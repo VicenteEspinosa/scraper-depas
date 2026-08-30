@@ -226,6 +226,22 @@ def telegram_chats(args: argparse.Namespace) -> None:
         print(f"{chat['id']:>16}  {chat.get('type'):12}  {name}")
 
 
+def test_alert(args: argparse.Namespace) -> None:
+    """Post the best-graded listing to Telegram, marked as a test rather than a find."""
+    connection = connect()
+    try:
+        pool = [dict(row) for row in connection.execute(
+            "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL AND is_project = 0")]
+        if not pool:
+            raise ValueError("nothing enriched to post; run `depas enrich` first")
+        scale = Scale(pool)
+        row, grade = max(((row, scale.grade(row)) for row in pool), key=lambda pair: pair[1].score)
+        send_listing(chat_id(), format_listing(row, grade, is_test=True), row["image_url"])
+        print(f"test alert posted: {grade.letter} {grade.score} {row['url']}")
+    finally:
+        connection.close()
+
+
 def show(args: argparse.Namespace) -> None:
     connection = connect()
     query, parameters = (args.sql, ()) if args.sql else _build_query(args)
@@ -306,6 +322,9 @@ def main() -> None:
 
     chatter = subparsers.add_parser("chats", help="list Telegram chats the bot can see")
     chatter.set_defaults(func=telegram_chats)
+
+    tester = subparsers.add_parser("test-alert", help="post the top listing as a test card")
+    tester.set_defaults(func=test_alert)
 
     viewer = subparsers.add_parser("show", help="best price per m2, or your own SQL")
     viewer.add_argument("sql", nargs="?")

@@ -151,3 +151,34 @@ def test_alerts_are_confined_to_the_configured_communes(connection, sent, monkey
     _announce(connection, limit=10)
 
     assert [text for text in sent if "far" in text] == []
+
+
+def test_the_card_marks_how_complete_the_grade_is(monkeypatch):
+    """A grade missing a component reads ❓; one scored on every axis reads ✔️."""
+    from depas.grade import Scale
+    from depas.telegram import COMPLETE_MARK, PARTIAL_MARK
+
+    monkeypatch.setenv("DEPAS_TARGET_FLOOR", "5")
+    complete = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000,
+                "price_clp": 600_000, "url": "https://x/1", "walk_minutes": 5, "floor": 6}
+    thin = complete | {"floor": None, "url": "https://x/2"}
+    scale = Scale([complete, thin])
+
+    full_card = format_listing(complete, scale.grade(complete))
+    thin_card = format_listing(thin, scale.grade(thin))
+
+    assert COMPLETE_MARK in full_card and PARTIAL_MARK not in full_card
+    assert PARTIAL_MARK in thin_card and COMPLETE_MARK not in thin_card
+
+
+def test_a_test_card_is_marked_as_one():
+    """A test send leads with 🧪 so it is never mistaken for a real find."""
+    from depas.grade import Scale
+    from depas.telegram import TEST_MARK
+
+    row = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000,
+           "price_clp": 600_000, "url": "https://x/1"}
+    scale = Scale([row])
+
+    assert format_listing(row, scale.grade(row), is_test=True).startswith(TEST_MARK)
+    assert TEST_MARK not in format_listing(row, scale.grade(row))
