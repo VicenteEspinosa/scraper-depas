@@ -60,6 +60,8 @@ def format_listing(row: dict[str, Any], grade: Any) -> str:
     partial = " ⚠️" if grade.missing else ""
     commune = (row.get("commune") or "").replace("-", " ").title()
     lines = [f"{emoji} <b>{grade.letter} {grade.score}</b>{partial} · <b>{_escape(commune)}</b>"]
+    if row.get("title"):
+        lines.append(f"<i>{_escape(row['title'])}</i>")
 
     spec = [f"{row['bedrooms']}D" if row.get("bedrooms") else None,
             f"{row['bathrooms']}B" if row.get("bathrooms") else None,
@@ -68,7 +70,12 @@ def format_listing(row: dict[str, Any], grade: Any) -> str:
     lines.append("🏠 " + " · ".join(part for part in spec if part))
 
     lines.append(f"💰 <b>{_clp(row.get('net_monthly_clp'))}</b> neto al mes")
-    lines.append(f"    ↳ {_clp(row.get('price_clp'))} arriendo + {_clp(row.get('common_expenses'))} gastos")
+    gastos = row.get("common_expenses")
+    breakdown = f"    ↳ {_clp(row.get('price_clp'))} arriendo"
+    lines.append(
+        f"{breakdown} + {_clp(gastos)} gastos comunes" if gastos
+        else f"{breakdown} · gastos comunes no informados"
+    )
     sublet = (row.get("parking_spaces") or 0, row.get("storage_units") or 0)
     if any(sublet):
         saved = (row.get("total_monthly_clp") or 0) - (row.get("net_monthly_clp") or 0)
@@ -94,6 +101,17 @@ def format_listing(row: dict[str, Any], grade: Any) -> str:
     return "\n".join(lines)
 
 
-def send_listing(chat_id: str, text: str) -> None:
+CAPTION_LIMIT = 1024
+
+
+def send_listing(chat_id: str, text: str, image_url: str | None = None) -> None:
+    """Post the card, as a photo when the listing has one and the caption fits."""
+    if image_url and len(text) <= CAPTION_LIMIT:
+        try:
+            call("sendPhoto", chat_id=chat_id, photo=image_url, caption=text, parse_mode="HTML")
+            return
+        except RuntimeError:
+            # Telegram rejects some remote images (size, host, format); the card still matters.
+            pass
     call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
          link_preview_options={"is_disabled": True})
