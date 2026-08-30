@@ -11,6 +11,8 @@ AMENITIES = (
 )
 COMPONENTS = ("value", "cost", "location", "size", "amenities", "security", "floor")
 LETTERS = ((90, "A"), (75, "B"), (50, "C"), (25, "D"))
+# A percentile scale centres here, so it is what an unmeasured component says.
+MIDPOINT = 50.0
 
 
 @dataclass(slots=True)
@@ -153,13 +155,18 @@ class Scale:
         self.composites = sorted(self._composite(row) for row in rows) if rows else []
 
     def _composite(self, row: dict) -> float:
+        """Weighted mean of the scored components, shrunk toward the middle by coverage."""
+        # Averaging only what is present renormalises missing data away, so a listing
+        # scored on four axes it happens to win ties with one scored on all seven.
         parts = self._parts(row)
         if not parts:
-            return 0.0
+            return MIDPOINT
         weight = sum(self.weights[name] for name in parts)
         if weight == 0:
-            return 0.0
-        return sum(parts[name] * self.weights[name] for name in parts) / weight
+            return MIDPOINT
+        average = sum(parts[name] * self.weights[name] for name in parts) / weight
+        coverage = len(parts) / len(self.applicable) if self.applicable else 1.0
+        return MIDPOINT + (average - MIDPOINT) * coverage
 
     def _parts(self, row: dict) -> dict[str, float]:
         parts = {}

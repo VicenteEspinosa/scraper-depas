@@ -154,3 +154,32 @@ def test_an_unknown_area_scores_bottom_but_still_grades(monkeypatch):
     assert stated.score > unknown.score
     assert unknown.score == smallest.score
     assert "size" not in unknown.missing
+
+
+def test_a_thin_grade_cannot_outrank_a_complete_one(monkeypatch):
+    """Winning four axes must not beat winning the same four plus three more."""
+    monkeypatch.setenv("DEPAS_TARGET_FLOOR", "5")
+    monkeypatch.setenv("DEPAS_TARGET_AREA", "50")
+    monkeypatch.setenv("DEPAS_ALERT_SECURITY", "24 horas")
+    shared = {"net_monthly_clp": 500_000, "walk_minutes": 2, "area": 90.0,
+              "security_type": "24 horas"}
+    complete = shared | {"price_per_m2_uf": 0.2, "zone_price_per_m2_uf": 0.5,
+                         "has_elevator": 1, "floor": 8, "building_floors": 20}
+    thin = dict(shared)
+    filler = [{"net_monthly_clp": 900_000, "walk_minutes": 14, "area": 42.0,
+               "price_per_m2_uf": 0.6, "zone_price_per_m2_uf": 0.5, "has_pool": 0,
+               "floor": 1, "building_floors": 1, "security_type": None}]
+    scale = Scale([complete, thin] + filler)
+
+    assert scale.grade(complete).score > scale.grade(thin).score
+
+
+def test_coverage_only_pulls_toward_the_middle(monkeypatch):
+    """Shrinking must never flip a thin listing below a genuinely worse complete one."""
+    monkeypatch.setenv("DEPAS_TARGET_AREA", "50")
+    good_thin = {"net_monthly_clp": 500_000, "area": 90.0}
+    bad_complete = {"net_monthly_clp": 950_000, "area": 42.0, "walk_minutes": 15,
+                    "price_per_m2_uf": 0.9, "zone_price_per_m2_uf": 0.5, "has_pool": 0}
+    scale = Scale([good_thin, bad_complete])
+
+    assert scale.grade(good_thin).score > scale.grade(bad_complete).score
