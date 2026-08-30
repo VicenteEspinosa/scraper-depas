@@ -121,12 +121,13 @@ ALERT_DELAY_SECONDS = 3
 # Every requirement is re-checked here, including the ones the scrape already
 # applied: enrichment overwrites card values (bedrooms among them) with the
 # detail page's, so a listing can stop qualifying after it was stored.
+# Floor is deliberately absent: it grades rather than excludes, because the
+# portals that publish the most listings never publish a floor number at all.
 ALERT_REQUIREMENTS = (
     ("DEPAS_ALERT_MAX_COST", "net_monthly_clp <= ?", optional_int),
     ("DEPAS_ALERT_MIN_BEDROOMS", "bedrooms >= ?", optional_int),
     ("DEPAS_ALERT_MAX_WALK", "walk_minutes <= ?", optional_int),
-    ("DEPAS_ALERT_MIN_FLOOR", "floor >= ?", optional_int),
-    ("DEPAS_ALERT_MIN_AREA", "area >= ?", optional_int),
+    ("DEPAS_ALERT_MIN_AREA", "(area IS NULL OR area >= ?)", optional_int),
 )
 
 

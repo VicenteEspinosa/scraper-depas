@@ -9,7 +9,7 @@ AMENITIES = (
     "has_elevator", "has_concierge", "has_heating", "has_air_conditioning",
     "has_pool", "has_gym", "has_terrace", "gated_community", "pets_allowed",
 )
-COMPONENTS = ("value", "cost", "location", "size", "amenities", "security")
+COMPONENTS = ("value", "cost", "location", "size", "amenities", "security", "floor")
 LETTERS = ((90, "A"), (75, "B"), (50, "C"), (25, "D"))
 
 
@@ -59,7 +59,20 @@ def _location(row: dict) -> float | None:
 
 
 def _size(row: dict) -> float | None:
-    return row.get("area") or None
+    """Bigger is better up to DEPAS_TARGET_AREA, where listings tie at the top.
+
+    An undeclared area scores as badly as the smallest allowed size rather than skipping
+    the component: a listing that omits its size must not outrank one that states it.
+    """
+    target = optional_int("DEPAS_TARGET_AREA")
+    area = row.get("area")
+    if target is None:
+        return area or None
+    if area is None:
+        return -1.0
+    minimum = optional_int("DEPAS_ALERT_MIN_AREA")
+    span = target - minimum if minimum and minimum < target else target
+    return -min(max(target - area, 0.0) / span, 1.0)
 
 
 def _amenities(row: dict) -> float | None:
@@ -81,8 +94,24 @@ def _security(row: dict) -> float | None:
     return float(row.get("security_type") == wanted)
 
 
-RAW = {"value": _value, "cost": _cost, "location": _location,
-       "size": _size, "amenities": _amenities, "security": _security}
+# The top floor takes the roof's heat and its leaks, so it is docked on top of any
+# shortfall — a penthouse is still worse than the identical unit one floor down.
+TOP_FLOOR_PENALTY = 0.5
+
+
+def _floor(row: dict) -> float | None:
+    """Height is a preference, not a cutoff: below the target costs score, and so does the top."""
+    floor = row.get("floor")
+    if floor is None:
+        return None
+    target = optional_int("DEPAS_TARGET_FLOOR")
+    shortfall = 0.0 if target is None or floor >= target else (target - floor) / target
+    top = TOP_FLOOR_PENALTY if floor == row.get("building_floors") else 0.0
+    return -min(shortfall + top, 1.0)
+
+
+RAW = {"value": _value, "cost": _cost, "location": _location, "size": _size,
+       "amenities": _amenities, "security": _security, "floor": _floor}
 
 
 def _weights() -> dict[str, float]:
