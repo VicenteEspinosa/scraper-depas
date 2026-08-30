@@ -10,6 +10,7 @@ from depas.models import Listing, Query
 from depas.portals import PORTALS, portalinmobiliario
 from depas.metro import nearest_station
 from depas.store import connect, save, save_detail
+from depas.telegram import chats
 from depas.uf import to_clp, uf_in_clp
 
 TOP_QUERY = """
@@ -143,6 +144,18 @@ def watch(args: argparse.Namespace) -> None:
         connection.close()
 
 
+def telegram_chats(args: argparse.Namespace) -> None:
+    """List the chats the bot can see, so the group id can be copied into TELEGRAM_CHAT_ID."""
+    found = chats()
+    if not found:
+        print("No chats yet. Add the bot to the group and send /start there, then rerun.\n"
+              "Bots only see commands until privacy mode is disabled in @BotFather.")
+        return
+    for chat in found:
+        name = chat.get("title") or chat.get("username") or chat.get("first_name") or "-"
+        print(f"{chat['id']:>16}  {chat.get('type'):12}  {name}")
+
+
 def show(args: argparse.Namespace) -> None:
     connection = connect()
     query, parameters = (args.sql, ()) if args.sql else _build_query(args)
@@ -216,6 +229,9 @@ def main() -> None:
     watcher = subparsers.add_parser("watch", help="scheduled pass: scrape then enrich new listings")
     watcher.add_argument("--enrich-limit", type=int, default=60)
     watcher.set_defaults(func=watch)
+
+    chatter = subparsers.add_parser("chats", help="list Telegram chats the bot can see")
+    chatter.set_defaults(func=telegram_chats)
 
     viewer = subparsers.add_parser("show", help="best price per m2, or your own SQL")
     viewer.add_argument("sql", nargs="?")

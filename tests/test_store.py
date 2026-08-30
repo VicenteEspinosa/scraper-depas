@@ -91,3 +91,13 @@ def test_migrations_are_recorded_and_not_reapplied(tmp_path):
     connect(path).close()
 
     assert migrate(connect(path)) == []
+
+
+def test_a_duplicate_env_key_is_rejected(tmp_path, monkeypatch):
+    """Two lines for one key silently kept the stale first value — that must raise instead."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("DEPAS_PARKING_INCOME=1\nDEPAS_PARKING_INCOME=2\n")
+    monkeypatch.setattr("depas.config.ENV_FILE", env_file)
+
+    with pytest.raises(ValueError, match="more than once"):
+        connect(tmp_path / "test.db")
