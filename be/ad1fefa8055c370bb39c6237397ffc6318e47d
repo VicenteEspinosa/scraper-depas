@@ -1,0 +1,19 @@
+tests/test_alerts.py
+  s_fb1a9aba76799b::t_992a04b37df530 266,268
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "bead1fefa8055c370bb39c6237397ffc6318e47d",
+  "prompts": {},
+  "sessions": {
+    "s_fb1a9aba76799b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "069b8062-fe82-4634-8a48-4083e0a4e7d9",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
