@@ -1,0 +1,29 @@
+tests/test_store.py
+  s_ac9b713021ac74::t_d18bce4631cdb5 4
+  s_cc6ef9e7f9bcc3::t_5caa8f12e931d1 124-125
+  s_cc6ef9e7f9bcc3::t_0ad595be66da46 117-123,126-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "880b3c112090873ac3be1a9655b0ce1dee35458b",
+  "prompts": {},
+  "sessions": {
+    "s_ac9b713021ac74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7cb6a0ba-5179-4899-b03d-3090bfaa406f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    },
+    "s_cc6ef9e7f9bcc3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f62b783b-45ac-4c98-b2b4-ba08d072a808",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
