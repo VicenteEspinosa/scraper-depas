@@ -310,3 +310,69 @@ def test_a_pass_with_nothing_to_post_asks_telegram_nothing(connection, sent, mon
                         lambda chat: pytest.fail("nothing to post, so nothing to look up"))
 
     assert _announce(connection, limit=10) == 0
+
+
+def test_a_furnished_apartment_is_never_announced(connection, sent):
+    """Amoblado is a hard no: no grade, no price and no configuration makes it a candidate."""
+    save(connection, [Listing(portal="pi", external_id="amoblado", url="https://x/amoblado",
+                              price=400_000, currency="CLP", price_clp=400_000, area_m2=60.0)])
+    save_detail(connection, "pi", "amoblado", {"walk_minutes": 1, "furnished": 1})
+
+    _announce(connection, limit=10)
+
+    assert [text for text, _ in sent if "amoblado" in text] == []
+
+
+def test_a_title_that_says_amoblado_is_enough_to_drop_it(connection, sent):
+    """The portals that publish no Amoblado spec row still say it in the title."""
+    save(connection, [Listing(portal="pi", external_id="titled", url="https://x/titled",
+                              title="Departamento amoblado 2D2B", price=400_000,
+                              currency="CLP", price_clp=400_000, area_m2=60.0)])
+    save_detail(connection, "pi", "titled", {"walk_minutes": 1})
+
+    _announce(connection, limit=10)
+
+    assert [text for text, _ in sent if "titled" in text] == []
+
+
+def test_a_listing_that_states_it_is_unfurnished_still_alerts(connection, sent):
+    """Only a furnished flat is excluded; declaring the field must not cost the alert."""
+    save(connection, [Listing(portal="pi", external_id="vacio", url="https://x/vacio",
+                              price=400_000, currency="CLP", price_clp=400_000, area_m2=60.0)])
+    save_detail(connection, "pi", "vacio", {"walk_minutes": 1, "furnished": 0})
+
+    _announce(connection, limit=10)
+
+    assert [text for text, _ in sent if "vacio" in text] != []
+
+
+def test_prose_reads_a_furnished_apartment_off_the_description():
+    """A portal without an Amoblado spec row still says it in words."""
+    from depas.detail import infer_from_description
+
+    assert infer_from_description("Depto amoblado, listo para llegar.")["furnished"] == 1
+    assert infer_from_description("Se entrega sin amoblar.")["furnished"] == 0
+
+
+def test_a_fitted_kitchen_is_not_a_furnished_apartment():
+    """"Cocina amoblada" is cabinets — reading it as furniture would drop good listings."""
+    from depas.detail import infer_from_description
+
+    assert "furnished" not in infer_from_description("Cocina amoblada y logia independiente.")
+    # The kitchen disowns only its own clause, never the sentence that follows it.
+    assert infer_from_description(
+        "Cocina totalmente amoblada. El departamento se arrienda amoblado.")["furnished"] == 1
+
+
+def test_the_card_shows_the_age_and_flags_it_when_over_target(monkeypatch):
+    """The antigüedad reads in the spec line, and an old building says so in the cons."""
+    from depas.grade import Scale
+
+    monkeypatch.setenv("DEPAS_TARGET_AGE", "25")
+    young = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000, "age": 8,
+             "price_clp": 600_000, "url": "https://x/1"}
+    old = young | {"age": 44, "url": "https://x/2"}
+    scale = Scale([young, old])
+
+    assert "8 años" in format_listing(young, scale.grade(young))
+    assert "44 años, sobre los 25" in format_listing(old, scale.grade(old))

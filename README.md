@@ -4,13 +4,18 @@ Scrapes Chilean rental listings, works out what each one would **actually** cost
 you, and grades it against everything else on the market.
 
 Built for a specific question — *is this apartment a good deal?* — which the
-portals themselves answer badly. Two things make the numbers honest:
+portals themselves answer badly. Three things make the answer honest:
 
 **Net cost, not asking rent.** If you sublet the parking space and the storage
 unit, the real monthly figure is `rent + gastos comunes − parking − storage`,
 with an assumed $120.000 standing in for gastos comunes nobody published. A
 listing at $800.000 with two parking spaces and a bodega can land below one
 asking $650.000. The portals never show this.
+
+**Amoblado is out, full stop.** A furnished apartment is never alerted on and
+never enters the pool the others are graded against — no setting turns it back on.
+It is caught from the `Amoblado` spec row, the description, or the title, whichever
+the portal bothered to fill in.
 
 **A grade that means something.** Every listing gets a 0–100 **percentile
 against the current pool**: `A 94` beats 94% of what is listed right now. Five
@@ -85,6 +90,13 @@ Found the hard way, and handled in code:
   Cards and the `gastos` column say when that default was used; filter
   `common_expenses > 0` for listings that state their own.
 - **`Ambientes` is unusable** (117 of 161 null). Use `bedrooms`.
+- **`Antigüedad` is two different numbers.** Some publishers put the age in years,
+  others the year the building went up, and none of them say which. The ranked
+  view's `age` reads anything over 100 as a year and subtracts, so both end up as
+  years old; a year still in the future is a typo and floors at 0.
+- **Amoblado is often only in the title.** Most portals publish no `Amoblado` spec
+  row, so the exclusion also reads the description and the title. In prose,
+  *cocina amoblada* is fitted cabinets rather than furniture, and does not count.
 - **Assetplan's headline price is a promotion**, typically half of one month.
   The standing rent is the other figure, and that is the one stored.
 - Listings graded on partial data are marked `*` with an `on` column, so a high
@@ -99,6 +111,7 @@ Everything personal lives in `.env` (gitignored) — see `.env.example`.
 | `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME` | Monthly CLP you would collect subletting. Default 0 — net then equals total, rather than inventing a market rate. |
 | `DEPAS_WEIGHT_*` | Relative weight per grading component. Default 1 each. |
 | `DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MAX_PRICE`, `DEPAS_ALERT_MIN_BEDROOMS` | What the scheduled `watch` pass scrapes. |
+| `DEPAS_TARGET_AGE` | Ideal antigüedad in years. Defaults to **25 even when unset** — unlike the other targets, leaving it blank does not switch the component off. Full marks at or under it, then the score falls away; never a cutoff, and an undeclared antigüedad is left unscored rather than assumed old. |
 | `DEPAS_LOCATIONS` | `name,lat,lon` per place you need to reach, `;`-separated, any number of them. |
 | `DEPAS_TARGET_COMMUTE`, `DEPAS_ALERT_MAX_COMMUTE` | Minutes to the location a listing reaches worst, by whichever of walking, bus and Metro is fastest. Full marks at or under the target, no alert over the ceiling. |
 | `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. |

@@ -14,8 +14,8 @@ from depas.grade import Scale
 from depas.models import Listing, Query
 from depas.portals import PORTALS
 from depas.metro import nearest_station
-from depas.store import (clear_notified, connect, mark_notified, refresh_commutes,
-                        refresh_zone_benchmarks, save, save_detail)
+from depas.store import (NOT_FURNISHED, POOL_QUERY, clear_notified, connect, mark_notified,
+                        refresh_commutes, refresh_zone_benchmarks, save, save_detail)
 from depas.telegram import chat_type, chats, format_listing, send_listing
 from depas.uf import normalize, stored_uf
 
@@ -121,14 +121,16 @@ FILTERS = (
     ("min_floor", "floor >= ?"),
     ("min_bedrooms", "bedrooms >= ?"),
     ("min_area", "area >= ?"),
+    ("max_age", "age <= ?"),
     ("security", "security_type = ?"),
 )
 
 
 def _build_query(args: argparse.Namespace) -> tuple[str, tuple[object, ...]]:
     """Assemble the ranked query from whichever filters were actually given."""
-    # An unenriched listing would be graded on two components and beat everything.
-    conditions = ["is_project = 0", "detail_fetched_at IS NOT NULL"]
+    # An unenriched listing would be graded on two components and beat everything,
+    # and amoblado is never on the table however good the rest of the row looks.
+    conditions = ["is_project = 0", "detail_fetched_at IS NOT NULL", NOT_FURNISHED]
     parameters: list[object] = []
     for name, condition in FILTERS:
         value = getattr(args, name)
@@ -181,17 +183,14 @@ def _announce(connection: sqlite3.Connection, limit: int) -> int:
     """Post enriched, un-announced listings that clear DEPAS_ALERT_MIN_GRADE."""
     conditions, parameters = _requirement_clauses()
     candidates = connection.execute(
-        "SELECT * FROM listings_ranked "
-        "WHERE notified_at IS NULL AND detail_fetched_at IS NOT NULL AND is_project = 0"
+        f"{POOL_QUERY} AND notified_at IS NULL"
         + "".join(f" AND {condition}" for condition in conditions),
         parameters,
     ).fetchall()
     if not candidates:
         return 0
 
-    pool = connection.execute(
-        "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL AND is_project = 0"
-    ).fetchall()
+    pool = connection.execute(POOL_QUERY).fetchall()
     scale = Scale([dict(row) for row in pool])
     minimum = optional_int("DEPAS_ALERT_MIN_GRADE") or 0
 
@@ -271,8 +270,7 @@ def test_alert(args: argparse.Namespace) -> None:
     """Post the best-graded listing to Telegram, marked as a test rather than a find."""
     connection = connect()
     try:
-        pool = [dict(row) for row in connection.execute(
-            "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL AND is_project = 0")]
+        pool = [dict(row) for row in connection.execute(POOL_QUERY)]
         if not pool:
             raise ValueError("nothing enriched to post; run `depas enrich` first")
         scale = Scale(pool)
@@ -300,9 +298,7 @@ def show(args: argparse.Namespace) -> None:
     if args.sql:
         _print_table(rows)
         return
-    pool = connection.execute(
-        "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL AND is_project = 0"
-    ).fetchall()
+    pool = connection.execute(POOL_QUERY).fetchall()
     scale = Scale([dict(row) for row in pool])
     # grading ranks against the whole pool, so the limit can only be applied afterwards
     graded = sorted((_summarise(row, scale) for row in rows),
@@ -313,7 +309,7 @@ def show(args: argparse.Namespace) -> None:
     connection.close()
 
 
-SUMMARY_COLUMNS = ("commune", "bedrooms", "area", "floor", "gastos", "est", "bod",
+SUMMARY_COLUMNS = ("commune", "bedrooms", "area", "floor", "age", "gastos", "est", "bod",
                    "net", "nearest_station", "walk", "commute", "url")
 
 
@@ -330,7 +326,7 @@ def _summarise(row: sqlite3.Row, scale: Scale) -> dict[str, object]:
         "score": scored.score,
         "on": f"{len(scored.parts)}/{len(scored.parts) + len(scored.missing)}",
         "commune": row["commune"], "bedrooms": row["bedrooms"], "area": row["area"],
-        "floor": row["floor"], "rent": round(row["price_clp"]),
+        "floor": row["floor"], "age": row["age"], "rent": round(row["price_clp"]),
         "gastos": _gastos(row["common_expenses"]), "est": row["parking_spaces"],
         "bod": row["storage_units"], "net": round(row["net_monthly_clp"]),
         "metro": row["nearest_station"], "walk": row["walk_minutes"],
@@ -399,6 +395,8 @@ def main() -> None:
     viewer.add_argument("--min-floor", type=int)
     viewer.add_argument("--min-bedrooms", type=int)
     viewer.add_argument("--min-area", type=float, help="minimum useful m2")
+    viewer.add_argument("--max-age", type=int,
+                        help="max years since the building went up; alerts never filter on it")
     viewer.add_argument("--security", help='e.g. "24 horas"')
     viewer.add_argument("--commune", action="append", default=[], type=Commune,
                         choices=list(Commune), metavar="SLUG")

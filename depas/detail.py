@@ -24,6 +24,9 @@ SPEC_COLUMNS: dict[str, tuple[str, str]] = {
     "Cantidad de pisos": ("building_floors", "INTEGER"),
     "Departamentos por piso": ("units_per_floor", "INTEGER"),
     "Antigüedad": ("age_years", "INTEGER"),
+    # Same column: some portals label the row with the year the building went up,
+    # which `listings_ranked` turns into an age. See `age` in the ranked view.
+    "Año de construcción": ("age_years", "INTEGER"),
     "Gastos comunes": ("common_expenses", "INTEGER"),
     "Orientación": ("orientation", "TEXT"),
     "Disponible desde": ("available_from", "TEXT"),
@@ -78,6 +81,14 @@ SECURITY_IN_TEXT = re.compile(r"24\s*(?:horas|hrs)", re.I)
 # "no tiene ascensor") — in "sin piscina y gimnasio" the gym is not being denied.
 DENIAL = re.compile(r"\b(?:sin|no)\s+(?:\w+\s+)?$", re.I)
 
+# Amoblado is excluded outright, so it is worth reading off the prose of the portals
+# that publish no spec row for it. "Cocina amoblada" is fitted cabinets rather than
+# furniture, so a room named just before the word disowns it; the comma or full stop
+# that ends a clause is what stops the disowning from reaching across sentences.
+FURNISHED_IN_TEXT = re.compile(r"\bamoblad[oa]s?\b|\bamueblad[oa]s?\b|\bamoblar\b", re.I)
+ROOM_BEFORE = re.compile(
+    r"\b(?:cocina|kitchenette|closets?|logia|ba[ñn]os?|terraza)s?\b[\w\s]{0,20}$", re.I)
+
 
 def _claimed(text: str, pattern: re.Pattern[str]) -> bool | None:
     """True when the prose claims the feature, False when it denies it, None when silent."""
@@ -85,6 +96,16 @@ def _claimed(text: str, pattern: re.Pattern[str]) -> bool | None:
     if match is None:
         return None
     return DENIAL.search(text[:match.start()]) is None
+
+
+def _furnished(text: str) -> int | None:
+    """1 when the prose says the apartment comes furnished, 0 when it says it does not."""
+    for match in FURNISHED_IN_TEXT.finditer(text):
+        before = text[:match.start()]
+        if ROOM_BEFORE.search(before):
+            continue  # a fitted kitchen says nothing about the rest of the flat
+        return int(DENIAL.search(before) is None)
+    return None
 
 
 def infer_from_description(text: str) -> dict[str, object]:
@@ -99,6 +120,9 @@ def infer_from_description(text: str) -> dict[str, object]:
         inferred["floor"] = int(floor.group(1))
     if _claimed(text, SECURITY_IN_TEXT):
         inferred["security_type"] = "24 horas"
+    furnished = _furnished(text)
+    if furnished is not None:
+        inferred["furnished"] = furnished
     return inferred
 
 

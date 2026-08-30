@@ -112,6 +112,18 @@ def target_cost() -> int | None:
     return optional_int("DEPAS_TARGET_COST")
 
 
+# Under 25 years is the standing rule, so age is the one target that applies whether
+# or not anything is configured: leaving DEPAS_TARGET_AGE unset must not quietly turn
+# the preference off. Set the variable to move the line; zero the weight to ignore it.
+DEFAULT_TARGET_AGE = 25
+
+
+def target_age() -> int:
+    """The antigüedad we aim to stay under; older listings score worse, never excluded."""
+    configured = optional_int("DEPAS_TARGET_AGE")
+    return DEFAULT_TARGET_AGE if configured is None else configured
+
+
 def max_rent() -> int | None:
     """Rent ceiling for the crawl, derived from the budget rather than configured.
 
