@@ -131,3 +131,18 @@ def test_the_backfill_prices_rows_stored_without_one(tmp_path):
     priced = dict(connection.execute("SELECT external_id, price_clp FROM listings"))
     assert (priced["42"], priced["43"]) == (600_000, 750_000)
     assert priced["44"] == pytest.approx(500_687.5)
+
+
+def test_the_ranked_view_prices_per_m2_from_the_cached_uf(tmp_path):
+    """The derived UF/m² is silently NULL until a UF is cached, so a pass must store one."""
+    connection = connect(tmp_path / "test.db")
+    save(connection, [_listing(800_000)])
+
+    before = connection.execute(
+        "SELECT price_per_m2_uf_effective FROM listings_ranked").fetchone()[0]
+    connection.execute("INSERT INTO uf_daily (day, value) VALUES ('2026-01-01', 40000.0)")
+    after = connection.execute(
+        "SELECT price_per_m2_uf_effective FROM listings_ranked").fetchone()[0]
+
+    assert before is None
+    assert after == pytest.approx(0.4)

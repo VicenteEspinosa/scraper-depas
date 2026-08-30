@@ -14,7 +14,7 @@ from depas.portals import PORTALS
 from depas.metro import nearest_station
 from depas.store import connect, mark_notified, refresh_zone_benchmarks, save, save_detail
 from depas.telegram import chats, format_listing, send_listing
-from depas.uf import normalize
+from depas.uf import normalize, stored_uf
 
 TOP_QUERY = """
 SELECT * FROM listings_ranked
@@ -32,6 +32,7 @@ def scrape(args: argparse.Namespace) -> None:
     fetcher = Fetcher()
     connection = connect()
     try:
+        stored_uf(connection, fetcher)
         for name in args.portals or PORTALS:
             try:
                 counts = save(connection, _matching(PORTALS[name].search(fetcher, query), fetcher, query))
@@ -100,6 +101,7 @@ def enrich(args: argparse.Namespace) -> None:
 
     fetcher = Fetcher()
     try:
+        stored_uf(connection, fetcher)
         for index, row in enumerate(pending, start=1):
             _enrich_one(connection, fetcher, row)
             print(f"\r{index}/{len(pending)} enriched", end="", flush=True)
@@ -214,6 +216,9 @@ def watch(args: argparse.Namespace) -> None:
     fetcher = Fetcher()
     connection = connect()
     try:
+        # The ranked view prices listings per m2 straight from this, so cache it before
+        # anything reads the view.
+        stored_uf(connection, fetcher)
         for name, portal in PORTALS.items():
             try:
                 counts = save(connection, _matching(portal.search(fetcher, query), fetcher, query))

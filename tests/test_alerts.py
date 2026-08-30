@@ -251,3 +251,17 @@ def test_a_listing_without_a_commune_leaves_no_dangling_separator():
 
     assert "·  ·" not in header
     assert header.endswith("<code>[7]</code>")
+
+
+def test_a_telegram_failure_reports_the_parameters_it_came_with(monkeypatch):
+    """A migrated chat carries its new id in `parameters`; the error must not drop it."""
+    from depas import telegram
+
+    monkeypatch.setattr(telegram, "bot_token", lambda: "t")
+    monkeypatch.setattr(telegram.requests, "post", lambda *a, **k: type("R", (), {
+        "json": staticmethod(lambda: {
+            "ok": False, "description": "Bad Request: group chat was upgraded to a supergroup chat",
+            "parameters": {"migrate_to_chat_id": -1004361974965}})})())
+
+    with pytest.raises(RuntimeError, match="-1004361974965"):
+        telegram.call("sendMessage", chat_id="-123", text="x")

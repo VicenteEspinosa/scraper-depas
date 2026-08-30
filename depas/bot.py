@@ -7,7 +7,7 @@ from depas.metro import nearest_station
 from depas.portals import PORTALS
 from depas.portals.portalinmobiliario import clean_url
 from depas.store import connect, save, save_detail
-from depas.uf import normalize
+from depas.uf import normalize, stored_uf
 from depas.telegram import call, format_listing, send_listing
 
 POLL_TIMEOUT = 30
@@ -89,6 +89,7 @@ def run() -> None:
     """Long-poll for messages and reply to any portal link with its graded card."""
     connection = connect()
     fetcher = Fetcher()
+    stored_uf(connection, fetcher)  # the ranked view prices per m2 straight from this
     print("bot listening")
     try:
         while True:
