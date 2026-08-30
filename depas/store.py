@@ -15,9 +15,12 @@ def db_path() -> Path:
     return Path(os.environ.get("DEPAS_DB_PATH", "depas.db"))
 
 
+# Only what a search card actually carries. Detail-page columns (gastos comunes,
+# coordinates, specs) are owned by save_detail — listing them here would blank
+# them on the next re-scrape, because the card has nothing to put in their place.
 FIELDS = (
-    "url", "title", "price", "currency", "common_expenses", "is_project", "price_clp",
-    "bedrooms", "bathrooms", "area_m2", "commune", "address", "lat", "lon",
+    "url", "title", "price", "currency", "is_project", "price_clp",
+    "bedrooms", "bathrooms", "area_m2", "commune", "address", "image_url",
 )
 
 
@@ -130,3 +133,11 @@ def save(connection: sqlite3.Connection, listings: Iterable[Listing]) -> dict[st
 
     connection.commit()
     return counts
+
+
+def mark_notified(connection: sqlite3.Connection, portal: str, external_id: str) -> None:
+    connection.execute(
+        "UPDATE listings SET notified_at = ? WHERE portal = ? AND external_id = ?",
+        (datetime.now(UTC).isoformat(), portal, external_id),
+    )
+    connection.commit()

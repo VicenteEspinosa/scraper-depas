@@ -101,3 +101,16 @@ def test_a_duplicate_env_key_is_rejected(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="more than once"):
         connect(tmp_path / "test.db")
+
+
+def test_rescraping_does_not_wipe_detail_data(tmp_path):
+    """The hourly watch re-scrapes, so a second save must not blank enriched columns."""
+    connection = connect(tmp_path / "test.db")
+    save(connection, [_listing(500_000)])
+    save_detail(connection, "houm", "42",
+                {"common_expenses": 90_000, "lat": -33.4, "lon": -70.6, "floor": 7})
+
+    save(connection, [_listing(500_000)])
+
+    row = connection.execute("SELECT * FROM listings").fetchone()
+    assert (row["common_expenses"], row["lat"], row["lon"], row["floor"]) == (90_000, -33.4, -70.6, 7)

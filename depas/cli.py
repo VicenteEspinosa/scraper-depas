@@ -1,16 +1,17 @@
 import argparse
 import sqlite3
+import time
 from collections.abc import Iterator
 
 from depas.communes import SANTIAGO_PROVINCE, Commune
-from depas.config import alert_communes, optional_int
+from depas.config import alert_communes, chat_id, optional_int
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.models import Listing, Query
 from depas.portals import PORTALS, portalinmobiliario
 from depas.metro import nearest_station
-from depas.store import connect, save, save_detail
-from depas.telegram import chats
+from depas.store import connect, mark_notified, save, save_detail
+from depas.telegram import chats, format_listing, send_listing
 from depas.uf import to_clp, uf_in_clp
 
 TOP_QUERY = """
@@ -114,6 +115,39 @@ def _build_query(args: argparse.Namespace) -> tuple[str, tuple[object, ...]]:
     return f"{TOP_QUERY}\nWHERE {' AND '.join(conditions)}", tuple(parameters)
 
 
+ALERT_DELAY_SECONDS = 3
+
+
+def _announce(connection: sqlite3.Connection, limit: int) -> int:
+    """Post enriched, un-announced listings that clear DEPAS_ALERT_MIN_GRADE."""
+    candidates = connection.execute(
+        "SELECT * FROM listings_ranked "
+        "WHERE notified_at IS NULL AND detail_fetched_at IS NOT NULL AND is_project = 0"
+    ).fetchall()
+    if not candidates:
+        return 0
+
+    pool = connection.execute(
+        "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL AND is_project = 0"
+    ).fetchall()
+    scale = Scale([dict(row) for row in pool])
+    minimum = optional_int("DEPAS_ALERT_MIN_GRADE") or 0
+
+    graded = sorted(((row, scale.grade(dict(row))) for row in candidates),
+                    key=lambda pair: pair[1].score, reverse=True)
+    posted = 0
+    for row, grade in graded:
+        if posted >= limit:
+            break
+        # Below the bar still gets stamped, so it is never reconsidered later.
+        if grade.score >= minimum:
+            send_listing(chat_id(), format_listing(dict(row), grade), row["image_url"])
+            posted += 1
+            time.sleep(ALERT_DELAY_SECONDS)  # group sends are rate-limited by Telegram
+        mark_notified(connection, row["portal"], row["external_id"])
+    return posted
+
+
 def watch(args: argparse.Namespace) -> None:
     """One scheduled pass: scrape the configured communes, then enrich what is new."""
     communes = [Commune(slug) for slug in alert_communes()]
@@ -139,6 +173,7 @@ def watch(args: argparse.Namespace) -> None:
         for row in pending:
             _enrich_one(connection, fetcher, row)
         print(f"enrich: {len(pending)} listings")
+        print(f"alerts: {_announce(connection, args.max_alerts)} posted")
     finally:
         fetcher.close()
         connection.close()
@@ -164,7 +199,7 @@ def show(args: argparse.Namespace) -> None:
         _print_table(rows)
         return
     pool = connection.execute(
-        "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL"
+        "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL AND is_project = 0"
     ).fetchall()
     scale = Scale([dict(row) for row in pool])
     # grading ranks against the whole pool, so the limit can only be applied afterwards
@@ -228,6 +263,7 @@ def main() -> None:
 
     watcher = subparsers.add_parser("watch", help="scheduled pass: scrape then enrich new listings")
     watcher.add_argument("--enrich-limit", type=int, default=60)
+    watcher.add_argument("--max-alerts", type=int, default=10)
     watcher.set_defaults(func=watch)
 
     chatter = subparsers.add_parser("chats", help="list Telegram chats the bot can see")

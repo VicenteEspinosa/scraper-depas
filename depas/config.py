@@ -46,3 +46,12 @@ def optional_int(name: str) -> int | None:
     if not raw.lstrip("-").isdigit():
         raise ValueError(f"{name} must be a whole number, got {raw!r}")
     return int(raw)
+
+
+def chat_id() -> str:
+    """The Telegram chat alerts are posted to."""
+    _load_env_file()
+    value = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if not value:
+        raise ValueError("set TELEGRAM_CHAT_ID (run `depas chats` to find it)")
+    return value
