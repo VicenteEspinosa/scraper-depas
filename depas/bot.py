@@ -5,10 +5,15 @@ from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.metro import nearest_station
 from depas.portals import portalinmobiliario
+from depas.portals.portalinmobiliario import LISTING_HOSTS, clean_url
 from depas.store import connect, save, save_detail
 from depas.telegram import call, format_listing, send_listing
 
-LISTING_LINK = re.compile(r"https?://(?:www\.)?portalinmobiliario\.com/\S*?MLC-\d+\S*")
+# Both hosts serve the same listings under the same MLC ids, so a link to either
+# resolves to one row.
+LISTING_LINK = re.compile(
+    r"https?://[\w.-]*(?:" + "|".join(h.replace(".", r"\.") for h in LISTING_HOSTS) + r")/\S*?MLC-\d+\S*"
+)
 POLL_TIMEOUT = 30
 OFFSET_KEY = "telegram_offset"
 
@@ -64,7 +69,7 @@ def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher, url: str) -> t
 
 def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) -> None:
     links = LISTING_LINK.findall(message.get("text") or message.get("caption") or "")
-    for url in dict.fromkeys(links):
+    for url in dict.fromkeys(clean_url(link) for link in links):
         graded = _grade_link(connection, fetcher, url)
         if graded is None:
             continue

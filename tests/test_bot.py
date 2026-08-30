@@ -76,3 +76,47 @@ def test_the_offset_survives_a_restart(connection):
     _remember_offset(connection, 42)
 
     assert _offset(connection) == 42
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://departamento.mercadolibre.cl/MLC-4398180030?matt_tool=9#origin=share",
+        "https://www.mercadolibre.cl/MLC-2-depto",
+        "https://casa.mercadolibre.cl/MLC-3",
+    ],
+)
+def test_mercadolibre_links_are_recognised(url):
+    """Portal Inmobiliario is MercadoLibre's vertical, so either host is the same listing."""
+    assert LISTING_LINK.search(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://mercadolibre.com.ar/MLA-99", "https://www.houm.com/propiedad/123",
+     "https://mercadolibre.cl/ofertas"],
+)
+def test_other_links_are_left_alone(url):
+    """Another country's site, another portal, or a non-listing page must not trigger a reply."""
+    assert not LISTING_LINK.search(url)
+
+
+def test_the_same_listing_on_either_host_is_one_row(connection, sent, monkeypatch):
+    """A shared MercadoLibre link for a listing scraped from Portal Inmobiliario is not refetched."""
+    monkeypatch.setattr("depas.bot.portalinmobiliario.fetch_standalone",
+                        lambda *a: pytest.fail("should recognise the id, not refetch"))
+    monkeypatch.setattr("depas.bot.portalinmobiliario.fetch_detail",
+                        lambda *a: pytest.fail("should not re-enrich"))
+
+    _handle(connection, None, {"chat": {"id": -100},
+                               "text": "https://departamento.mercadolibre.cl/MLC-1?ua=x"})
+
+    assert len(sent) == 1
+
+
+def test_tracking_parameters_are_stripped(connection, sent, monkeypatch):
+    """Share links carry tracking junk that must not become part of the stored URL."""
+    from depas.portals.portalinmobiliario import clean_url
+
+    assert clean_url("https://departamento.mercadolibre.cl/MLC-4?matt_tool=9&ua=z#origin=share") \
+        == "https://departamento.mercadolibre.cl/MLC-4"
