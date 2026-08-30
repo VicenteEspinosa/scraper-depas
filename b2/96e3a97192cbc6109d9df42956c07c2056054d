@@ -1,0 +1,9 @@
+tests/test_alerts.py
+  ai_agent 102-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b296e3a97192cbc6109d9df42956c07c2056054d",
+  "prompts": {}
+}
