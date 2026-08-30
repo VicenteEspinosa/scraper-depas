@@ -1,0 +1,25 @@
+depas/config.py
+  s_ac9b713021ac74::t_a6973b12613b8b 1-25
+.env.example
+  s_ac9b713021ac74::t_a6973b12613b8b 1-4
+depas/store.py
+  s_ac9b713021ac74::t_a6973b12613b8b 6,66,84-89
+.gitignore
+  s_ac9b713021ac74::t_a6973b12613b8b 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "ec8c2ce2d76763ceaaa73f8107558531d3656642",
+  "prompts": {},
+  "sessions": {
+    "s_ac9b713021ac74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7cb6a0ba-5179-4899-b03d-3090bfaa406f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
