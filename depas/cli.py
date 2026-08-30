@@ -88,6 +88,7 @@ FILTERS = (
     ("max_walk", "walk_minutes <= ?"),
     ("min_floor", "floor >= ?"),
     ("min_bedrooms", "bedrooms >= ?"),
+    ("min_area", "area >= ?"),
     ("security", "security_type = ?"),
 )
 
@@ -155,6 +156,7 @@ def main() -> None:
     viewer.add_argument("--max-cost", type=int, help="max net monthly cost in CLP")
     viewer.add_argument("--min-floor", type=int)
     viewer.add_argument("--min-bedrooms", type=int)
+    viewer.add_argument("--min-area", type=float, help="minimum useful m2")
     viewer.add_argument("--security", help='e.g. "24 horas"')
     viewer.add_argument("--commune", action="append", default=[], type=Commune,
                         choices=list(Commune), metavar="SLUG")
