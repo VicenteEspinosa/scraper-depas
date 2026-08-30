@@ -4,7 +4,8 @@ from typing import Any
 from curl_cffi import requests
 
 from depas.commute import as_text as commute_text
-from depas.config import _load_env_file, current_cost, optional_int, optional_text
+from depas.config import (DEFAULT_COMMON_EXPENSES, _load_env_file, current_cost,
+                          optional_int, optional_text)
 from depas.metro import STATION_LINES
 
 API = "https://api.telegram.org"
@@ -112,9 +113,12 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
     lines.append(f"💰 <b>{_clp(row.get('net_monthly_clp'))}</b> neto al mes")
     gastos = row.get("common_expenses")
     breakdown = f"    ↳ {_clp(row.get('price_clp'))} arriendo"
+    # Undeclared gastos comunes are estimated, and the net figure above already
+    # includes the estimate, so the card has to admit which number it used.
     lines.append(
         f"{breakdown} + {_clp(gastos)} gastos comunes" if gastos
-        else f"{breakdown} + gastos comunes"
+        else f"{breakdown} + {_clp(DEFAULT_COMMON_EXPENSES)} gastos comunes "
+             "(estimado por defecto, no publicado)"
     )
     sublet = (row.get("parking_spaces") or 0, row.get("storage_units") or 0)
     if any(sublet):

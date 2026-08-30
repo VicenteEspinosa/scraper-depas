@@ -45,7 +45,8 @@ Repository **variables**: `TZ`, `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME`,
 `DEPAS_CURRENT_COST`.
 
 Every cost figure is the **net** monthly cost — rent plus gastos comunes minus
-sublet income. There is no asking-rent setting: the rent ceiling the crawl uses
+sublet income, where an unpublished gasto comun counts as the assumed
+$120.000 default rather than as zero. There is no asking-rent setting: the rent ceiling the crawl uses
 is derived as `MAX_COST + 2 × parking income + storage income`, because gastos
 only add to the net and sublet is the only thing that subtracts, so rent above
 that can never come in under budget.

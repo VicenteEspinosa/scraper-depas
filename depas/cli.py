@@ -7,8 +7,8 @@ from depas.bot import run as run_bot
 from depas.communes import SANTIAGO_PROVINCE, Commune
 from depas.commute import as_text as commute_text
 from depas.detail import infer_from_description
-from depas.config import (alert_communes, chat_id, locations, max_rent, optional_int,
-                          optional_text)
+from depas.config import (DEFAULT_COMMON_EXPENSES, alert_communes, chat_id, locations,
+                          max_rent, optional_int, optional_text)
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.models import Listing, Query
@@ -317,6 +317,11 @@ SUMMARY_COLUMNS = ("commune", "bedrooms", "area", "floor", "gastos", "est", "bod
                    "net", "nearest_station", "walk", "commute", "url")
 
 
+def _gastos(published: int | None) -> str:
+    """The figure the net cost was built from, marked when it is the assumed default."""
+    return str(published) if published else f"{DEFAULT_COMMON_EXPENSES} (def)"
+
+
 def _summarise(row: sqlite3.Row, scale: Scale) -> dict[str, object]:
     """One display row: the fields worth scanning, led by the grade."""
     scored = scale.grade(dict(row))
@@ -326,7 +331,7 @@ def _summarise(row: sqlite3.Row, scale: Scale) -> dict[str, object]:
         "on": f"{len(scored.parts)}/{len(scored.parts) + len(scored.missing)}",
         "commune": row["commune"], "bedrooms": row["bedrooms"], "area": row["area"],
         "floor": row["floor"], "rent": round(row["price_clp"]),
-        "gastos": row["common_expenses"], "est": row["parking_spaces"],
+        "gastos": _gastos(row["common_expenses"]), "est": row["parking_spaces"],
         "bod": row["storage_units"], "net": round(row["net_monthly_clp"]),
         "metro": row["nearest_station"], "walk": row["walk_minutes"],
         "commute": commute_text(row["commute"]) or "—", "url": row["url"],

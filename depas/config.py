@@ -4,6 +4,11 @@ from pathlib import Path
 
 ENV_FILE = Path(".env")
 
+# Most publishers simply omit gastos comunes, and treating that as zero makes a
+# listing look cheaper than any building it could actually be in. Assume a typical
+# Santiago figure instead, and say so wherever the number is shown.
+DEFAULT_COMMON_EXPENSES = 120_000
+
 
 def _load_env_file() -> None:
     """Read .env into the environment without overriding anything already exported."""

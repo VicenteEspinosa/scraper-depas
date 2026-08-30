@@ -7,7 +7,8 @@ Built for a specific question — *is this apartment a good deal?* — which the
 portals themselves answer badly. Two things make the numbers honest:
 
 **Net cost, not asking rent.** If you sublet the parking space and the storage
-unit, the real monthly figure is `rent + gastos comunes − parking − storage`. A
+unit, the real monthly figure is `rent + gastos comunes − parking − storage`,
+with an assumed $120.000 standing in for gastos comunes nobody published. A
 listing at $800.000 with two parking spaces and a bodega can land below one
 asking $650.000. The portals never show this.
 
@@ -17,10 +18,10 @@ components — value against the zone, net cost, walk to the Metro, size,
 amenities — with weights you control.
 
 ```
-grade  on   commune      area  floor  rent    gastos  est  bod  net     metro              walk
-A 99   5/5  providencia  43.0  9      600000  -       0    1    570000  Manuel Montt       3
-A 97   5/5  providencia  42.0  11     653938  160000  1    1    723938  Pedro de Valdivia  3
-C 64   5/5  providencia  52.0  22     690000  80000   0    0    770000  Pedro de Valdivia  3
+grade  on   commune      area  floor  rent    gastos        est  bod  net     metro              walk
+A 99   5/5  providencia  43.0  9      600000  120000 (def)  0    1    690000  Manuel Montt       3
+A 97   5/5  providencia  42.0  11     653938  160000        1    1    723938  Pedro de Valdivia  3
+C 64   5/5  providencia  52.0  22     690000  80000         0    0    770000  Pedro de Valdivia  3
 ```
 
 ## Quick start
@@ -79,8 +80,10 @@ Found the hard way, and handled in code:
   communes.
 - **60% of listings are priced in UF**, so everything is normalised to CLP.
 - **Gastos comunes are often 0 or absent** — publisher omission, not a free
-  building. Those look artificially cheap; filter `common_expenses > 0` when it
-  matters.
+  building. Those used to look artificially cheap, so a missing or zero figure
+  now costs an assumed $120.000 (`DEFAULT_COMMON_EXPENSES`) in every net cost.
+  Cards and the `gastos` column say when that default was used; filter
+  `common_expenses > 0` for listings that state their own.
 - **`Ambientes` is unusable** (117 of 161 null). Use `bedrooms`.
 - **Assetplan's headline price is a promotion**, typically half of one month.
   The standing rent is the other figure, and that is the one stored.
