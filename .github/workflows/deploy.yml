@@ -17,7 +17,12 @@ permissions:
   contents: read
 
 jobs:
+  # Deploying a red main is how a broken pass reaches the box unnoticed.
+  test:
+    uses: ./.github/workflows/test.yml
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
