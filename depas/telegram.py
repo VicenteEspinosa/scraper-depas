@@ -120,7 +120,8 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
     if row.get("nearest_station"):
         lines.append(f"🚇 {_escape(row['nearest_station'])} · {row.get('walk_minutes')} min caminando")
 
-    asking, zone = row.get("price_per_m2_uf"), row.get("zone_price_per_m2_uf")
+    asking = row.get("price_per_m2_uf_effective")
+    zone = row.get("zone_price_per_m2_uf_effective")
     if asking and zone:
         delta = (asking / zone - 1) * 100
         mark = "🔻" if delta < 0 else "🔺"

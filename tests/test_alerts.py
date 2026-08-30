@@ -182,3 +182,28 @@ def test_a_test_card_is_marked_as_one():
 
     assert format_listing(row, scale.grade(row), is_test=True).startswith(TEST_MARK)
     assert TEST_MARK not in format_listing(row, scale.grade(row))
+
+
+def test_prose_fills_only_what_the_spec_table_left_empty():
+    """A portal's own value always wins; the description is read for the rest."""
+    from depas.detail import infer_from_description
+
+    inferred = infer_from_description(
+        "Departamento en piso 8, con ascensor y conserjería 24 horas, "
+        "sin piscina y gimnasio equipado. Piso flotante en todo el depto.")
+
+    assert inferred["floor"] == 8  # "piso flotante" needs a digit, so it never matches
+    assert inferred["has_elevator"] == 1
+    assert inferred["has_pool"] == 0
+    assert inferred["has_gym"] == 1  # the denial belongs to the pool, not the gym
+    assert inferred["security_type"] == "24 horas"
+
+
+def test_prose_denials_are_read_as_absence():
+    """'sin ascensor' must record the absence, not the mention."""
+    from depas.detail import infer_from_description
+
+    inferred = infer_from_description("Edificio sin ascensor, no tiene conserjería.")
+
+    assert inferred["has_elevator"] == 0
+    assert inferred["has_concierge"] == 0

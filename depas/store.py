@@ -1,8 +1,10 @@
 import os
 import sqlite3
+from collections import defaultdict
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
+from statistics import median
 
 from depas.config import lease_income
 from depas.detail import DETAIL_COLUMNS
@@ -64,6 +66,15 @@ DROP VIEW IF EXISTS listings_ranked;
 CREATE VIEW listings_ranked AS
 SELECT *,
        COALESCE(area_useful_m2, area_m2)        AS area,
+       -- Only Portal Inmobiliario publishes a UF/m2 figure; for everyone else derive it
+       -- from the cached UF, which matches the published one to well under a percent.
+       COALESCE(price_per_m2_uf,
+                price_clp / (SELECT value FROM uf_daily ORDER BY day DESC LIMIT 1)
+                          / NULLIF(COALESCE(area_useful_m2, area_m2), 0))
+                                                AS price_per_m2_uf_effective,
+       COALESCE(zone_price_per_m2_uf,
+                (SELECT uf_per_m2 FROM zone_benchmark WHERE commune = listings.commune))
+                                                AS zone_price_per_m2_uf_effective,
        price_clp + COALESCE(common_expenses, 0) AS total_monthly_clp,
        price_clp + COALESCE(common_expenses, 0)
            - COALESCE(parking_spaces, 0) * (SELECT value FROM settings WHERE key = 'parking_income')
@@ -71,6 +82,23 @@ SELECT *,
                                                 AS net_monthly_clp
 FROM listings;
 """
+
+
+def refresh_zone_benchmarks(connection: sqlite3.Connection) -> int:
+    """Recompute each commune's median published zone UF/m2 for the other portals to borrow."""
+    by_commune: dict[str, list[float]] = defaultdict(list)
+    for commune, value in connection.execute(
+        "SELECT commune, zone_price_per_m2_uf FROM listings "
+        "WHERE commune IS NOT NULL AND zone_price_per_m2_uf IS NOT NULL"
+    ):
+        by_commune[commune].append(value)
+    connection.executemany(
+        "INSERT INTO zone_benchmark (commune, uf_per_m2) VALUES (?, ?) "
+        "ON CONFLICT(commune) DO UPDATE SET uf_per_m2 = excluded.uf_per_m2",
+        [(commune, median(values)) for commune, values in by_commune.items()],
+    )
+    connection.commit()
+    return len(by_commune)
 
 
 def _sync_lease_income(connection: sqlite3.Connection) -> None:
