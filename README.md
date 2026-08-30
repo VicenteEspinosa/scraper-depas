@@ -60,8 +60,8 @@ depas/
 ```
 
 Adding a portal is one file exposing `search(fetcher, query) -> Iterator[Listing]`
-plus one line in the registry. Portal Inmobiliario, Houm, TocToc and
-Chilepropiedades work; Goplaceit is a stub.
+plus one line in the registry. Portal Inmobiliario, Houm, TocToc,
+Chilepropiedades and Assetplan work; Goplaceit is a stub.
 
 ## Things the data will lie to you about
 
@@ -79,6 +79,8 @@ Found the hard way, and handled in code:
   building. Those look artificially cheap; filter `common_expenses > 0` when it
   matters.
 - **`Ambientes` is unusable** (117 of 161 null). Use `bedrooms`.
+- **Assetplan's headline price is a promotion**, typically half of one month.
+  The standing rent is the other figure, and that is the one stored.
 - Listings graded on partial data are marked `*` with an `on` column, so a high
   score earned by dodging weak axes is visible rather than trusted.
 
