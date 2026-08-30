@@ -14,9 +14,9 @@ from depas.grade import Scale
 from depas.models import Listing, Query
 from depas.portals import PORTALS
 from depas.metro import nearest_station
-from depas.store import (connect, mark_notified, refresh_commutes, refresh_zone_benchmarks,
-                         save, save_detail)
-from depas.telegram import chats, format_listing, send_listing
+from depas.store import (clear_notified, connect, mark_notified, refresh_commutes,
+                        refresh_zone_benchmarks, save, save_detail)
+from depas.telegram import chat_type, chats, format_listing, send_listing
 from depas.uf import normalize, stored_uf
 
 TOP_QUERY = """
@@ -197,15 +197,19 @@ def _announce(connection: sqlite3.Connection, limit: int) -> int:
 
     graded = sorted(((row, scale.grade(dict(row))) for row in candidates),
                     key=lambda pair: pair[1].score, reverse=True)
+    destination = chat_id()
+    # Cards only get comment threads in a channel, and the id alone cannot say which
+    # this is: channels and discussion groups share the -100 prefix.
+    print(f"alerts: posting to a {chat_type(destination)}")
     posted = 0
     for row, grade in graded:
         if posted >= limit:
             break
         # Below the bar still gets stamped, so it is never reconsidered later.
         if grade.score >= minimum:
-            send_listing(chat_id(), format_listing(dict(row), grade), row["image_url"])
+            send_listing(destination, format_listing(dict(row), grade), row["image_url"])
             posted += 1
-            time.sleep(ALERT_DELAY_SECONDS)  # group sends are rate-limited by Telegram
+            time.sleep(ALERT_DELAY_SECONDS)  # Telegram rate-limits how fast a chat is posted to
         mark_notified(connection, row["portal"], row["external_id"])
     return posted
 
@@ -252,10 +256,10 @@ def watch(args: argparse.Namespace) -> None:
 
 
 def telegram_chats(args: argparse.Namespace) -> None:
-    """List the chats the bot can see, so the group id can be copied into TELEGRAM_CHAT_ID."""
+    """List the chats the bot can see, so the right id can be copied into TELEGRAM_CHAT_ID."""
     found = chats()
     if not found:
-        print("No chats yet. Add the bot to the group and send /start there, then rerun.\n"
+        print("No chats yet. Add the bot to the channel or group and post there, then rerun.\n"
               "Bots only see commands until privacy mode is disabled in @BotFather.")
         return
     for chat in found:
@@ -277,6 +281,16 @@ def test_alert(args: argparse.Namespace) -> None:
         print(f"test alert posted: {grade.letter} {grade.score} {row['url']}")
     finally:
         connection.close()
+
+
+def resend(args: argparse.Namespace) -> None:
+    """Un-stamp recent alerts so the next watch pass posts them again, to wherever it posts now."""
+    connection = connect()
+    try:
+        cleared = clear_notified(connection, args.hours)
+    finally:
+        connection.close()
+    print(f"{cleared} listings un-stamped; `depas watch` will announce them again")
 
 
 def show(args: argparse.Namespace) -> None:
@@ -357,7 +371,7 @@ def main() -> None:
     watcher.add_argument("--max-alerts", type=int, default=10)
     watcher.set_defaults(func=watch)
 
-    bot = subparsers.add_parser("bot", help="reply to portal links posted in the group")
+    bot = subparsers.add_parser("bot", help="reply to portal links posted in the chat")
     bot.set_defaults(func=lambda _: run_bot())
 
     chatter = subparsers.add_parser("chats", help="list Telegram chats the bot can see")
@@ -365,6 +379,12 @@ def main() -> None:
 
     tester = subparsers.add_parser("test-alert", help="post the top listing as a test card")
     tester.set_defaults(func=test_alert)
+
+    resender = subparsers.add_parser(
+        "resend", help="re-announce recently alerted listings on the next watch pass")
+    resender.add_argument("--hours", type=int, default=6,
+                          help="how far back to un-stamp; older alerts are left alone")
+    resender.set_defaults(func=resend)
 
     viewer = subparsers.add_parser("show", help="best price per m2, or your own SQL")
     viewer.add_argument("sql", nargs="?")

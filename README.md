@@ -44,6 +44,8 @@ Scraping is two-stage, because detail pages are expensive:
   benchmark. Only touches rows where `detail_fetched_at IS NULL`.
 - **`watch`** — both of the above in one scheduled pass, driven by `.env`.
 - **`show`** — filter and rank. Pass raw SQL instead for anything ad hoc.
+- **`resend`** — drop the notified stamp from recent alerts so the next `watch`
+  posts them again, which is how listings announced to the wrong chat are moved.
 
 ```
 depas/
@@ -97,7 +99,8 @@ Everything personal lives in `.env` (gitignored) — see `.env.example`.
 | `DEPAS_LOCATIONS` | `name,lat,lon` per place you need to reach, `;`-separated, any number of them. |
 | `DEPAS_TARGET_COMMUTE`, `DEPAS_ALERT_MAX_COMMUTE` | Minutes to the location a listing reaches worst, by whichever of walking, bus and Metro is fastest. Full marks at or under the target, no alert over the ceiling. |
 | `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Bot credentials. |
+| `TELEGRAM_BOT_TOKEN` | From @BotFather. |
+| `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread; a group takes the cards but leaves them undiscussable. Switching between the two is only this value. |
 
 ## Schema
 
