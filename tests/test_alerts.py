@@ -25,7 +25,7 @@ def connection(tmp_path, monkeypatch):
 def sent(monkeypatch):
     posted = []
     monkeypatch.setattr("depas.cli.send_listing",
-                        lambda chat, text, image=None: posted.append((text, image)))
+                        lambda chat, text, image=None, thread=None: posted.append((text, image)))
     monkeypatch.setattr("depas.cli.time.sleep", lambda _: None)  # no real rate-limit wait
     return posted
 
@@ -91,14 +91,30 @@ def test_a_listing_with_a_photo_is_sent_as_one(monkeypatch):
     calls = []
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setattr("depas.telegram.call",
-                        lambda method, **params: calls.append(method) or {})
+                        lambda method, **params: calls.append((method, params)) or {})
 
     from depas.telegram import send_listing
 
     send_listing("-100", "card", "https://img/1.webp")
     send_listing("-100", "card", None)
 
-    assert calls == ["sendPhoto", "sendMessage"]
+    assert [method for method, _ in calls] == ["sendPhoto", "sendMessage"]
+
+
+def test_a_reply_inside_a_comment_thread_stays_in_it(monkeypatch):
+    """A thread id reaches Telegram; without one the parameter is left out entirely."""
+    calls = []
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr("depas.telegram.call",
+                        lambda method, **params: calls.append(params) or {})
+
+    from depas.telegram import send_listing
+
+    send_listing("-100", "card", None, 77)
+    send_listing("-100", "card", None)
+
+    assert calls[0]["message_thread_id"] == 77
+    assert "message_thread_id" not in calls[1]
 
 
 def test_requirements_gate_which_listings_are_announced(connection, sent, monkeypatch):

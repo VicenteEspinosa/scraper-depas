@@ -149,14 +149,18 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
 CAPTION_LIMIT = 1024
 
 
-def send_listing(chat_id: str, text: str, image_url: str | None = None) -> None:
+def send_listing(chat_id: str, text: str, image_url: str | None = None,
+                 thread_id: int | None = None) -> None:
     """Post the card, as a photo when the listing has one and the caption fits."""
+    # Only ever sent when replying inside a comment thread; Telegram rejects a null.
+    thread = {"message_thread_id": thread_id} if thread_id else {}
     if image_url and len(text) <= CAPTION_LIMIT:
         try:
-            call("sendPhoto", chat_id=chat_id, photo=image_url, caption=text, parse_mode="HTML")
+            call("sendPhoto", chat_id=chat_id, photo=image_url, caption=text,
+                 parse_mode="HTML", **thread)
             return
         except RuntimeError:
             # Telegram rejects some remote images (size, host, format); the card still matters.
             pass
     call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
-         link_preview_options={"is_disabled": True})
+         link_preview_options={"is_disabled": True}, **thread)

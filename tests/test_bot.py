@@ -20,7 +20,7 @@ def connection(tmp_path, monkeypatch):
 def sent(monkeypatch):
     posted = []
     monkeypatch.setattr("depas.bot.send_listing",
-                        lambda chat, text, image=None: posted.append((chat, text)))
+                        lambda chat, text, image=None, thread=None: posted.append((chat, text, thread)))
     return posted
 
 
@@ -51,6 +51,14 @@ def test_a_known_link_is_answered_without_refetching(connection, sent, monkeypat
 
     assert len(sent) == 1
     assert sent[0][0] == "-100"
+
+
+def test_a_comment_is_answered_inside_its_own_thread(connection, sent):
+    """A link pasted under a channel post is graded in that post's comments, not the group."""
+    _handle(connection, None, {"chat": {"id": -100}, "message_thread_id": 12,
+                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"})
+
+    assert sent[0][2] == 12
 
 
 def test_the_same_link_twice_in_one_message_answers_once(connection, sent, monkeypatch):
