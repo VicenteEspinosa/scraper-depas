@@ -84,8 +84,22 @@ def test_the_card_shows_the_publication_title():
     card = format_listing(row, Scale([row]).grade(row))
 
     assert "<i>Depto 2D &amp; luminoso</i>" in card
-    assert "arriendo + gastos comunes" in card  # no amount published, and never a dash
+    # No amount published: the assumed default is shown, labelled, and never a dash.
+    assert "arriendo + $120.000 gastos comunes (estimado por defecto, no publicado)" in card
     assert "—" not in card
+
+
+def test_the_card_labels_a_published_gasto_comun_as_published():
+    """A real figure is shown on its own — the default disclaimer belongs only to guesses."""
+    from depas.grade import Scale
+
+    row = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000,
+           "price_clp": 500_000, "common_expenses": 80_000, "url": "https://x/1"}
+
+    card = format_listing(row, Scale([row]).grade(row))
+
+    assert "arriendo + $80.000 gastos comunes" in card
+    assert "por defecto" not in card
 
 
 def test_a_listing_with_a_photo_is_sent_as_one(monkeypatch):

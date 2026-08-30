@@ -1,5 +1,6 @@
 import pytest
 
+from depas.config import DEFAULT_COMMON_EXPENSES
 from depas.models import Listing
 from depas.store import MIGRATIONS_DIR, connect, migrate, save, save_detail
 
@@ -65,6 +66,20 @@ def test_lease_income_defaults_to_zero_rather_than_a_guessed_rate(tmp_path, monk
 
     row = connection.execute("SELECT total_monthly_clp, net_monthly_clp FROM listings_ranked").fetchone()
     assert row["net_monthly_clp"] == row["total_monthly_clp"] == 700_000
+
+
+@pytest.mark.parametrize("detail", [{}, {"common_expenses": 0}])
+def test_an_undeclared_gasto_comun_falls_back_to_the_default(tmp_path, monkeypatch, detail):
+    """Absent or published as zero, gastos comunes cost the assumed default, not nothing."""
+    monkeypatch.delenv("DEPAS_PARKING_INCOME", raising=False)
+    monkeypatch.delenv("DEPAS_STORAGE_INCOME", raising=False)
+    connection = connect(tmp_path / "test.db")
+    save(connection, [_listing(600_000)])
+
+    save_detail(connection, "houm", "42", {"floor": 7, **detail})
+
+    row = connection.execute("SELECT total_monthly_clp, net_monthly_clp FROM listings_ranked").fetchone()
+    assert row["total_monthly_clp"] == row["net_monthly_clp"] == 600_000 + DEFAULT_COMMON_EXPENSES
 
 
 def test_a_non_numeric_lease_income_fails_loudly(tmp_path, monkeypatch):

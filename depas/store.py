@@ -8,7 +8,7 @@ from pathlib import Path
 from statistics import median
 
 from depas.commute import from_listing
-from depas.config import lease_income, locations
+from depas.config import DEFAULT_COMMON_EXPENSES, lease_income, locations
 from depas.fetch import Fetcher
 from depas.detail import DETAIL_COLUMNS
 from depas.models import Listing
@@ -64,7 +64,7 @@ def migrate(connection: sqlite3.Connection) -> list[int]:
     return newly_applied
 
 
-RANKED_VIEW = """
+RANKED_VIEW = f"""
 DROP VIEW IF EXISTS listings_ranked;
 CREATE VIEW listings_ranked AS
 SELECT *,
@@ -80,8 +80,11 @@ SELECT *,
        COALESCE(zone_price_per_m2_uf,
                 (SELECT uf_per_m2 FROM zone_benchmark WHERE commune = listings.commune))
                                                 AS zone_price_per_m2_uf_effective,
-       price_clp + COALESCE(common_expenses, 0) AS total_monthly_clp,
-       price_clp + COALESCE(common_expenses, 0)
+       -- A gasto comun that is absent, or published as zero, is assumed rather than
+       -- taken as free: see DEFAULT_COMMON_EXPENSES. The cards say when it is assumed.
+       price_clp + COALESCE(NULLIF(common_expenses, 0), {DEFAULT_COMMON_EXPENSES})
+                                                AS total_monthly_clp,
+       price_clp + COALESCE(NULLIF(common_expenses, 0), {DEFAULT_COMMON_EXPENSES})
            - COALESCE(parking_spaces, 0) * (SELECT value FROM settings WHERE key = 'parking_income')
            - COALESCE(storage_units, 0)  * (SELECT value FROM settings WHERE key = 'storage_income')
                                                 AS net_monthly_clp
