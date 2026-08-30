@@ -2,14 +2,17 @@ import os
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 
-from depas.config import _load_env_file, optional_int, optional_text, target_cost
+from depas.config import (_load_env_file, line_preference, optional_int, optional_text,
+                          target_cost)
+from depas.metro import STATION_LINES
 
 # Amenities a listing is credited for having; the raw score is the fraction present.
 AMENITIES = (
     "has_elevator", "has_concierge", "has_heating", "has_air_conditioning",
     "has_pool", "has_gym", "has_terrace", "gated_community", "pets_allowed",
 )
-COMPONENTS = ("value", "cost", "location", "size", "amenities", "security", "floor")
+COMPONENTS = ("value", "cost", "location", "size", "amenities", "security", "floor",
+              "metro")
 LETTERS = ((90, "A"), (75, "B"), (50, "C"), (25, "D"))
 # A percentile scale centres here, so it is what an unmeasured component says.
 MIDPOINT = 50.0
@@ -113,8 +116,22 @@ def _floor(row: dict) -> float | None:
     return -min(shortfall + top, 1.0)
 
 
+def _metro(row: dict) -> float | None:
+    """Rank the station by the best-tiered line calling at it; an interchange takes its best."""
+    tiers = line_preference()
+    station = row.get("nearest_station")
+    if not tiers or station is None:
+        return None
+    lines = STATION_LINES.get(station)
+    if not lines:
+        return None
+    # A line nobody ranked sits one tier worse than the last one that was.
+    ranks = [rank for rank, tier in enumerate(tiers) if any(line in tier for line in lines)]
+    return -(min(ranks) if ranks else len(tiers)) / len(tiers)
+
+
 RAW = {"value": _value, "cost": _cost, "location": _location, "size": _size,
-       "amenities": _amenities, "security": _security, "floor": _floor}
+       "amenities": _amenities, "security": _security, "floor": _floor, "metro": _metro}
 
 
 def _weights() -> dict[str, float]:
