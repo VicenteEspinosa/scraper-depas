@@ -1,0 +1,19 @@
+migrations/004_backfill_price_clp.sql
+  s_cc6ef9e7f9bcc3::t_2eab02ee71e56f 1-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b21ee88239fc74a43a6ab99fdec1a9b2717cd234",
+  "prompts": {},
+  "sessions": {
+    "s_cc6ef9e7f9bcc3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f62b783b-45ac-4c98-b2b4-ba08d072a808",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
