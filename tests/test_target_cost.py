@@ -56,3 +56,27 @@ def test_no_budget_means_no_derived_rent_ceiling(monkeypatch):
     monkeypatch.delenv("DEPAS_ALERT_MAX_COST")
 
     assert max_rent() is None
+
+
+def test_walking_within_the_ideal_ties_at_the_top(monkeypatch):
+    """Two minutes and ten minutes are both fine, so neither should outrank the other."""
+    monkeypatch.setenv("DEPAS_TARGET_WALK", "10")
+    monkeypatch.setenv("DEPAS_ALERT_MAX_WALK", "15")
+    pool = [{"walk_minutes": w, "net_monthly_clp": 700_000, "area": 50.0} for w in (2, 6, 10)]
+
+    scores = {Scale(pool).grade(row).parts["location"] for row in pool}
+
+    assert len(scores) == 1
+
+
+def test_walking_past_the_ideal_costs_score_without_excluding(monkeypatch):
+    """Between the ideal and the ceiling the score falls, but the listing still ranks."""
+    monkeypatch.setenv("DEPAS_TARGET_WALK", "10")
+    monkeypatch.setenv("DEPAS_ALERT_MAX_WALK", "15")
+    pool = [{"walk_minutes": w, "net_monthly_clp": 700_000, "area": 50.0} for w in (10, 12, 14, 15)]
+    scale = Scale(pool)
+
+    scores = [scale.grade(row).parts["location"] for row in pool]
+
+    assert scores == sorted(scores, reverse=True)
+    assert scores[0] > scores[-1] > 0
