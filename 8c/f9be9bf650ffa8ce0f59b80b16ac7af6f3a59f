@@ -1,0 +1,19 @@
+tests/test_bot.py
+  s_cc6ef9e7f9bcc3::t_6a75171b3713af 123-141
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "8cf9be9bf650ffa8ce0f59b80b16ac7af6f3a59f",
+  "prompts": {},
+  "sessions": {
+    "s_cc6ef9e7f9bcc3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f62b783b-45ac-4c98-b2b4-ba08d072a808",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
