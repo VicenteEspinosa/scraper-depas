@@ -1,5 +1,8 @@
 import re
 import sqlite3
+import time
+
+from curl_cffi.requests.exceptions import RequestException
 
 from depas.fetch import Fetcher
 from depas.grade import Scale
@@ -11,6 +14,9 @@ from depas.uf import normalize, stored_uf
 from depas.telegram import call, format_listing, send_listing
 
 POLL_TIMEOUT = 30
+# Telegram and the portals both blip. A blip should cost one poll, not the process:
+# the container restarts on exit, so crashing is how a hiccup became a restart loop.
+ERROR_BACKOFF_SECONDS = 5
 OFFSET_KEY = "telegram_offset"
 
 
@@ -93,11 +99,21 @@ def run() -> None:
     print("bot listening")
     try:
         while True:
-            updates = call("getUpdates", offset=_offset(connection), timeout=POLL_TIMEOUT)
+            try:
+                updates = call("getUpdates", offset=_offset(connection), timeout=POLL_TIMEOUT)
+            except (RuntimeError, RequestException) as error:
+                print(f"getUpdates failed, polling again: {error}")
+                time.sleep(ERROR_BACKOFF_SECONDS)
+                continue
             for update in updates:
                 message = update.get("message") or update.get("channel_post")
                 if message:
-                    _handle(connection, fetcher, message)
+                    try:
+                        _handle(connection, fetcher, message)
+                    except (RuntimeError, RequestException) as error:
+                        print(f"could not answer update {update['update_id']}: {error}")
+                # Advances even when the reply failed: an update that cannot be
+                # answered must not be redelivered on every restart forever.
                 _remember_offset(connection, update["update_id"] + 1)
     finally:
         fetcher.close()

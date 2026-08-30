@@ -1,6 +1,9 @@
-import pytest
+from types import SimpleNamespace
 
-from depas.bot import _handle, _offset, _remember_offset, find_links
+import pytest
+from curl_cffi.requests.exceptions import RequestException
+
+from depas.bot import _handle, _offset, _remember_offset, find_links, run
 from depas.models import Listing
 from depas.store import connect, save, save_detail
 
@@ -165,3 +168,62 @@ def test_a_houm_page_that_is_not_a_listing_is_ignored():
     """Marketing pages on a supported host must not be mistaken for listings."""
     assert find_links("https://houm.com/cl/propietario/arriendo") == []
 
+
+
+class StopLoop(Exception):
+    """Sentinel that ends the bot's endless poll loop once a test has seen enough."""
+
+
+@pytest.fixture
+def poll(connection, monkeypatch):
+    """Drive run() over a script of getUpdates outcomes; an Exception instance is raised."""
+    def drive(*outcomes):
+        scripted = iter(outcomes)
+        polls = []
+
+        def getUpdates(method, **params):
+            polls.append(params)
+            outcome = next(scripted)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        monkeypatch.setattr("depas.bot.call", getUpdates)
+        monkeypatch.setattr("depas.bot.connect", lambda *args, **kwargs: connection)
+        monkeypatch.setattr("depas.bot.Fetcher", lambda: SimpleNamespace(close=lambda: None))
+        monkeypatch.setattr("depas.bot.stored_uf", lambda *args: None)
+        monkeypatch.setattr("depas.bot.time.sleep", lambda _: None)
+        with pytest.raises(StopLoop):
+            run()
+        return polls
+    return drive
+
+
+def test_a_telegram_blip_costs_one_poll_not_the_process(poll):
+    """A failed getUpdates backs off and polls again rather than ending the bot."""
+    polls = poll(RuntimeError("Conflict: terminated by other getUpdates request"), StopLoop())
+
+    assert len(polls) == 2
+
+
+def test_a_dropped_connection_is_survived_too(poll):
+    """The network failing mid-poll is the same kind of blip as Telegram saying no."""
+    polls = poll(RequestException("connection reset"), StopLoop())
+
+    assert len(polls) == 2
+
+
+def _portal_is_down(*args: object) -> None:
+    raise RuntimeError("portal is down")
+
+
+def test_an_update_that_cannot_be_answered_is_not_redelivered(poll, monkeypatch):
+    """A reply that fails still advances the offset, or every restart retries it forever."""
+    advanced: list[int] = []
+    monkeypatch.setattr("depas.bot._handle", _portal_is_down)
+    monkeypatch.setattr("depas.bot._remember_offset",
+                        lambda connection, offset: advanced.append(offset))
+
+    poll([{"update_id": 41, "message": {"chat": {"id": 1}, "text": "hola"}}], StopLoop())
+
+    assert advanced == [42]
