@@ -5,7 +5,7 @@ from collections.abc import Iterator
 
 from depas.bot import run as run_bot
 from depas.communes import SANTIAGO_PROVINCE, Commune
-from depas.config import alert_communes, chat_id, optional_int, optional_text
+from depas.config import alert_communes, chat_id, max_rent, optional_int, optional_text
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.models import Listing, Query
@@ -123,7 +123,6 @@ ALERT_DELAY_SECONDS = 3
 # detail page's, so a listing can stop qualifying after it was stored.
 ALERT_REQUIREMENTS = (
     ("DEPAS_ALERT_MAX_COST", "net_monthly_clp <= ?", optional_int),
-    ("DEPAS_ALERT_MAX_PRICE", "price_clp <= ?", optional_int),
     ("DEPAS_ALERT_MIN_BEDROOMS", "bedrooms >= ?", optional_int),
     ("DEPAS_ALERT_MAX_WALK", "walk_minutes <= ?", optional_int),
     ("DEPAS_ALERT_MIN_FLOOR", "floor >= ?", optional_int),
@@ -189,7 +188,7 @@ def watch(args: argparse.Namespace) -> None:
     query = Query(
         operation="rent",
         communes=communes,
-        max_price=optional_int("DEPAS_ALERT_MAX_PRICE"),
+        max_price=max_rent(),  # derived from the budget, not configured
         min_bedrooms=optional_int("DEPAS_ALERT_MIN_BEDROOMS"),
     )
     fetcher = Fetcher()

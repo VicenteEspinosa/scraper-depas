@@ -66,3 +66,20 @@ def optional_text(name: str) -> str | None:
 def current_cost() -> int | None:
     """What you pay now, net, so every listing can be shown as a difference."""
     return optional_int("DEPAS_CURRENT_COST")
+
+
+def target_cost() -> int | None:
+    """What we aim to spend; listings above it score worse without being excluded."""
+    return optional_int("DEPAS_TARGET_COST")
+
+
+def max_rent() -> int | None:
+    """Rent ceiling for the crawl, derived from the budget rather than configured.
+
+    Gastos comunes only add to the net cost and sublet income is the only thing that
+    subtracts, so rent above budget-plus-maximum-sublet can never come in under budget.
+    """
+    budget = optional_int("DEPAS_ALERT_MAX_COST")
+    if budget is None:
+        return None
+    return budget + 2 * lease_income("parking") + lease_income("storage")
