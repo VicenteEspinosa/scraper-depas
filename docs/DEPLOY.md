@@ -38,17 +38,30 @@ Repository **secrets**:
 | `TELEGRAM_CHAT_ID` | The group the bot posts to |
 
 Repository **variables**: `TZ`, `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME`,
-`DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MAX_PRICE`, `DEPAS_ALERT_MIN_BEDROOMS`,
-`DEPAS_ALERT_MIN_GRADE`, `DEPAS_ALERT_MAX_COST`, `DEPAS_ALERT_MAX_WALK`,
-`DEPAS_ALERT_MIN_FLOOR`, `DEPAS_ALERT_MIN_AREA`, `DEPAS_ALERT_SECURITY`.
+`DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MIN_BEDROOMS`, `DEPAS_ALERT_MIN_GRADE`,
+`DEPAS_TARGET_COST`, `DEPAS_ALERT_MAX_COST`, `DEPAS_ALERT_MAX_WALK`,
+`DEPAS_ALERT_MIN_FLOOR`, `DEPAS_ALERT_MIN_AREA`, `DEPAS_ALERT_SECURITY`,
+`DEPAS_CURRENT_COST`.
 
-Requirements apply at two different points. `MAX_PRICE` and `MIN_BEDROOMS` are
-scrape-time filters, so listings that miss them never enter the database at all.
+Every cost figure is the **net** monthly cost — rent plus gastos comunes minus
+sublet income. There is no asking-rent setting: the rent ceiling the crawl uses
+is derived as `MAX_COST + 2 × parking income + storage income`, because gastos
+only add to the net and sublet is the only thing that subtracts, so rent above
+that can never come in under budget.
+
+Requirements apply at two different points. The derived rent ceiling and
+`MIN_BEDROOMS` bound the scrape, so listings far outside budget never enter the
+database at all — but every requirement is re-checked when announcing, because
+enrichment can overwrite a card value (bedrooms included) with the detail page's.
 `MAX_COST`, `MAX_WALK`, `MIN_FLOOR`, `MIN_AREA` and `SECURITY` depend on the
 detail page, so they gate *alerts* instead — the listings are still stored and
 queryable. Note `MAX_PRICE` is the asking rent and `MAX_COST` is what you
 actually pay (rent + gastos comunes − sublet income); a listing can clear the
 first and fail the second.
+
+`TARGET_COST` is not a filter: at or under it a listing gets full marks on the
+cost component, and above it the score degrades to zero at `MAX_COST`. Nothing is
+excluded for being over target, it just ranks lower.
 
 A listing that misses a requirement is left unstamped rather than marked
 notified, so a later price drop can still bring it into range. A listing that
