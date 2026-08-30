@@ -8,6 +8,7 @@ from depas.portals import portalinmobiliario
 from depas.portals.portalinmobiliario import LISTING_HOSTS, clean_url
 from depas.store import connect, save, save_detail
 from depas.telegram import call, format_listing, send_listing
+from depas.uf import to_clp, uf_in_clp
 
 # Both hosts serve the same listings under the same MLC ids, so a link to either
 # resolves to one row.
@@ -45,6 +46,7 @@ def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher, url: str) -> t
         listing = portalinmobiliario.fetch_standalone(fetcher, url)
         if listing is None:
             return None
+        listing.price_clp = to_clp(listing.price, listing.currency, uf_in_clp(fetcher))
         save(connection, [listing])
 
     row = connection.execute(
