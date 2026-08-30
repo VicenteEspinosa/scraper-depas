@@ -3,7 +3,7 @@ from typing import Any
 
 from curl_cffi import requests
 
-from depas.config import _load_env_file
+from depas.config import _load_env_file, current_cost
 
 API = "https://api.telegram.org"
 TIMEOUT = 40
@@ -80,6 +80,16 @@ def format_listing(row: dict[str, Any], grade: Any) -> str:
     if any(sublet):
         saved = (row.get("total_monthly_clp") or 0) - (row.get("net_monthly_clp") or 0)
         lines.append(f"    ↳ −{_clp(saved)} arrendando {sublet[0]}🚗 {sublet[1]}📦")
+
+    baseline = current_cost()
+    net = row.get("net_monthly_clp")
+    if baseline and net is not None:
+        difference = net - baseline
+        if difference == 0:
+            lines.append("⚖️ lo mismo que pagas hoy")
+        else:
+            mark, word = ("🔺", "más caro") if difference > 0 else ("🔻", "más barato")
+            lines.append(f"⚖️ {mark} {_clp(abs(difference))} {word} que hoy")
 
     if row.get("nearest_station"):
         lines.append(f"🚇 {_escape(row['nearest_station'])} · {row.get('walk_minutes')} min caminando")

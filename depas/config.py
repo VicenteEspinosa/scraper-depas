@@ -61,3 +61,8 @@ def optional_text(name: str) -> str | None:
     _load_env_file()
     value = os.environ.get(name, "").strip()
     return value or None
+
+
+def current_cost() -> int | None:
+    """What you pay now, net, so every listing can be shown as a difference."""
+    return optional_int("DEPAS_CURRENT_COST")
