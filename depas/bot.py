@@ -9,7 +9,7 @@ from depas.grade import Scale
 from depas.metro import nearest_station
 from depas.portals import PORTALS
 from depas.portals.portalinmobiliario import clean_url
-from depas.store import connect, save, save_detail
+from depas.store import POOL_QUERY, connect, save, save_detail
 from depas.uf import normalize, stored_uf
 from depas.telegram import call, format_listing, send_listing
 
@@ -74,9 +74,7 @@ def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher,
     ranked = connection.execute(
         "SELECT * FROM listings_ranked WHERE portal = ? AND external_id = ?", key
     ).fetchone()
-    pool = connection.execute(
-        "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL AND is_project = 0"
-    ).fetchall()
+    pool = connection.execute(POOL_QUERY).fetchall()
     return dict(ranked), Scale([dict(item) for item in pool]).grade(dict(ranked))
 
 

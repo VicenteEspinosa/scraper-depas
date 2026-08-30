@@ -1,8 +1,11 @@
+from datetime import UTC, datetime
+
 import pytest
 
 from depas.config import DEFAULT_COMMON_EXPENSES
 from depas.models import Listing
-from depas.store import MIGRATIONS_DIR, connect, migrate, save, save_detail
+from depas.store import (MIGRATIONS_DIR, POOL_QUERY, connect, migrate, save,
+                         save_detail)
 
 
 def _listing(price: int) -> Listing:
@@ -161,3 +164,42 @@ def test_the_ranked_view_prices_per_m2_from_the_cached_uf(tmp_path):
 
     assert before is None
     assert after == pytest.approx(0.4)
+
+
+def test_a_published_year_is_read_as_an_age(tmp_path):
+    """Antigüedad comes as years from some portals and as the year built from others."""
+    connection = connect(tmp_path / "test.db")
+    built = datetime.now(UTC).year - 12
+    for external_id, published in (("42", 12), ("43", built), ("44", None)):
+        save(connection, [Listing(portal="houm", external_id=external_id,
+                                  url=f"https://x/{external_id}", price=500_000,
+                                  currency="CLP", price_clp=500_000.0)])
+        save_detail(connection, "houm", external_id, {"age_years": published})
+
+    ages = dict(connection.execute("SELECT external_id, age FROM listings_ranked"))
+
+    assert ages == {"42": 12, "43": 12, "44": None}
+
+
+def test_a_year_still_to_come_is_floored_at_zero(tmp_path):
+    """A mistyped year must not make a building younger than new."""
+    connection = connect(tmp_path / "test.db")
+    save(connection, [_listing(500_000)])
+    save_detail(connection, "houm", "42", {"age_years": datetime.now(UTC).year + 3})
+
+    assert connection.execute("SELECT age FROM listings_ranked").fetchone()[0] == 0
+
+
+def test_a_furnished_listing_is_left_out_of_the_pool(tmp_path):
+    """Amoblado is excluded outright, and a listing nobody would take must not set the curve."""
+    connection = connect(tmp_path / "test.db")
+    for external_id, title in (("42", "Depto 2D"), ("43", "Depto 2D"), ("44", "Depto AMOBLADO 2D")):
+        save(connection, [Listing(portal="houm", external_id=external_id, title=title,
+                                  url=f"https://x/{external_id}", price=500_000,
+                                  currency="CLP", price_clp=500_000.0)])
+        save_detail(connection, "houm", external_id,
+                    {"furnished": 1 if external_id == "43" else None})
+
+    pooled = [row["external_id"] for row in connection.execute(POOL_QUERY)]
+
+    assert pooled == ["42"]  # 43 says so in its spec table, 44 only in its title

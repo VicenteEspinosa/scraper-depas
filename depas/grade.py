@@ -4,7 +4,7 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 
 from depas.config import (_load_env_file, line_preference, optional_int, optional_text,
-                          target_cost)
+                          target_age, target_cost)
 from depas.metro import STATION_LINES
 
 # Amenities a listing is credited for having; the raw score is the fraction present.
@@ -13,7 +13,7 @@ AMENITIES = (
     "has_pool", "has_gym", "has_terrace", "gated_community", "pets_allowed",
 )
 COMPONENTS = ("value", "cost", "location", "size", "amenities", "security", "floor",
-              "metro", "commute")
+              "metro", "commute", "age")
 LETTERS = ((90, "A"), (75, "B"), (50, "C"), (25, "D"))
 # A percentile scale centres here, so it is what an unmeasured component says.
 MIDPOINT = 50.0
@@ -117,6 +117,19 @@ def _floor(row: dict) -> float | None:
     return -min(shortfall + top, 1.0)
 
 
+def _age(row: dict) -> float | None:
+    """Newer is better up to the age target; past it the score falls without excluding.
+
+    An undeclared antigüedad is left unscored rather than assumed old: most portals
+    simply omit it. No ceiling is passed because age never blocks an alert — the target
+    alone sets how fast an older building loses the component.
+    """
+    age = row.get("age")
+    if age is None:
+        return None
+    return _against_target(float(age), target_age(), None)
+
+
 def _metro(row: dict) -> float | None:
     """Rank the station by the best-tiered line calling at it; an interchange takes its best."""
     tiers = line_preference()
@@ -143,7 +156,7 @@ def _commute(row: dict) -> float | None:
 
 RAW = {"value": _value, "cost": _cost, "location": _location, "size": _size,
        "amenities": _amenities, "security": _security, "floor": _floor, "metro": _metro,
-       "commute": _commute}
+       "commute": _commute, "age": _age}
 
 
 def _weights() -> dict[str, float]:

@@ -236,3 +236,46 @@ def test_lines_sharing_a_tier_score_the_same(monkeypatch):
     line_one, line_six, line_three, line_two = (scale.grade(row).score for row in pool)
 
     assert line_one > line_six == line_three > line_two
+
+
+def test_an_older_building_scores_lower_without_being_excluded(monkeypatch):
+    """Age is a preference: past the target a listing loses score, never the alert."""
+    monkeypatch.setenv("DEPAS_TARGET_AGE", "25")
+    pool = [_listing(age=age) for age in (0, 25, 40, 60)]
+    scale = Scale(pool)
+
+    new, target, older, oldest = (scale.grade(row).score for row in pool)
+
+    assert new == target > older > oldest
+    assert all(scale.grade(row).letter != "?" for row in pool)
+
+
+def test_an_unknown_age_is_missing_not_penalised(monkeypatch):
+    """Most portals never publish an antigüedad, so its absence must not be graded as old."""
+    monkeypatch.setenv("DEPAS_TARGET_AGE", "25")
+    pool = [_listing(age=5), _listing(age=None)]
+    scale = Scale(pool)
+
+    assert "age" in scale.grade(pool[1]).missing
+    assert scale.grade(pool[1]).letter != "?"
+
+
+def test_age_at_or_under_the_target_ties_at_the_top(monkeypatch):
+    """Beating 25 years is not a competition; the other components decide it."""
+    monkeypatch.setenv("DEPAS_TARGET_AGE", "25")
+    pool = [_listing(age=age) for age in (2, 25, 30)]
+    scale = Scale(pool)
+
+    brand_new, target, over = (scale.grade(row).score for row in pool)
+
+    assert brand_new == target > over
+
+
+def test_under_25_years_is_the_target_with_nothing_configured():
+    """The rule stands whether or not DEPAS_TARGET_AGE was ever set."""
+    pool = [_listing(age=age) for age in (10, 24, 40)]
+    scale = Scale(pool)
+
+    young, still_under, over = (scale.grade(row).score for row in pool)
+
+    assert young == still_under > over

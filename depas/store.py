@@ -71,6 +71,15 @@ SELECT *,
        -- Stable: nothing deletes rows or VACUUMs, so a listing keeps its number for life.
        rowid                                    AS id,
        COALESCE(area_useful_m2, area_m2)        AS area,
+       -- Antigüedad is published either as a number of years or as the year the
+       -- building went up, and no portal says which it means. A flat over a century
+       -- old is far rarer than that second habit, so a big number reads as a year;
+       -- a year still to come is a typo, hence the floor at zero rather than a
+       -- negative age.
+       CASE WHEN age_years > 100
+            THEN MAX(CAST(strftime('%Y', 'now') AS INTEGER) - age_years, 0)
+            ELSE age_years
+       END                                      AS age,
        -- Only Portal Inmobiliario publishes a UF/m2 figure; for everyone else derive it
        -- from the cached UF, which matches the published one to well under a percent.
        COALESCE(price_per_m2_uf,
@@ -90,6 +99,20 @@ SELECT *,
                                                 AS net_monthly_clp
 FROM listings;
 """
+
+# Amoblado is a hard no rather than a preference: a furnished flat is excluded
+# outright, and it is kept out of the pool everything else is ranked against too,
+# so percentiles are measured against apartments we would actually take. An
+# undeclared `furnished` is not a reason to drop a listing, but a title that says
+# amoblado is — the portals that publish no spec row for it still say it there.
+NOT_FURNISHED = ("COALESCE(furnished, 0) = 0"
+                 " AND (title IS NULL OR lower(title) NOT LIKE '%amoblad%')")
+
+# Every listing worth ranking or alerting on: enriched, an actual unit rather than
+# a project, and not furnished. An unenriched listing would be graded on two
+# components and beat everything.
+POOL_QUERY = ("SELECT * FROM listings_ranked "
+              f"WHERE detail_fetched_at IS NOT NULL AND is_project = 0 AND {NOT_FURNISHED}")
 
 
 def refresh_zone_benchmarks(connection: sqlite3.Connection) -> int:

@@ -5,7 +5,7 @@ from curl_cffi import requests
 
 from depas.commute import as_text as commute_text
 from depas.config import (DEFAULT_COMMON_EXPENSES, _load_env_file, current_cost,
-                          optional_int, optional_text)
+                          optional_int, optional_text, target_age)
 from depas.metro import STATION_LINES
 
 API = "https://api.telegram.org"
@@ -75,6 +75,9 @@ def _cons(row: dict[str, Any]) -> list[str]:
         cons.append("metraje no publicado")
     elif target_area is not None and area < target_area:
         cons.append(f"{area:.0f} m², bajo los {target_area}")
+    age, oldest = row.get("age"), target_age()
+    if age is not None and age > oldest:
+        cons.append(f"{age:.0f} años, sobre los {oldest}")
     wanted = optional_text("DEPAS_ALERT_SECURITY")
     if wanted and row.get("security_type") != wanted:
         cons.append(f"sin conserjería {wanted}")
@@ -107,7 +110,9 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
     spec = [f"{row['bedrooms']}D" if row.get("bedrooms") else None,
             f"{row['bathrooms']}B" if row.get("bathrooms") else None,
             f"{row['area']:.0f} m²" if row.get("area") else None,
-            f"piso {row['floor']}" if row.get("floor") else None]
+            f"piso {row['floor']}" if row.get("floor") else None,
+            # `is not None`: a brand-new building is 0 años, which is worth printing.
+            f"{row['age']:.0f} años" if row.get("age") is not None else None]
     lines.append("🏠 " + " · ".join(part for part in spec if part))
 
     lines.append(f"💰 <b>{_clp(row.get('net_monthly_clp'))}</b> neto al mes")
