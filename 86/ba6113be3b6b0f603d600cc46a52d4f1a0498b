@@ -1,0 +1,24 @@
+uv.lock
+  ai_agent 1-267
+pyproject.toml
+  s_ac9b713021ac74::t_6af2cd7beaa315 14-24
+  s_ac9b713021ac74::t_1f6d6aa270dfef 1-13
+.gitignore
+  s_ac9b713021ac74::t_5eb181625eb604 1-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "86ba6113be3b6b0f603d600cc46a52d4f1a0498b",
+  "prompts": {},
+  "sessions": {
+    "s_ac9b713021ac74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7cb6a0ba-5179-4899-b03d-3090bfaa406f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
