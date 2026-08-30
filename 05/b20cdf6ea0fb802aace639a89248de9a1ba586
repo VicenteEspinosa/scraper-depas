@@ -1,0 +1,17 @@
+docker-compose.yml
+  ai_agent 1-16
+.dockerignore
+  ai_agent 1-17
+Dockerfile
+  ai_agent 1-33
+.env.example
+  ai_agent 13-24
+deploy/crontab
+  ai_agent 1-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "05b20cdf6ea0fb802aace639a89248de9a1ba586",
+  "prompts": {}
+}
