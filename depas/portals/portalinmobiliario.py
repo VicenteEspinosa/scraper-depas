@@ -15,6 +15,14 @@ BASE = "https://www.portalinmobiliario.com"
 # Portal Inmobiliario is MercadoLibre's property vertical: same item ids, same
 # page markup, so a mercadolibre.cl link parses with exactly these selectors.
 LISTING_HOSTS = ("portalinmobiliario.com", "mercadolibre.cl")
+LISTING_URL = re.compile(
+    r"https?://[\w.-]*(?:portalinmobiliario\.com|mercadolibre\.cl)/\S*?MLC-\d+\S*"
+)
+
+
+def listing_id(url: str) -> str | None:
+    match = LISTING_ID.search(url)
+    return match.group(1) if match else None
 REGION = "metropolitana"
 PAGE_SIZE = 48
 OPERATION_PATH = {"rent": "arriendo", "sale": "venta"}

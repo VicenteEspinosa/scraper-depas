@@ -1,9 +1,17 @@
 from collections.abc import Iterator
 
 from depas.fetch import Fetcher
+import re
 from typing import Any
 
 from depas.models import Listing, Query
+
+LISTING_URL = re.compile(r"(?!x)x")  # no links recognised yet
+
+
+def listing_id(url: str) -> str | None:
+    return None
+
 
 NAME = "toctoc"
 
