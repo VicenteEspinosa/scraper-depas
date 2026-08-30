@@ -3,6 +3,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from depas.config import lease_income
 from depas.detail import DETAIL_COLUMNS
 from depas.models import Listing
 
@@ -62,6 +63,7 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     connection.executescript(SCHEMA)
     _add_detail_columns(connection)
     connection.executescript(RANKED_VIEW)
+    _sync_lease_income(connection)
     return connection
 
 
@@ -79,14 +81,12 @@ FROM listings;
 """
 
 
-def get_setting(connection: sqlite3.Connection, key: str) -> int:
-    return connection.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()["value"]
-
-
-def set_setting(connection: sqlite3.Connection, key: str, value: int) -> None:
-    """Lease income is a standing input, not scraped: set once, applies to every listing."""
-    if connection.execute("UPDATE settings SET value = ? WHERE key = ?", (value, key)).rowcount == 0:
-        raise KeyError(f"unknown setting: {key}")
+def _sync_lease_income(connection: sqlite3.Connection) -> None:
+    """Mirror the environment into `settings` so the ranked view can read it from SQL."""
+    for kind in ("parking", "storage"):
+        connection.execute(
+            "UPDATE settings SET value = ? WHERE key = ?", (lease_income(kind), f"{kind}_income")
+        )
     connection.commit()
 
 
