@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Runs on the Oracle VM, piped in over SSH by the deploy workflow. Writes .env
+# Runs on the deploy host, piped in over SSH by the deploy workflow. Writes .env
 # from the base64 blob the workflow built, fast-forwards the checkout to the
 # deploy commit, and rebuilds + restarts the containers. The image is built
-# natively (arm64) on the box — there is no registry.
+# natively (arm64) on the host — there is no registry.
 #
 # Secrets arrive as a single base64 blob (ENV_B64), NOT as individual inline
 # `VAR=value` ssh args: the remote shell re-expands $ sequences in such args, so
