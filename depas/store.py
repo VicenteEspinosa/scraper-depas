@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -7,49 +8,12 @@ from depas.config import lease_income
 from depas.detail import DETAIL_COLUMNS
 from depas.models import Listing
 
-DB_PATH = Path("depas.db")
+MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS listings (
-    portal          TEXT NOT NULL,
-    external_id     TEXT NOT NULL,
-    url             TEXT NOT NULL,
-    title           TEXT,
-    price           REAL NOT NULL,
-    currency        TEXT NOT NULL,
-    common_expenses INTEGER,
-    is_project      INTEGER NOT NULL DEFAULT 0,
-    price_clp       REAL,
-    bedrooms        INTEGER,
-    bathrooms       INTEGER,
-    area_m2         REAL,
-    commune         TEXT,
-    address         TEXT,
-    lat             REAL,
-    lon             REAL,
-    first_seen      TEXT NOT NULL,
-    last_seen       TEXT NOT NULL,
-    PRIMARY KEY (portal, external_id)
-);
 
-CREATE TABLE IF NOT EXISTS price_history (
-    portal      TEXT NOT NULL,
-    external_id TEXT NOT NULL,
-    price       REAL NOT NULL,
-    currency    TEXT NOT NULL,
-    seen_at     TEXT NOT NULL
-);
+def db_path() -> Path:
+    return Path(os.environ.get("DEPAS_DB_PATH", "depas.db"))
 
-CREATE INDEX IF NOT EXISTS idx_price_history_listing
-    ON price_history (portal, external_id, seen_at);
-
-CREATE TABLE IF NOT EXISTS settings (
-    key   TEXT PRIMARY KEY,
-    value INTEGER NOT NULL
-);
-
-INSERT OR IGNORE INTO settings (key, value) VALUES ('parking_income', 0), ('storage_income', 0);
-"""
 
 FIELDS = (
     "url", "title", "price", "currency", "common_expenses", "is_project", "price_clp",
@@ -57,14 +21,39 @@ FIELDS = (
 )
 
 
-def connect(path: Path = DB_PATH) -> sqlite3.Connection:
-    connection = sqlite3.connect(path)
+def connect(path: Path | None = None) -> sqlite3.Connection:
+    connection = sqlite3.connect(path or db_path())
     connection.row_factory = sqlite3.Row
-    connection.executescript(SCHEMA)
-    _add_detail_columns(connection)
+    # WAL + a busy timeout because the bot and the cron sidecar share one file.
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA busy_timeout=5000")
+    migrate(connection)
+    # The view is derived, not state: rebuilt every connect so it tracks the code.
     connection.executescript(RANKED_VIEW)
     _sync_lease_income(connection)
     return connection
+
+
+def migrate(connection: sqlite3.Connection) -> list[int]:
+    """Apply any migrations/*.sql not yet recorded, in filename order."""
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS schema_migrations"
+        " (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+    )
+    applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
+    newly_applied = []
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        version = int(path.name.split("_")[0])
+        if version in applied:
+            continue
+        connection.executescript(path.read_text())
+        connection.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
+            (version,),
+        )
+        connection.commit()
+        newly_applied.append(version)
+    return newly_applied
 
 
 RANKED_VIEW = """
@@ -90,13 +79,6 @@ def _sync_lease_income(connection: sqlite3.Connection) -> None:
     connection.commit()
 
 
-def _add_detail_columns(connection: sqlite3.Connection) -> None:
-    """Detail columns are added in place so enriching never costs the existing price history."""
-    existing = {row["name"] for row in connection.execute("PRAGMA table_info(listings)")}
-    for column, sql_type in DETAIL_COLUMNS.items():
-        if column not in existing:
-            connection.execute(f"ALTER TABLE listings ADD COLUMN {column} {sql_type}")
-    connection.commit()
 
 
 def save_detail(
