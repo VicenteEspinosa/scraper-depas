@@ -23,3 +23,20 @@ def lease_income(kind: str) -> int:
     if not raw.isdigit():
         raise ValueError(f"DEPAS_{kind.upper()}_INCOME must be a whole number of CLP, got {raw!r}")
     return int(raw)
+
+
+def alert_communes() -> list[str]:
+    """Communes the hourly watch scrapes, as portal slugs."""
+    _load_env_file()
+    raw = os.environ.get("DEPAS_ALERT_COMMUNES", "")
+    return [slug.strip() for slug in raw.split(",") if slug.strip()]
+
+
+def optional_int(name: str) -> int | None:
+    _load_env_file()
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return None
+    if not raw.lstrip("-").isdigit():
+        raise ValueError(f"{name} must be a whole number, got {raw!r}")
+    return int(raw)
