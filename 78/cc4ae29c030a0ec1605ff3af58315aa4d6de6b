@@ -1,0 +1,27 @@
+README.md
+  s_d5aea67bbb8509::t_3cfa627e48dbc6 97
+  s_d5aea67bbb8509::t_046eee847f1e43 56,98,120-137
+LICENSE
+  s_d5aea67bbb8509::t_046eee847f1e43 1-21
+.env.example
+  s_d5aea67bbb8509::t_3cfa627e48dbc6 16,39-42
+  s_d5aea67bbb8509::t_046eee847f1e43 43-45
+  s_d5aea67bbb8509::t_31d05ac1e9df21 48
+  s_d5aea67bbb8509::t_da146f4d4cc407 46-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "78cc4ae29c030a0ec1605ff3af58315aa4d6de6b",
+  "prompts": {},
+  "sessions": {
+    "s_d5aea67bbb8509": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ffa7bb2f-c01d-4bfa-8578-96ba8f3787a7",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
