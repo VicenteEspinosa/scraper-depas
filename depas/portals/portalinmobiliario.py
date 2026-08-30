@@ -12,6 +12,9 @@ from depas.models import Listing, Query
 
 NAME = "portalinmobiliario"
 BASE = "https://www.portalinmobiliario.com"
+# Portal Inmobiliario is MercadoLibre's property vertical: same item ids, same
+# page markup, so a mercadolibre.cl link parses with exactly these selectors.
+LISTING_HOSTS = ("portalinmobiliario.com", "mercadolibre.cl")
 REGION = "metropolitana"
 PAGE_SIZE = 48
 OPERATION_PATH = {"rent": "arriendo", "sale": "venta"}
@@ -62,7 +65,7 @@ def _parse_card(card: Node, commune: Commune | None) -> Listing | None:
     price = _parse_price(card)
     if anchor is None or price is None:
         return None
-    url = anchor.attributes["href"].split("#")[0]
+    url = clean_url(anchor.attributes["href"])
     listing_id = LISTING_ID.search(url)
     if listing_id is None:
         return None
@@ -86,6 +89,11 @@ def _parse_card(card: Node, commune: Commune | None) -> Listing | None:
         address=location.text(strip=True) if location else None,
         image_url=_picture_url(picture),
     )
+
+
+def clean_url(url: str) -> str:
+    """Drop share/tracking parameters so one listing has one canonical URL."""
+    return url.split("#")[0].split("?")[0]
 
 
 def _picture_url(picture: Node | None) -> str | None:
@@ -249,7 +257,7 @@ def fetch_standalone(fetcher: Fetcher, url: str) -> Listing | None:
     return Listing(
         portal=NAME,
         external_id=listing_id.group(1),
-        url=url.split("#")[0],
+        url=clean_url(url),
         title=title.text(strip=True),
         price=amount,
         currency="UF" if symbol.text(strip=True) == "UF" else "CLP",
