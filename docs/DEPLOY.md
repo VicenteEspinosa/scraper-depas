@@ -39,7 +39,24 @@ Repository **secrets**:
 
 Repository **variables**: `TZ`, `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME`,
 `DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MAX_PRICE`, `DEPAS_ALERT_MIN_BEDROOMS`,
-`DEPAS_ALERT_MIN_GRADE`.
+`DEPAS_ALERT_MIN_GRADE`, `DEPAS_ALERT_MAX_COST`, `DEPAS_ALERT_MAX_WALK`,
+`DEPAS_ALERT_MIN_FLOOR`, `DEPAS_ALERT_MIN_AREA`, `DEPAS_ALERT_SECURITY`.
+
+Requirements apply at two different points. `MAX_PRICE` and `MIN_BEDROOMS` are
+scrape-time filters, so listings that miss them never enter the database at all.
+`MAX_COST`, `MAX_WALK`, `MIN_FLOOR`, `MIN_AREA` and `SECURITY` depend on the
+detail page, so they gate *alerts* instead — the listings are still stored and
+queryable. Note `MAX_PRICE` is the asking rent and `MAX_COST` is what you
+actually pay (rent + gastos comunes − sublet income); a listing can clear the
+first and fail the second.
+
+A listing that misses a requirement is left unstamped rather than marked
+notified, so a later price drop can still bring it into range. A listing that
+clears the requirements but misses `MIN_GRADE` *is* stamped, because the grade
+is a percentile and would otherwise resurface as the pool shifts.
+
+**Changing a variable needs a deploy** — `.env` is only re-rendered by
+`scripts/deploy-remote.sh`, so re-run the workflow after editing one.
 
 **This repository is public, so its Actions logs are public too.** Actions masks
 secrets but not variables, so anything that would identify the host — hostname,
