@@ -13,7 +13,7 @@ from depas.portals import PORTALS
 from depas.metro import nearest_station
 from depas.store import connect, mark_notified, save, save_detail
 from depas.telegram import chats, format_listing, send_listing
-from depas.uf import to_clp, uf_in_clp
+from depas.uf import normalize
 
 TOP_QUERY = """
 SELECT * FROM listings_ranked
@@ -47,9 +47,8 @@ def _matching(
     listings: Iterator[Listing], fetcher: Fetcher, query: Query
 ) -> Iterator[Listing]:
     """Normalize UF prices to CLP; portal-side filters are unreliable, so re-check them here."""
-    uf_value = uf_in_clp(fetcher)
     for listing in listings:
-        listing.price_clp = to_clp(listing.price, listing.currency, uf_value)
+        normalize(listing, fetcher)
         if query.min_price is not None and listing.price_clp < query.min_price:
             continue
         if query.max_price is not None and listing.price_clp > query.max_price:
