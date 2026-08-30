@@ -55,6 +55,11 @@ def _cons(row: dict[str, Any]) -> list[str]:
         cons.append(f"piso {floor}, bajo el {target}º")
     if floor is not None and floor == top:
         cons.append(f"último piso ({floor} de {top})")
+    area, target_area = row.get("area"), optional_int("DEPAS_TARGET_AREA")
+    if area is None:
+        cons.append("metraje no publicado")
+    elif target_area is not None and area < target_area:
+        cons.append(f"{area:.0f} m², bajo los {target_area}")
     wanted = optional_text("DEPAS_ALERT_SECURITY")
     if wanted and row.get("security_type") != wanted:
         cons.append(f"sin seguridad {wanted}")

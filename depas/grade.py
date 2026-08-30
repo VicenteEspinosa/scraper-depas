@@ -59,7 +59,20 @@ def _location(row: dict) -> float | None:
 
 
 def _size(row: dict) -> float | None:
-    return row.get("area") or None
+    """Bigger is better up to DEPAS_TARGET_AREA, where listings tie at the top.
+
+    An undeclared area scores as badly as the smallest allowed size rather than skipping
+    the component: a listing that omits its size must not outrank one that states it.
+    """
+    target = optional_int("DEPAS_TARGET_AREA")
+    area = row.get("area")
+    if target is None:
+        return area or None
+    if area is None:
+        return -1.0
+    minimum = optional_int("DEPAS_ALERT_MIN_AREA")
+    span = target - minimum if minimum and minimum < target else target
+    return -min(max(target - area, 0.0) / span, 1.0)
 
 
 def _amenities(row: dict) -> float | None:

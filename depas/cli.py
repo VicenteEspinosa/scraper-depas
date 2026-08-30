@@ -127,7 +127,7 @@ ALERT_REQUIREMENTS = (
     ("DEPAS_ALERT_MAX_COST", "net_monthly_clp <= ?", optional_int),
     ("DEPAS_ALERT_MIN_BEDROOMS", "bedrooms >= ?", optional_int),
     ("DEPAS_ALERT_MAX_WALK", "walk_minutes <= ?", optional_int),
-    ("DEPAS_ALERT_MIN_AREA", "area >= ?", optional_int),
+    ("DEPAS_ALERT_MIN_AREA", "(area IS NULL OR area >= ?)", optional_int),
 )
 
 

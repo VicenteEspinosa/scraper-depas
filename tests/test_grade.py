@@ -127,3 +127,29 @@ def test_an_unknown_floor_is_missing_not_penalised(monkeypatch):
 
     assert "floor" in scale.grade(pool[1]).missing
     assert scale.grade(pool[1]).letter != "?"
+
+
+def test_area_at_the_target_ties_at_the_top(monkeypatch):
+    """Past the ideal size, extra square metres stop earning score."""
+    monkeypatch.setenv("DEPAS_TARGET_AREA", "50")
+    monkeypatch.setenv("DEPAS_ALERT_MIN_AREA", "42")
+    pool = [_listing(area=a) for a in (80.0, 50.0, 46.0, 42.0)]
+    scale = Scale(pool)
+
+    huge, target, middling, smallest = (scale.grade(row).score for row in pool)
+
+    assert huge == target > middling > smallest
+
+
+def test_an_unknown_area_scores_bottom_but_still_grades(monkeypatch):
+    """A listing that hides its size must not outrank one that states it, nor be dropped."""
+    monkeypatch.setenv("DEPAS_TARGET_AREA", "50")
+    monkeypatch.setenv("DEPAS_ALERT_MIN_AREA", "42")
+    pool = [_listing(area=50.0), _listing(area=42.0), _listing(area=None)]
+    scale = Scale(pool)
+
+    stated, smallest, unknown = (scale.grade(row) for row in pool)
+
+    assert stated.score > unknown.score
+    assert unknown.score == smallest.score
+    assert "size" not in unknown.missing
