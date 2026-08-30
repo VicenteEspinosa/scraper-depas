@@ -130,10 +130,10 @@ STATIONS: tuple[tuple[str, float, float], ...] = (
     ("Ñuñoa", -33.45419, -70.60497),
 )
 
-# Streets are not straight lines and city walking is slower than open-road walking;
-# both are tunable if the estimates drift against real routes.
-DETOUR_FACTOR = 1.3
-WALK_SPEED_M_PER_MIN = 75.0
+# Medians measured against 24 listings where the portal published its own routed walk,
+# so this fallback lands close to the real figure when the portal publishes nothing.
+DETOUR_FACTOR = 1.37
+WALK_SPEED_M_PER_MIN = 77.0
 
 EARTH_RADIUS_M = 6_371_000
 
