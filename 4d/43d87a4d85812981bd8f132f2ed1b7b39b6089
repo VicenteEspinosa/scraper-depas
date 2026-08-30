@@ -1,0 +1,29 @@
+depas/telegram.py
+  s_79ce7d51f427bf::t_83b1d6690219bf 26-29
+tests/test_alerts.py
+  s_79ce7d51f427bf::t_83b1d6690219bf 254-267
+tests/test_store.py
+  s_79ce7d51f427bf::t_786b228e59d218 134-135,137,140-148
+  s_79ce7d51f427bf::t_6a341d810baa84 136,138-139
+depas/cli.py
+  s_79ce7d51f427bf::t_417da639aafe21 35
+  s_79ce7d51f427bf::t_cfe6074262e599 17,104,219-221
+depas/bot.py
+  s_79ce7d51f427bf::t_786b228e59d218 10,92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "4d43d87a4d85812981bd8f132f2ed1b7b39b6089",
+  "prompts": {},
+  "sessions": {
+    "s_79ce7d51f427bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b5c2c0fe-8751-4188-8fb6-338419856ade",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
