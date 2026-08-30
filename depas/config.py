@@ -48,6 +48,13 @@ def optional_int(name: str) -> int | None:
     return int(raw)
 
 
+def line_preference() -> list[str]:
+    """Metro lines best first, so a station is scored by the best line calling at it."""
+    _load_env_file()
+    raw = os.environ.get("DEPAS_LINE_PREFERENCE", "")
+    return [line.strip().upper() for line in raw.split(",") if line.strip()]
+
+
 def chat_id() -> str:
     """The Telegram chat alerts are posted to."""
     _load_env_file()

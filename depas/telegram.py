@@ -4,6 +4,7 @@ from typing import Any
 from curl_cffi import requests
 
 from depas.config import _load_env_file, current_cost, optional_int, optional_text
+from depas.metro import STATION_LINES
 
 API = "https://api.telegram.org"
 TIMEOUT = 40
@@ -121,8 +122,11 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
             mark, word = ("🔺", "más caro") if difference > 0 else ("🔻", "más barato")
             lines.append(f"⚖️ {mark} {_clp(abs(difference))} {word} que hoy")
 
-    if row.get("nearest_station"):
-        lines.append(f"🚇 {_escape(row['nearest_station'])} · {row.get('walk_minutes')} min caminando")
+    station = row.get("nearest_station")
+    if station:
+        calling = STATION_LINES.get(station, ())
+        label = f" (L{'/L'.join(calling)})" if calling else ""
+        lines.append(f"🚇 {_escape(station)}{label} · {row.get('walk_minutes')} min caminando")
 
     asking = row.get("price_per_m2_uf_effective")
     zone = row.get("zone_price_per_m2_uf_effective")

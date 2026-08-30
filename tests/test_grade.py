@@ -183,3 +183,44 @@ def test_coverage_only_pulls_toward_the_middle(monkeypatch):
     scale = Scale([good_thin, bad_complete])
 
     assert scale.grade(good_thin).score > scale.grade(bad_complete).score
+
+
+def test_a_preferred_line_scores_above_a_less_preferred_one(monkeypatch):
+    """Ranking line 1 first must lift its stations above stations on lines ranked later."""
+    monkeypatch.setenv("DEPAS_LINE_PREFERENCE", "1,6,2")
+    pool = [_listing(nearest_station=station)
+            for station in ("Manuel Montt", "Ñuñoa", "Cementerios")]
+    scale = Scale(pool)
+
+    line_one, line_six, line_two = (scale.grade(row).score for row in pool)
+
+    assert line_one > line_six > line_two
+
+
+def test_an_interchange_is_judged_on_its_better_line(monkeypatch):
+    """Baquedano is on 1 and 5; ranking 1 first must score it as a line 1 station."""
+    monkeypatch.setenv("DEPAS_LINE_PREFERENCE", "1,5")
+    pool = [_listing(nearest_station="Baquedano"), _listing(nearest_station="Manuel Montt"),
+            _listing(nearest_station="Bellavista de La Florida")]
+    scale = Scale(pool)
+
+    interchange, only_one, only_five = (scale.grade(row).score for row in pool)
+
+    assert interchange == only_one > only_five
+
+
+def test_an_unranked_line_falls_below_every_ranked_one(monkeypatch):
+    """Naming only line 1 must not make every other line tie with it."""
+    monkeypatch.setenv("DEPAS_LINE_PREFERENCE", "1")
+    pool = [_listing(nearest_station="Manuel Montt"), _listing(nearest_station="Ñuñoa")]
+    scale = Scale(pool)
+
+    assert scale.grade(pool[0]).score > scale.grade(pool[1]).score
+
+
+def test_no_preference_leaves_the_line_unscored(monkeypatch):
+    """Without the setting, the metro line must not become a missing component."""
+    monkeypatch.delenv("DEPAS_LINE_PREFERENCE", raising=False)
+    pool = [_listing(nearest_station="Manuel Montt")]
+
+    assert "metro" not in Scale(pool).grade(pool[0]).missing
