@@ -3,6 +3,7 @@ import sqlite3
 import time
 from collections.abc import Iterator
 
+from depas.bot import run as run_bot
 from depas.communes import SANTIAGO_PROVINCE, Commune
 from depas.config import alert_communes, chat_id, optional_int, optional_text
 from depas.fetch import Fetcher
@@ -289,6 +290,9 @@ def main() -> None:
     watcher.add_argument("--enrich-limit", type=int, default=60)
     watcher.add_argument("--max-alerts", type=int, default=10)
     watcher.set_defaults(func=watch)
+
+    bot = subparsers.add_parser("bot", help="reply to portal links posted in the group")
+    bot.set_defaults(func=lambda _: run_bot())
 
     chatter = subparsers.add_parser("chats", help="list Telegram chats the bot can see")
     chatter.set_defaults(func=telegram_chats)
