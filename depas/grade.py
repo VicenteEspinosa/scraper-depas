@@ -2,7 +2,7 @@ import os
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 
-from depas.config import _load_env_file
+from depas.config import _load_env_file, optional_int, target_cost
 
 # Amenities a listing is credited for having; the raw score is the fraction present.
 AMENITIES = (
@@ -30,8 +30,23 @@ def _value(row: dict) -> float | None:
 
 
 def _cost(row: dict) -> float | None:
+    """Cheaper ranks better; with a target set, anything within budget ties at the top.
+
+    Being under budget is not a competition — once a listing is affordable the other
+    components should decide it. Without a target this falls back to plain percentile.
+    """
     net = row.get("net_monthly_clp")
-    return None if not net else -net
+    if not net:
+        return None
+    target = target_cost()
+    if target is None:
+        return -net
+    if net <= target:
+        return 0.0
+    ceiling = optional_int("DEPAS_ALERT_MAX_COST")
+    overspend = net - target
+    span = (ceiling - target) if ceiling and ceiling > target else target
+    return -min(overspend / span, 1.0)
 
 
 def _location(row: dict) -> float | None:
