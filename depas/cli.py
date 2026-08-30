@@ -128,7 +128,7 @@ def _announce(connection: sqlite3.Connection, limit: int) -> int:
         return 0
 
     pool = connection.execute(
-        "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL"
+        "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL AND is_project = 0"
     ).fetchall()
     scale = Scale([dict(row) for row in pool])
     minimum = optional_int("DEPAS_ALERT_MIN_GRADE") or 0
@@ -141,7 +141,7 @@ def _announce(connection: sqlite3.Connection, limit: int) -> int:
             break
         # Below the bar still gets stamped, so it is never reconsidered later.
         if grade.score >= minimum:
-            send_listing(chat_id(), format_listing(dict(row), grade))
+            send_listing(chat_id(), format_listing(dict(row), grade), row["image_url"])
             posted += 1
             time.sleep(ALERT_DELAY_SECONDS)  # group sends are rate-limited by Telegram
         mark_notified(connection, row["portal"], row["external_id"])
@@ -199,7 +199,7 @@ def show(args: argparse.Namespace) -> None:
         _print_table(rows)
         return
     pool = connection.execute(
-        "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL"
+        "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL AND is_project = 0"
     ).fetchall()
     scale = Scale([dict(row) for row in pool])
     # grading ranks against the whole pool, so the limit can only be applied afterwards
