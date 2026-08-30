@@ -1,0 +1,25 @@
+depas/models.py
+  s_ac9b713021ac74::t_aec69403542a2d 27
+depas/portals/portalinmobiliario.py
+  s_ac9b713021ac74::t_aec69403542a2d 73,87,91-99
+migrations/003_image.sql
+  s_ac9b713021ac74::t_aec69403542a2d 1-2
+depas/store.py
+  s_ac9b713021ac74::t_aec69403542a2d 20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "130cba4fbfa99b90eaaa089b2bef9256bfb3733e",
+  "prompts": {},
+  "sessions": {
+    "s_ac9b713021ac74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7cb6a0ba-5179-4899-b03d-3090bfaa406f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
