@@ -38,6 +38,10 @@ def chats() -> list[dict[str, Any]]:
 
 
 GRADE_EMOJI = {"A": "🟢", "B": "🟢", "C": "🟡", "D": "🟠", "E": "🔴", "?": "⚪"}
+# How much of the grade is real: every component scored, or some of them absent.
+COMPLETE_MARK = "✔️"
+PARTIAL_MARK = "❓"
+TEST_MARK = "🧪"
 AMENITY_LABELS = (
     ("has_elevator", "ascensor"), ("has_concierge", "conserjería"),
     ("has_pool", "piscina"), ("has_gym", "gimnasio"), ("has_heating", "calefacción"),
@@ -74,12 +78,14 @@ def _escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def format_listing(row: dict[str, Any], grade: Any) -> str:
+def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> str:
     """Render one listing as the Telegram HTML card posted to the group."""
     emoji = GRADE_EMOJI.get(grade.letter, "⚪")
-    partial = " ⚠️" if grade.missing else ""
+    data_mark = PARTIAL_MARK if grade.missing else COMPLETE_MARK
+    prefix = f"{TEST_MARK} " if is_test else ""
     commune = (row.get("commune") or "").replace("-", " ").title()
-    lines = [f"{emoji} <b>{grade.letter} {grade.score}</b>{partial} · <b>{_escape(commune)}</b>"]
+    lines = [f"{prefix}{emoji} <b>{grade.letter} {grade.score}</b> {data_mark} "
+             f"· <b>{_escape(commune)}</b>"]
     if row.get("title"):
         lines.append(f"<i>{_escape(row['title'])}</i>")
 
