@@ -1,0 +1,22 @@
+depas/grade.py
+  s_79ce7d51f427bf::t_48d8412fd190b5 14-15,162,165-168
+  s_79ce7d51f427bf::t_f87b632c8b03e0 157-159
+tests/test_grade.py
+  s_79ce7d51f427bf::t_89ad01d2fb949c 156-184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "67f15c53d7ff1cdbd804220790cdb13fadb414c3",
+  "prompts": {},
+  "sessions": {
+    "s_79ce7d51f427bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b5c2c0fe-8751-4188-8fb6-338419856ade",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
