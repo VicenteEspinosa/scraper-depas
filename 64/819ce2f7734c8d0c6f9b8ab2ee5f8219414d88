@@ -1,0 +1,11 @@
+depas/detail.py
+  ai_agent 1-96
+depas/store.py
+  ai_agent 1-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "64819ce2f7734c8d0c6f9b8ab2ee5f8219414d88",
+  "prompts": {}
+}
