@@ -1,0 +1,20 @@
+tests/test_toctoc.py
+  s_fd317928344dba::t_49b4da316b52cd 1-42,45,47-70
+  s_fd317928344dba::t_0869be9a9298b0 43-44,46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "a3abd5f55f94c3ac81fa6f70abd229485acda04c",
+  "prompts": {},
+  "sessions": {
+    "s_fd317928344dba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c98daac-dab4-4e97-bdbc-9c6eba2032ae",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
