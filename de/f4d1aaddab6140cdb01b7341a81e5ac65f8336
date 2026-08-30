@@ -1,0 +1,20 @@
+depas/portals/houm.py
+  s_ac9b713021ac74::t_83efa108b047c1 3,115-147,181-184
+  s_ac9b713021ac74::t_77f1aca8d6486b 19-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "def4d1aaddab6140cdb01b7341a81e5ac65f8336",
+  "prompts": {},
+  "sessions": {
+    "s_ac9b713021ac74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7cb6a0ba-5179-4899-b03d-3090bfaa406f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
