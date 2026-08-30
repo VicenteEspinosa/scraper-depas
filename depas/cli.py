@@ -3,7 +3,9 @@ import sqlite3
 from collections.abc import Iterator
 
 from depas.communes import SANTIAGO_PROVINCE, Commune
+from depas.config import alert_communes, optional_int
 from depas.fetch import Fetcher
+from depas.grade import Scale
 from depas.models import Listing, Query
 from depas.portals import PORTALS, portalinmobiliario
 from depas.metro import nearest_station
@@ -11,10 +13,7 @@ from depas.store import connect, save, save_detail
 from depas.uf import to_clp, uf_in_clp
 
 TOP_QUERY = """
-SELECT commune, bedrooms, area, floor, ROUND(price_clp) AS rent, common_expenses AS gastos,
-       parking_spaces AS est, storage_units AS bod, ROUND(net_monthly_clp) AS net,
-       nearest_station, walk_minutes AS walk, security_type, url
-FROM listings_ranked
+SELECT * FROM listings_ranked
 """
 
 
@@ -59,6 +58,16 @@ def _matching(
         yield listing
 
 
+def _enrich_one(connection: sqlite3.Connection, fetcher: Fetcher, row: sqlite3.Row) -> None:
+    """Fetch one detail page, falling back to a computed walk when the portal omits one."""
+    detail = portalinmobiliario.fetch_detail(fetcher, row["url"])
+    if "nearest_station" not in detail and detail.get("lat") is not None:
+        station, metres, minutes = nearest_station(detail["lat"], detail["lon"])
+        detail |= {"nearest_station": station, "station_distance_m": metres,
+                   "walk_minutes": minutes, "walk_source": "computed"}
+    save_detail(connection, row["portal"], row["external_id"], detail)
+
+
 def enrich(args: argparse.Namespace) -> None:
     connection = connect()
     pending = connection.execute(
@@ -70,12 +79,7 @@ def enrich(args: argparse.Namespace) -> None:
     fetcher = Fetcher()
     try:
         for index, row in enumerate(pending, start=1):
-            detail = portalinmobiliario.fetch_detail(fetcher, row["url"])
-            if "nearest_station" not in detail and detail.get("lat") is not None:
-                station, metres, minutes = nearest_station(detail["lat"], detail["lon"])
-                detail |= {"nearest_station": station, "station_distance_m": metres,
-                           "walk_minutes": minutes, "walk_source": "computed"}
-            save_detail(connection, row["portal"], row["external_id"], detail)
+            _enrich_one(connection, fetcher, row)
             print(f"\r{index}/{len(pending)} enriched", end="", flush=True)
     finally:
         fetcher.close()
@@ -106,19 +110,79 @@ def _build_query(args: argparse.Namespace) -> tuple[str, tuple[object, ...]]:
         conditions.append(f"commune IN ({', '.join('?' * len(args.commune))})")
         parameters.extend(commune.value for commune in args.commune)
 
-    query = f"{TOP_QUERY}\nWHERE {' AND '.join(conditions)}\nORDER BY net_monthly_clp\nLIMIT ?"
-    return query, (*parameters, args.limit)
+    return f"{TOP_QUERY}\nWHERE {' AND '.join(conditions)}", tuple(parameters)
+
+
+def watch(args: argparse.Namespace) -> None:
+    """One scheduled pass: scrape the configured communes, then enrich what is new."""
+    communes = [Commune(slug) for slug in alert_communes()]
+    if not communes:
+        raise ValueError("set DEPAS_ALERT_COMMUNES to the commune slugs you want watched")
+
+    query = Query(
+        operation="rent",
+        communes=communes,
+        max_price=optional_int("DEPAS_ALERT_MAX_PRICE"),
+        min_bedrooms=optional_int("DEPAS_ALERT_MIN_BEDROOMS"),
+    )
+    fetcher = Fetcher()
+    connection = connect()
+    try:
+        counts = save(connection, _matching(portalinmobiliario.search(fetcher, query), fetcher, query))
+        print(f"scrape: {counts['new']} new, {counts['price_changed']} price changed")
+
+        pending = connection.execute(
+            "SELECT portal, external_id, url FROM listings WHERE detail_fetched_at IS NULL LIMIT ?",
+            (args.enrich_limit,),
+        ).fetchall()
+        for row in pending:
+            _enrich_one(connection, fetcher, row)
+        print(f"enrich: {len(pending)} listings")
+    finally:
+        fetcher.close()
+        connection.close()
 
 
 def show(args: argparse.Namespace) -> None:
     connection = connect()
     query, parameters = (args.sql, ()) if args.sql else _build_query(args)
     rows = connection.execute(query, parameters).fetchall()
-    _print_table(rows)
+    if args.sql:
+        _print_table(rows)
+        return
+    pool = connection.execute(
+        "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL"
+    ).fetchall()
+    scale = Scale([dict(row) for row in pool])
+    # grading ranks against the whole pool, so the limit can only be applied afterwards
+    graded = sorted((_summarise(row, scale) for row in rows),
+                    key=lambda row: row["score"], reverse=True)
+    _print_table([{k: v for k, v in row.items() if k != "score"} for row in graded[:args.limit]])
+    if any(row["grade"].endswith("*") for row in graded[:args.limit]):
+        print("\n* graded on partial data — see the 'on' column for how many of 5 components")
     connection.close()
 
 
-def _print_table(rows: list[sqlite3.Row]) -> None:
+SUMMARY_COLUMNS = ("commune", "bedrooms", "area", "floor", "gastos", "est", "bod",
+                   "net", "nearest_station", "walk", "url")
+
+
+def _summarise(row: sqlite3.Row, scale: Scale) -> dict[str, object]:
+    """One display row: the fields worth scanning, led by the grade."""
+    scored = scale.grade(dict(row))
+    return {
+        "grade": f"{scored.letter} {scored.score}" + ("*" if scored.missing else ""),
+        "score": scored.score,
+        "on": f"{len(scored.parts)}/5",
+        "commune": row["commune"], "bedrooms": row["bedrooms"], "area": row["area"],
+        "floor": row["floor"], "rent": round(row["price_clp"]),
+        "gastos": row["common_expenses"], "est": row["parking_spaces"],
+        "bod": row["storage_units"], "net": round(row["net_monthly_clp"]),
+        "metro": row["nearest_station"], "walk": row["walk_minutes"], "url": row["url"],
+    }
+
+
+def _print_table(rows: list[sqlite3.Row] | list[dict[str, object]]) -> None:
     if not rows:
         print("no rows")
         return
@@ -148,6 +212,10 @@ def main() -> None:
     enricher = subparsers.add_parser("enrich", help="fetch detail pages for listings missing them")
     enricher.add_argument("--limit", type=int, default=50)
     enricher.set_defaults(func=enrich)
+
+    watcher = subparsers.add_parser("watch", help="scheduled pass: scrape then enrich new listings")
+    watcher.add_argument("--enrich-limit", type=int, default=60)
+    watcher.set_defaults(func=watch)
 
     viewer = subparsers.add_parser("show", help="best price per m2, or your own SQL")
     viewer.add_argument("sql", nargs="?")

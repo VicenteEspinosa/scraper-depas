@@ -1,0 +1,73 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'tests/**'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-depas
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # SSH_HOST / SSH_USER / DEPLOY_PATH are secrets, not vars: this repo is public,
+      # so its Actions logs are public and only secrets get masked in them.
+      - name: Set up SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Apply and restart
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          TZ: ${{ vars.TZ }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DEPAS_PARKING_INCOME: ${{ vars.DEPAS_PARKING_INCOME }}
+          DEPAS_STORAGE_INCOME: ${{ vars.DEPAS_STORAGE_INCOME }}
+          DEPAS_ALERT_COMMUNES: ${{ vars.DEPAS_ALERT_COMMUNES }}
+          DEPAS_ALERT_MAX_PRICE: ${{ vars.DEPAS_ALERT_MAX_PRICE }}
+          DEPAS_ALERT_MIN_BEDROOMS: ${{ vars.DEPAS_ALERT_MIN_BEDROOMS }}
+          DEPAS_ALERT_MIN_GRADE: ${{ vars.DEPAS_ALERT_MIN_GRADE }}
+        run: |
+          # Values are expanded exactly once here, then base64'd, so a literal $
+          # inside a token survives the remote shell verbatim.
+          ENV_B64=$(printf '%s\n' \
+            "TZ=$TZ" \
+            "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN" \
+            "TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID" \
+            "DEPAS_PARKING_INCOME=$DEPAS_PARKING_INCOME" \
+            "DEPAS_STORAGE_INCOME=$DEPAS_STORAGE_INCOME" \
+            "DEPAS_ALERT_COMMUNES=$DEPAS_ALERT_COMMUNES" \
+            "DEPAS_ALERT_MAX_PRICE=$DEPAS_ALERT_MAX_PRICE" \
+            "DEPAS_ALERT_MIN_BEDROOMS=$DEPAS_ALERT_MIN_BEDROOMS" \
+            "DEPAS_ALERT_MIN_GRADE=$DEPAS_ALERT_MIN_GRADE" \
+            | base64 -w0)
+
+          # Actions masks a secret's literal value but not its base64 form, and this
+          # blob carries the bot token. Mask it so a failing step can never print it.
+          echo "::add-mask::$ENV_B64"
+
+          ssh -o BatchMode=yes "$SSH_USER@$SSH_HOST" \
+            "DEPLOY_PATH='$DEPLOY_PATH' GITHUB_SHA='$GITHUB_SHA' ENV_B64='$ENV_B64' bash -s" \
+            < scripts/deploy-remote.sh
