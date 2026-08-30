@@ -1,0 +1,20 @@
+README.md
+  s_fd317928344dba::t_c96a7165298ce9 82-83
+  s_fd317928344dba::t_05938a5a39846a 63-64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "5a3f6e8aaccbc661ed3707d30a02af9f9371eed1",
+  "prompts": {},
+  "sessions": {
+    "s_fd317928344dba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c98daac-dab4-4e97-bdbc-9c6eba2032ae",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
