@@ -1,0 +1,25 @@
+depas/portals/goplaceit.py
+  s_ac9b713021ac74::t_e1da672813e125 4-5,13-16
+depas/portals/toctoc.py
+  s_ac9b713021ac74::t_e1da672813e125 4-5,13-16
+depas/portals/houm.py
+  s_ac9b713021ac74::t_bef085e42136c9 1-2,4,6-8,13-17,19-26,30-92,95-132
+  s_ac9b713021ac74::t_77f1aca8d6486b 18
+  s_ac9b713021ac74::t_83efa108b047c1 93-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "390190d221d76dd0278b6af57bd7365419d2e75f",
+  "prompts": {},
+  "sessions": {
+    "s_ac9b713021ac74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7cb6a0ba-5179-4899-b03d-3090bfaa406f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
