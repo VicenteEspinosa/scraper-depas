@@ -4,7 +4,8 @@ from depas.grade import COMPONENTS, Scale
 
 
 def _listing(**overrides) -> dict:
-    base = {"price_per_m2_uf": 0.30, "zone_price_per_m2_uf": 0.37, "net_monthly_clp": 700_000,
+    base = {"price_per_m2_uf_effective": 0.30, "zone_price_per_m2_uf_effective": 0.37,
+            "net_monthly_clp": 700_000,
             "walk_minutes": 8, "area": 50.0, "has_elevator": 1}
     return base | overrides
 

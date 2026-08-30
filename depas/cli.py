@@ -5,13 +5,14 @@ from collections.abc import Iterator
 
 from depas.bot import run as run_bot
 from depas.communes import SANTIAGO_PROVINCE, Commune
+from depas.detail import infer_from_description
 from depas.config import alert_communes, chat_id, max_rent, optional_int, optional_text
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.models import Listing, Query
 from depas.portals import PORTALS
 from depas.metro import nearest_station
-from depas.store import connect, mark_notified, save, save_detail
+from depas.store import connect, mark_notified, refresh_zone_benchmarks, save, save_detail
 from depas.telegram import chats, format_listing, send_listing
 from depas.uf import normalize
 
@@ -60,9 +61,28 @@ def _matching(
         yield listing
 
 
+def _infer_stored_descriptions(connection: sqlite3.Connection) -> int:
+    """Fill columns a portal left empty from descriptions already in the database."""
+    filled = 0
+    for row in connection.execute(
+        "SELECT * FROM listings WHERE description IS NOT NULL AND description != ''"
+    ).fetchall():
+        gaps = {column: value
+                for column, value in infer_from_description(row["description"]).items()
+                if row[column] is None}
+        if gaps:
+            save_detail(connection, row["portal"], row["external_id"], gaps)
+            filled += 1
+    return filled
+
+
 def _enrich_one(connection: sqlite3.Connection, fetcher: Fetcher, row: sqlite3.Row) -> None:
     """Fetch one detail page, falling back to a computed walk when the portal omits one."""
     detail = PORTALS[row["portal"]].fetch_detail(fetcher, row["url"])
+    description = detail.get("description")
+    if description:
+        # The portal's own spec table always wins; prose only fills what it left empty.
+        detail = infer_from_description(str(description)) | detail
     if "nearest_station" not in detail and detail.get("lat") is not None:
         station, metres, minutes = nearest_station(detail["lat"], detail["lon"])
         detail |= {"nearest_station": station, "station_distance_m": metres,
@@ -208,6 +228,8 @@ def watch(args: argparse.Namespace) -> None:
         for row in pending:
             _enrich_one(connection, fetcher, row)
         print(f"enrich: {len(pending)} listings")
+        print(f"from descriptions: {_infer_stored_descriptions(connection)} listings filled")
+        print(f"zone benchmarks: {refresh_zone_benchmarks(connection)} communes")
         print(f"alerts: {_announce(connection, args.max_alerts)} posted")
     finally:
         fetcher.close()

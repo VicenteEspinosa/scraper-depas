@@ -58,6 +58,49 @@ DETAIL_COLUMNS: dict[str, str] = {
 }
 
 
+# TocToc and Chilepropiedades publish no spec table worth the name, but their prose
+# names the same features outright. Only ever used for fields the portal left empty.
+DESCRIPTION_HINTS = {
+    "has_elevator": re.compile(r"ascensor", re.I),
+    "has_concierge": re.compile(r"conserj\w*|porter[ií]a", re.I),
+    "has_pool": re.compile(r"piscina", re.I),
+    "has_gym": re.compile(r"gimnasio|\bgym\b", re.I),
+    "has_heating": re.compile(r"calefacci[óo]n", re.I),
+    "has_air_conditioning": re.compile(r"aire acondicionado", re.I),
+    "has_terrace": re.compile(r"terraza", re.I),
+}
+# "piso 8" is the unit's floor; "piso flotante" is the flooring, and never matches
+# because a digit is required.
+FLOOR_IN_TEXT = re.compile(r"\bpiso\s+(\d{1,2})\b", re.I)
+SECURITY_IN_TEXT = re.compile(r"24\s*(?:horas|hrs)", re.I)
+# A denial only counts when it is right up against the feature ("sin ascensor",
+# "no tiene ascensor") — in "sin piscina y gimnasio" the gym is not being denied.
+DENIAL = re.compile(r"\b(?:sin|no)\s+(?:\w+\s+)?$", re.I)
+
+
+def _claimed(text: str, pattern: re.Pattern[str]) -> bool | None:
+    """True when the prose claims the feature, False when it denies it, None when silent."""
+    match = pattern.search(text)
+    if match is None:
+        return None
+    return DENIAL.search(text[:match.start()]) is None
+
+
+def infer_from_description(text: str) -> dict[str, object]:
+    """Read off the fields a portal omitted from its spec table but stated in prose."""
+    inferred: dict[str, object] = {}
+    for column, pattern in DESCRIPTION_HINTS.items():
+        claimed = _claimed(text, pattern)
+        if claimed is not None:
+            inferred[column] = int(claimed)
+    floor = FLOOR_IN_TEXT.search(text)
+    if floor:
+        inferred["floor"] = int(floor.group(1))
+    if _claimed(text, SECURITY_IN_TEXT):
+        inferred["security_type"] = "24 horas"
+    return inferred
+
+
 def parse_specs(rows: list[tuple[str, str]]) -> dict[str, object]:
     """Split a detail page's spec rows into promoted columns plus a `features` JSON blob."""
     parsed: dict[str, object] = {}

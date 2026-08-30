@@ -25,7 +25,8 @@ class Grade:
 
 def _value(row: dict) -> float | None:
     """Cheaper than its zone scores better, so the ratio is negated."""
-    asking, zone = row.get("price_per_m2_uf"), row.get("zone_price_per_m2_uf")
+    asking = row.get("price_per_m2_uf_effective")
+    zone = row.get("zone_price_per_m2_uf_effective")
     return None if not asking or not zone else -(asking / zone)
 
 
