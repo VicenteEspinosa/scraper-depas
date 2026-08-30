@@ -8,12 +8,18 @@ def _load_env_file() -> None:
     """Read .env into the environment without overriding anything already exported."""
     if not ENV_FILE.exists():
         return
+    seen: set[str] = set()
     for line in ENV_FILE.read_text().splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         key, _, value = stripped.partition("=")
-        os.environ.setdefault(key.strip(), value.strip())
+        key = key.strip()
+        # A repeated key silently kept the first value, which hides a pasted-in update.
+        if key in seen:
+            raise ValueError(f"{ENV_FILE} defines {key} more than once; keep a single line")
+        seen.add(key)
+        os.environ.setdefault(key, value.strip())
 
 
 def lease_income(kind: str) -> int:
