@@ -23,7 +23,10 @@ def call(method: str, **params: Any) -> Any:
     response = requests.post(f"{API}/bot{bot_token()}/{method}", json=params, timeout=TIMEOUT)
     payload = response.json()
     if not payload.get("ok"):
-        raise RuntimeError(f"telegram {method} failed: {payload.get('description')}")
+        # Telegram puts the actionable part in `parameters` — a migrated chat's new id
+        # lands there, and dropping it turns a one-line fix into a debugging session.
+        detail = payload.get("parameters") or ""
+        raise RuntimeError(f"telegram {method} failed: {payload.get('description')} {detail}".strip())
     return payload["result"]
 
 
