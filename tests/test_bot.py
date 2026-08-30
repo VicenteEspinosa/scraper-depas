@@ -3,9 +3,9 @@ from types import SimpleNamespace
 import pytest
 from curl_cffi.requests.exceptions import RequestException
 
-from depas.bot import _handle, _offset, _remember_offset, find_links, run
+from depas.bot import NO_CARD, _handle, _offset, _remember_offset, find_links, run
 from depas.models import Listing
-from depas.store import connect, save, save_detail
+from depas.store import POOL_QUERY, connect, remember_card, save, save_detail
 
 
 @pytest.fixture
@@ -22,9 +22,26 @@ def connection(tmp_path, monkeypatch):
 @pytest.fixture
 def sent(monkeypatch):
     posted = []
-    monkeypatch.setattr("depas.bot.send_listing",
-                        lambda chat, text, image=None, thread=None: posted.append((chat, text, thread)))
+
+    def send(chat, text, image=None, thread=None):
+        posted.append((chat, text, thread))
+        # Telegram's own record of the message, which is what the bot stores.
+        return {"chat": {"id": int(chat)}, "message_id": 500 + len(posted)}
+
+    monkeypatch.setattr("depas.bot.send_listing", send)
     return posted
+
+
+@pytest.fixture
+def answers(monkeypatch):
+    """Every plain reply the bot posts, and every card it redraws."""
+    said, edited = [], []
+    monkeypatch.setattr("depas.bot.reply",
+                        lambda chat, text, thread=None, reply_to=None: said.append(text))
+    monkeypatch.setattr("depas.bot.edit_listing",
+                        lambda chat, message, text, is_photo=False:
+                        edited.append((chat, message, text)))
+    return SimpleNamespace(said=said, edited=edited)
 
 
 @pytest.mark.parametrize(
@@ -168,6 +185,122 @@ def test_a_houm_page_that_is_not_a_listing_is_ignored():
     """Marketing pages on a supported host must not be mistaken for listings."""
     assert find_links("https://houm.com/cl/propietario/arriendo") == []
 
+
+
+CHANNEL, CARD, GROUP, THREAD = -1001, 77, -1002, 88
+
+
+@pytest.fixture
+def announced(connection):
+    """A card posted to the channel and copied by Telegram into its discussion group."""
+    remember_card(connection, CHANNEL, CARD, "portalinmobiliario", "MLC-1")
+    _handle(connection, None, {
+        "chat": {"id": GROUP}, "message_id": THREAD, "is_automatic_forward": True,
+        "forward_origin": {"type": "channel", "chat": {"id": CHANNEL}, "message_id": CARD},
+        "text": "🟢 B 80 ✔️",
+    })
+    return connection
+
+
+def _comment(text, **extra):
+    """A comment left in the card's thread, as Telegram delivers it."""
+    return {"chat": {"id": GROUP}, "message_id": 900, "message_thread_id": THREAD,
+            "from": {"username": "vicente"}, "text": text, **extra}
+
+
+def _verdict(connection):
+    return connection.execute(
+        "SELECT interest, rated_by FROM listings WHERE external_id = 'MLC-1'").fetchone()
+
+
+def test_a_like_in_the_thread_marks_that_apartment(announced, answers):
+    """The thread a comment sits in is what says which listing the command is about."""
+    _handle(announced, None, _comment("/like"))
+
+    assert tuple(_verdict(announced)) == (1, "vicente")
+    assert answers.said == ["⭐ anotado como interesante"]
+
+
+def test_a_dislike_takes_the_listing_out_of_the_pool(announced, answers):
+    """Turning a listing down has to stop it being announced and stop it skewing the ranking."""
+    _handle(announced, None, _comment("/dislike"))
+
+    assert _verdict(announced)["interest"] == -1
+    assert announced.execute(POOL_QUERY).fetchall() == []
+
+
+def test_the_card_itself_is_redrawn_with_the_verdict(announced, answers):
+    """The mark belongs on the card, so the channel is scannable without opening threads."""
+    _handle(announced, None, _comment("/like"))
+
+    chat, message, text = answers.edited[0]
+    assert (chat, message) == (str(CHANNEL), CARD)
+    assert text.startswith("⭐ ")
+
+
+def test_the_command_is_recognised_when_addressed_to_the_bot(announced, answers):
+    """Telegram appends @thebot whenever more than one bot shares the chat."""
+    _handle(announced, None, _comment("/dislike@depas_bot"))
+
+    assert _verdict(announced)["interest"] == -1
+
+
+def test_a_command_with_no_card_behind_it_says_so(connection, answers):
+    """A command shouted into the group rates nothing rather than rating the wrong thing."""
+    _handle(connection, None, {"chat": {"id": GROUP}, "message_id": 900, "text": "/like"})
+
+    assert _verdict(connection)["interest"] is None
+    assert answers.said == [NO_CARD]
+
+
+def test_a_reply_to_a_card_the_bot_posted_is_enough(connection, sent, answers):
+    """In a plain group there are no threads: the card is whatever the command answers."""
+    _handle(connection, None, {"chat": {"id": GROUP}, "message_id": 1,
+                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"})
+
+    _handle(connection, None, {"chat": {"id": GROUP}, "message_id": 900, "text": "/like",
+                               "reply_to_message": {"message_id": 501}})
+
+    assert _verdict(connection)["interest"] == 1
+
+
+def test_an_older_card_is_traced_by_the_id_it_prints(connection, answers):
+    """Cards posted before the bot recorded them still carry [id] in their header."""
+    listing_id = connection.execute(
+        "SELECT id FROM listings_ranked WHERE external_id = 'MLC-1'").fetchone()["id"]
+
+    _handle(connection, None, {
+        "chat": {"id": GROUP}, "message_id": 900, "text": "/dislike",
+        "reply_to_message": {"message_id": 4, "text": f"🟢 B 80 ✔️ · Ñuñoa · [{listing_id}]"},
+    })
+
+    assert _verdict(connection)["interest"] == -1
+    # Nothing to edit: that card was posted before its ids were being kept.
+    assert answers.edited == []
+
+
+def test_the_channels_own_copy_is_never_answered(connection, sent):
+    """Telegram copies each card into the discussion group; replying would post it twice."""
+    _handle(connection, None, {
+        "chat": {"id": GROUP}, "message_id": THREAD, "is_automatic_forward": True,
+        "forward_origin": {"type": "channel", "chat": {"id": CHANNEL}, "message_id": CARD},
+        "text": "🟢 B 80 https://portalinmobiliario.com/MLC-1-x-_JM",
+    })
+
+    assert sent == []
+
+
+def test_a_card_too_old_to_edit_still_keeps_the_verdict(announced, answers, monkeypatch):
+    """Telegram refuses edits past 48 hours; the rating is the part that matters."""
+    def refuses(*args, **kwargs):
+        raise RuntimeError("telegram editMessageText failed: message can't be edited")
+
+    monkeypatch.setattr("depas.bot.edit_listing", refuses)
+
+    _handle(announced, None, _comment("/like"))
+
+    assert _verdict(announced)["interest"] == 1
+    assert answers.said == ["⭐ anotado como interesante"]
 
 
 class StopLoop(Exception):

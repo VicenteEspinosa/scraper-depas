@@ -5,7 +5,7 @@ import pytest
 
 from depas.cli import _announce
 from depas.models import Listing
-from depas.store import clear_notified, connect, save, save_detail
+from depas.store import DISLIKE, clear_notified, connect, save, save_detail, set_interest
 from depas.telegram import format_listing
 
 
@@ -25,8 +25,12 @@ def connection(tmp_path, monkeypatch):
 @pytest.fixture
 def sent(monkeypatch):
     posted = []
-    monkeypatch.setattr("depas.cli.send_listing",
-                        lambda chat, text, image=None, thread=None: posted.append((text, image)))
+
+    def send(chat, text, image=None, thread=None):
+        posted.append((text, image))
+        return {"chat": {"id": int(chat)}, "message_id": 500 + len(posted)}
+
+    monkeypatch.setattr("depas.cli.send_listing", send)
     monkeypatch.setattr("depas.cli.chat_type", lambda chat: "channel")
     monkeypatch.setattr("depas.cli.time.sleep", lambda _: None)  # no real rate-limit wait
     return posted
@@ -158,6 +162,27 @@ def test_unset_requirements_impose_no_filter(connection, sent):
     assert _announce(connection, limit=10) == 4
 
 
+def test_a_rejected_listing_is_never_announced(connection, sent):
+    """A /dislike in the chat is final: the card stays away, and `resend` cannot bring it back."""
+    set_interest(connection, "pi", "0", DISLIKE, "vicente")
+
+    assert _announce(connection, limit=10) == 3
+
+    clear_notified(connection, hours=6)  # what `depas resend` un-stamps
+    _announce(connection, limit=10)
+
+    assert [text for text, _ in sent if "https://x/0" in text] == []
+
+
+def test_announced_cards_are_recorded_so_a_command_can_find_them(connection, sent):
+    """Without the message ids, a /like commented under a card has nothing to match on."""
+    _announce(connection, limit=1)
+
+    card = connection.execute("SELECT * FROM card_messages").fetchone()
+    assert (card["chat_id"], card["message_id"]) == ("-100", 501)
+    assert card["portal"] == "pi"
+
+
 def test_enrichment_downgrading_bedrooms_blocks_the_alert(connection, sent, monkeypatch):
     """The card said 2D, the detail page says 1D — the alert must respect the corrected value."""
     monkeypatch.setenv("DEPAS_ALERT_MIN_BEDROOMS", "2")
@@ -168,7 +193,7 @@ def test_enrichment_downgrading_bedrooms_blocks_the_alert(connection, sent, monk
 
     _announce(connection, limit=10)
 
-    posted_urls = [text for text in sent if "drift" in text]
+    posted_urls = [text for text, _ in sent if "drift" in text]
     assert posted_urls == []
 
 
@@ -182,7 +207,7 @@ def test_alerts_are_confined_to_the_configured_communes(connection, sent, monkey
 
     _announce(connection, limit=10)
 
-    assert [text for text in sent if "far" in text] == []
+    assert [text for text, _ in sent if "far" in text] == []
 
 
 def test_the_card_marks_how_complete_the_grade_is(monkeypatch):

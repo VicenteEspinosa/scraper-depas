@@ -108,11 +108,17 @@ FROM listings;
 NOT_FURNISHED = ("COALESCE(furnished, 0) = 0"
                  " AND (title IS NULL OR lower(title) NOT LIKE '%amoblad%')")
 
+# A listing turned down with /dislike is out for good: never announced again, and
+# kept out of the pool the others are ranked against, so a flat nobody would take
+# stops moving the percentiles the rest are graded on.
+NOT_REJECTED = "COALESCE(interest, 0) >= 0"
+
 # Every listing worth ranking or alerting on: enriched, an actual unit rather than
-# a project, and not furnished. An unenriched listing would be graded on two
-# components and beat everything.
+# a project, not furnished and not rejected. An unenriched listing would be graded
+# on two components and beat everything.
 POOL_QUERY = ("SELECT * FROM listings_ranked "
-              f"WHERE detail_fetched_at IS NOT NULL AND is_project = 0 AND {NOT_FURNISHED}")
+              f"WHERE detail_fetched_at IS NOT NULL AND is_project = 0 "
+              f"AND {NOT_FURNISHED} AND {NOT_REJECTED}")
 
 
 def refresh_zone_benchmarks(connection: sqlite3.Connection) -> int:
@@ -226,6 +232,68 @@ def mark_notified(connection: sqlite3.Connection, portal: str, external_id: str)
         (datetime.now(UTC).isoformat(), portal, external_id),
     )
     connection.commit()
+
+
+# What the chat commands mean, as stored in `listings.interest`.
+LIKE, DISLIKE = 1, -1
+
+
+def set_interest(connection: sqlite3.Connection, portal: str, external_id: str,
+                 interest: int, rated_by: str | None = None) -> None:
+    """Record the verdict somebody gave a listing from the chat."""
+    connection.execute(
+        "UPDATE listings SET interest = ?, rated_at = ?, rated_by = ? "
+        "WHERE portal = ? AND external_id = ?",
+        (interest, datetime.now(UTC).isoformat(), rated_by, portal, external_id),
+    )
+    connection.commit()
+
+
+def remember_card(connection: sqlite3.Connection, chat_id: object, message_id: int,
+                  portal: str, external_id: str, is_photo: bool = False) -> None:
+    """Record a card we posted, so a command left under it can find its listing.
+
+    Ids come from Telegram's own record of the message rather than from whatever
+    TELEGRAM_CHAT_ID holds, which may be an @username the forwards never mention.
+    """
+    connection.execute(
+        "INSERT INTO card_messages "
+        "(chat_id, message_id, portal, external_id, is_photo, posted_at) "
+        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(chat_id, message_id) DO NOTHING",
+        (str(chat_id), message_id, portal, external_id, int(is_photo),
+         datetime.now(UTC).isoformat()),
+    )
+    connection.commit()
+
+
+def link_thread(connection: sqlite3.Connection, chat_id: object, message_id: int,
+                thread_chat_id: object, thread_id: int) -> bool:
+    """Pair a channel card with the discussion-group copy its comments hang off."""
+    updated = connection.execute(
+        "UPDATE card_messages SET thread_chat_id = ?, thread_id = ? "
+        "WHERE chat_id = ? AND message_id = ?",
+        (str(thread_chat_id), thread_id, str(chat_id), message_id),
+    ).rowcount
+    connection.commit()
+    return bool(updated)
+
+
+def card_for_thread(connection: sqlite3.Connection, chat_id: object,
+                    thread_id: int) -> sqlite3.Row | None:
+    """The card a Comments thread belongs to."""
+    return connection.execute(
+        "SELECT * FROM card_messages WHERE thread_chat_id = ? AND thread_id = ?",
+        (str(chat_id), thread_id),
+    ).fetchone()
+
+
+def card_for_message(connection: sqlite3.Connection, chat_id: object,
+                     message_id: int) -> sqlite3.Row | None:
+    """The card a message replies to, when we are the one who posted it."""
+    return connection.execute(
+        "SELECT * FROM card_messages WHERE chat_id = ? AND message_id = ?",
+        (str(chat_id), message_id),
+    ).fetchone()
 
 
 def clear_notified(connection: sqlite3.Connection, hours: int) -> int:

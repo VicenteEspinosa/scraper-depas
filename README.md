@@ -52,6 +52,39 @@ Scraping is two-stage, because detail pages are expensive:
 - **`show`** — filter and rank. Pass raw SQL instead for anything ad hoc.
 - **`resend`** — drop the notified stamp from recent alerts so the next `watch`
   posts them again, which is how listings announced to the wrong chat are moved.
+- **`bot`** — long-polls Telegram: grades any portal link pasted in the chat, and
+  takes the verdict commands below.
+
+### Judging a listing from the chat
+
+Comment on a card — in its Comments thread if alerts go to a channel, or as a
+reply to the card in a plain group:
+
+| Command | Effect |
+| --- | --- |
+| `/like` | Marks the listing interesting. The card gains a ⭐. |
+| `/dislike` | Marks it out. The card gains a 🚫 and the listing leaves the pool: never announced again, gone from `show`, and no longer moving the percentiles everything else is graded against. Not even `resend` brings it back. |
+
+No webhook and no open port: the commands ride the same `getUpdates` long poll the
+bot already runs. Which listing a command means comes from where it was left, so
+nothing has to be typed twice. Each card the bot posts is recorded in
+`card_messages`; when Telegram copies a channel post into the linked discussion
+group, that copy's id is the thread id every comment carries, which is how a
+comment is traced back to its apartment and the card itself edited in place. A
+card posted before any of this existed still works — the `[id]` printed in its
+header is read back instead, though there is then no message to redraw.
+
+Two requirements: the bot must be a member of the discussion group (that is where
+comments actually land, not the channel), and its privacy mode must be off in
+@BotFather, which it already needs to be to see pasted links at all. Registering
+the two commands with `/setcommands` is optional and only buys autocomplete.
+
+A verdict is a column on the listing (`interest`, `rated_at`, `rated_by`), so it
+survives re-scrapes and is queryable:
+
+```bash
+uv run depas show "SELECT commune, url, rated_by FROM listings WHERE interest = 1"
+```
 
 ```
 depas/
@@ -116,7 +149,7 @@ Everything personal lives in `.env` (gitignored) — see `.env.example`.
 | `DEPAS_TARGET_COMMUTE`, `DEPAS_ALERT_MAX_COMMUTE` | Minutes to the location a listing reaches worst, by whichever of walking, bus and Metro is fastest. Full marks at or under the target, no alert over the ceiling. |
 | `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. |
 | `TELEGRAM_BOT_TOKEN` | From @BotFather. |
-| `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread; a group takes the cards but leaves them undiscussable. Switching between the two is only this value. |
+| `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread, which is also where `/like` and `/dislike` are read from; a group takes the cards but leaves them undiscussable, so verdicts have to be replies. Switching between the two is only this value. |
 
 ## Schema
 
