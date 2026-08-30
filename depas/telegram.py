@@ -3,6 +3,7 @@ from typing import Any
 
 from curl_cffi import requests
 
+from depas.commute import as_text as commute_text
 from depas.config import _load_env_file, current_cost, optional_int, optional_text
 from depas.metro import STATION_LINES
 
@@ -130,6 +131,10 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
         calling = STATION_LINES.get(station, ())
         label = f" (L{'/L'.join(calling)})" if calling else ""
         lines.append(f"🚇 {_escape(station)}{label} · {row.get('walk_minutes')} min caminando")
+
+    travel = commute_text(row.get("commute"))
+    if travel:
+        lines.append(f"🧭 {travel} min")
 
     asking = row.get("price_per_m2_uf_effective")
     zone = row.get("zone_price_per_m2_uf_effective")

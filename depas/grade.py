@@ -1,3 +1,4 @@
+import json
 import os
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ AMENITIES = (
     "has_pool", "has_gym", "has_terrace", "gated_community", "pets_allowed",
 )
 COMPONENTS = ("value", "cost", "location", "size", "amenities", "security", "floor",
-              "metro")
+              "metro", "commute")
 LETTERS = ((90, "A"), (75, "B"), (50, "C"), (25, "D"))
 # A percentile scale centres here, so it is what an unmeasured component says.
 MIDPOINT = 50.0
@@ -130,8 +131,19 @@ def _metro(row: dict) -> float | None:
     return -(min(ranks) if ranks else len(tiers)) / len(tiers)
 
 
+def _commute(row: dict) -> float | None:
+    """Judged on the location it reaches worst — you have to make every one of those trips."""
+    travel = row.get("commute")
+    if not travel:
+        return None
+    return _against_target(max(json.loads(travel).values()),
+                           optional_int("DEPAS_TARGET_COMMUTE"),
+                           optional_int("DEPAS_ALERT_MAX_COMMUTE"))
+
+
 RAW = {"value": _value, "cost": _cost, "location": _location, "size": _size,
-       "amenities": _amenities, "security": _security, "floor": _floor, "metro": _metro}
+       "amenities": _amenities, "security": _security, "floor": _floor, "metro": _metro,
+       "commute": _commute}
 
 
 def _weights() -> dict[str, float]:

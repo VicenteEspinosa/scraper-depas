@@ -46,6 +46,7 @@ DETAIL_COLUMNS: dict[str, str] = {
     "published_label": "TEXT",
     "published_days_ago": "INTEGER",
     "features": "TEXT",
+    "commute": "TEXT",
     "nearest_station": "TEXT",
     "station_distance_m": "INTEGER",
     "walk_minutes": "INTEGER",
