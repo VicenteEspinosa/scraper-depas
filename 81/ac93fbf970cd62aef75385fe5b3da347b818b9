@@ -1,0 +1,21 @@
+depas/store.py
+  s_ac9b713021ac74::t_918c07d17b543f 1,11-16,24-25,27-31,37-58
+migrations/001_initial.sql
+  s_ac9b713021ac74::t_24820c6a6b12d0 1-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "81ac93fbf970cd62aef75385fe5b3da347b818b9",
+  "prompts": {},
+  "sessions": {
+    "s_ac9b713021ac74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7cb6a0ba-5179-4899-b03d-3090bfaa406f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
