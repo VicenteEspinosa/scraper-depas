@@ -3,7 +3,7 @@ from typing import Any
 
 from curl_cffi import requests
 
-from depas.config import _load_env_file, current_cost
+from depas.config import _load_env_file, current_cost, optional_int, optional_text
 
 API = "https://api.telegram.org"
 TIMEOUT = 40
@@ -44,6 +44,21 @@ AMENITY_LABELS = (
     ("has_air_conditioning", "aire acond."), ("gated_community", "condominio"),
     ("pets_allowed", "mascotas"), ("has_terrace", "terraza"),
 )
+
+
+def _cons(row: dict[str, Any]) -> list[str]:
+    """The preferences this listing misses, so a docked score is legible in the card."""
+    cons = []
+    floor, top = row.get("floor"), row.get("building_floors")
+    target = optional_int("DEPAS_TARGET_FLOOR")
+    if floor is not None and target is not None and floor < target:
+        cons.append(f"piso {floor}, bajo el {target}º")
+    if floor is not None and floor == top:
+        cons.append(f"último piso ({floor} de {top})")
+    wanted = optional_text("DEPAS_ALERT_SECURITY")
+    if wanted and row.get("security_type") != wanted:
+        cons.append(f"sin seguridad {wanted}")
+    return cons
 
 
 def _clp(amount: float | None) -> str:
@@ -103,6 +118,10 @@ def format_listing(row: dict[str, Any], grade: Any) -> str:
     amenities = [label for column, label in AMENITY_LABELS if row.get(column)]
     if amenities:
         lines.append("✨ " + " · ".join(amenities[:5]))
+
+    cons = _cons(row)
+    if cons:
+        lines.append("👎 " + " · ".join(cons))
 
     if row.get("published_days_ago") is not None:
         lines.append(f"🕐 publicado hace {row['published_days_ago']} días")

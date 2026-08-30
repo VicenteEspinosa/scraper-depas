@@ -1,6 +1,6 @@
 import pytest
 
-from depas.grade import Scale
+from depas.grade import COMPONENTS, Scale
 
 
 def _listing(**overrides) -> dict:
@@ -67,8 +67,8 @@ def test_weights_shift_the_ranking(monkeypatch):
 
 def test_all_weights_zero_fails_loudly(monkeypatch):
     """A .env that zeroes everything must raise, not divide by zero."""
-    for component in ("VALUE", "COST", "LOCATION", "SIZE", "AMENITIES", "SECURITY"):
-        monkeypatch.setenv(f"DEPAS_WEIGHT_{component}", "0")
+    for component in COMPONENTS:
+        monkeypatch.setenv(f"DEPAS_WEIGHT_{component.upper()}", "0")
 
     with pytest.raises(ValueError, match="at least one"):
         Scale(_pool())
@@ -94,3 +94,36 @@ def test_an_unset_security_preference_is_not_a_missing_component(monkeypatch):
     pool = [{"net_monthly_clp": 700_000, "area": 50.0, "walk_minutes": 5, "has_elevator": 1}]
 
     assert "security" not in Scale(pool).grade(pool[0]).missing
+
+
+def test_floor_below_target_scores_lower_without_being_excluded(monkeypatch):
+    """A low floor costs score, so listings on it still alert rather than disappearing."""
+    monkeypatch.setenv("DEPAS_TARGET_FLOOR", "5")
+    pool = [_listing(floor=floor, building_floors=20) for floor in (8, 5, 3, 1)]
+    scale = Scale(pool)
+
+    high, target, low, ground = (scale.grade(row).score for row in pool)
+
+    assert high == target > low > ground
+    assert all(scale.grade(row).letter != "?" for row in pool)
+
+
+def test_the_top_floor_is_docked(monkeypatch):
+    """Being the highest floor scores below the identical unit one floor down."""
+    monkeypatch.setenv("DEPAS_TARGET_FLOOR", "5")
+    pool = [_listing(floor=20, building_floors=20), _listing(floor=19, building_floors=20)]
+    scale = Scale(pool)
+
+    top, below = (scale.grade(row).score for row in pool)
+
+    assert top < below
+
+
+def test_an_unknown_floor_is_missing_not_penalised(monkeypatch):
+    """A portal that never publishes a floor must not be graded as if it were floor zero."""
+    monkeypatch.setenv("DEPAS_TARGET_FLOOR", "5")
+    pool = [_listing(floor=5, building_floors=20), _listing(floor=None)]
+    scale = Scale(pool)
+
+    assert "floor" in scale.grade(pool[1]).missing
+    assert scale.grade(pool[1]).letter != "?"
