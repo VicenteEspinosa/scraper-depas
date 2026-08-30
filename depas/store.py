@@ -130,3 +130,11 @@ def save(connection: sqlite3.Connection, listings: Iterable[Listing]) -> dict[st
 
     connection.commit()
     return counts
+
+
+def mark_notified(connection: sqlite3.Connection, portal: str, external_id: str) -> None:
+    connection.execute(
+        "UPDATE listings SET notified_at = ? WHERE portal = ? AND external_id = ?",
+        (datetime.now(UTC).isoformat(), portal, external_id),
+    )
+    connection.commit()
