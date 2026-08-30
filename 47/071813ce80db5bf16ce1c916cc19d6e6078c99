@@ -1,0 +1,19 @@
+depas/bot.py
+  s_cc6ef9e7f9bcc3::t_55647047fb93fa 11,49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "47071813ce80db5bf16ce1c916cc19d6e6078c99",
+  "prompts": {},
+  "sessions": {
+    "s_cc6ef9e7f9bcc3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f62b783b-45ac-4c98-b2b4-ba08d072a808",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
