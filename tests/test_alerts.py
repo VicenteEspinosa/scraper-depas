@@ -82,7 +82,8 @@ def test_the_card_shows_the_publication_title():
     card = format_listing(row, Scale([row]).grade(row))
 
     assert "<i>Depto 2D &amp; luminoso</i>" in card
-    assert "gastos comunes" in card
+    assert "arriendo + gastos comunes" in card  # no amount published, and never a dash
+    assert "—" not in card
 
 
 def test_a_listing_with_a_photo_is_sent_as_one(monkeypatch):

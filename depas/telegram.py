@@ -74,7 +74,7 @@ def format_listing(row: dict[str, Any], grade: Any) -> str:
     breakdown = f"    ↳ {_clp(row.get('price_clp'))} arriendo"
     lines.append(
         f"{breakdown} + {_clp(gastos)} gastos comunes" if gastos
-        else f"{breakdown} · gastos comunes no informados"
+        else f"{breakdown} + gastos comunes"
     )
     sublet = (row.get("parking_spaces") or 0, row.get("storage_units") or 0)
     if any(sublet):
