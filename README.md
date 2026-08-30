@@ -53,6 +53,7 @@ depas/
   detail.py      detail-page specs → columns + a features JSON blob
   grade.py       percentile scoring
   metro.py       126 Santiago Metro stations (OpenStreetMap), distance fallback
+  commute.py     travel time to your own locations, routed over buses and Metro
   uf.py          UF → CLP, so mixed-currency listings compare
   communes.py    the 43 RM communes the portal indexes
   telegram.py    Bot API client
@@ -93,6 +94,8 @@ Everything personal lives in `.env` (gitignored) — see `.env.example`.
 | `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME` | Monthly CLP you would collect subletting. Default 0 — net then equals total, rather than inventing a market rate. |
 | `DEPAS_WEIGHT_*` | Relative weight per grading component. Default 1 each. |
 | `DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MAX_PRICE`, `DEPAS_ALERT_MIN_BEDROOMS` | What the scheduled `watch` pass scrapes. |
+| `DEPAS_LOCATIONS` | `name,lat,lon` per place you need to reach, `;`-separated, any number of them. |
+| `DEPAS_TARGET_COMMUTE`, `DEPAS_ALERT_MAX_COMMUTE` | Minutes to the location a listing reaches worst, by whichever of walking, bus and Metro is fastest. Full marks at or under the target, no alert over the ceiling. |
 | `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Bot credentials. |
 
@@ -114,3 +117,21 @@ uv run pytest
 
 Parsers are tested against real saved HTML, so a markup change fails loudly
 instead of silently returning nothing.
+
+## Data sources and attribution
+
+Travel times are routed by [Transitous](https://transitous.org), a free,
+community-run public-transport router — it covers the whole Red network,
+buses included, from the DTPM feed. Sources and their licences are listed at
+**<https://transitous.org/sources/>**. Transitous is best-effort and
+**non-commercial only**; this project caches every answer for the life of a
+listing, caps how many it routes per pass, and falls back to an offline
+Metro-and-walking estimate whenever the service cannot answer.
+
+Station coordinates in `metro.py` come from
+[OpenStreetMap](https://www.openstreetmap.org/copyright), © OpenStreetMap
+contributors, ODbL.
+
+## Licence
+
+MIT — see `LICENSE`. The attribution above covers the data, not the code.

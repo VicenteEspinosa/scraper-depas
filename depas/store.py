@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 from collections import defaultdict
@@ -6,7 +7,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from statistics import median
 
-from depas.config import lease_income
+from depas.commute import from_listing
+from depas.config import lease_income, locations
+from depas.fetch import Fetcher
 from depas.detail import DETAIL_COLUMNS
 from depas.models import Listing
 
@@ -101,6 +104,32 @@ def refresh_zone_benchmarks(connection: sqlite3.Connection) -> int:
     )
     connection.commit()
     return len(by_commune)
+
+
+def refresh_commutes(connection: sqlite3.Connection, fetcher: Fetcher, limit: int) -> int:
+    """Route the located listings still missing travel times, newest first, up to `limit`.
+
+    Coordinates never move, so an answer is kept for the life of the listing; only a
+    change to DEPAS_LOCATIONS makes a stored one stale. Routing is a call to somebody
+    else's server per listing per location, which is why this is capped rather than a
+    full recompute.
+    """
+    wanted = {place.name for place in locations()}
+    if not wanted:
+        return 0
+    rows = connection.execute(
+        "SELECT rowid, lat, lon, commute FROM listings "
+        "WHERE lat IS NOT NULL AND lon IS NOT NULL ORDER BY first_seen DESC"
+    ).fetchall()
+    stale = [row for row in rows
+             if not row["commute"] or set(json.loads(row["commute"])) != wanted][:limit]
+    for row in stale:
+        connection.execute(
+            "UPDATE listings SET commute = ? WHERE rowid = ?",
+            (json.dumps(from_listing(fetcher, row["lat"], row["lon"])), row["rowid"]),
+        )
+    connection.commit()
+    return len(stale)
 
 
 def _sync_lease_income(connection: sqlite3.Connection) -> None:

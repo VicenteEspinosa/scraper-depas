@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 ENV_FILE = Path(".env")
@@ -55,6 +56,30 @@ def line_preference() -> list[list[str]]:
     tiers = [[line.strip().upper() for line in tier.split(",") if line.strip()]
              for tier in raw.split(">")]
     return [tier for tier in tiers if tier]
+
+
+@dataclass(frozen=True, slots=True)
+class Location:
+    """A place you have to be able to reach from the apartment."""
+
+    name: str
+    lat: float
+    lon: float
+
+
+def locations() -> list[Location]:
+    """DEPAS_LOCATIONS as `name,lat,lon` entries separated by `;`."""
+    _load_env_file()
+    found = []
+    for entry in os.environ.get("DEPAS_LOCATIONS", "").split(";"):
+        if not entry.strip():
+            continue
+        parts = [part.strip() for part in entry.split(",")]
+        if len(parts) != 3:
+            raise ValueError(f"DEPAS_LOCATIONS entry must be name,lat,lon: {entry!r}")
+        name, lat, lon = parts
+        found.append(Location(name, float(lat), float(lon)))
+    return found
 
 
 def chat_id() -> str:

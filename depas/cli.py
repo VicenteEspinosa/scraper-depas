@@ -5,14 +5,17 @@ from collections.abc import Iterator
 
 from depas.bot import run as run_bot
 from depas.communes import SANTIAGO_PROVINCE, Commune
+from depas.commute import as_text as commute_text
 from depas.detail import infer_from_description
-from depas.config import alert_communes, chat_id, max_rent, optional_int, optional_text
+from depas.config import (alert_communes, chat_id, locations, max_rent, optional_int,
+                          optional_text)
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.models import Listing, Query
 from depas.portals import PORTALS
 from depas.metro import nearest_station
-from depas.store import connect, mark_notified, refresh_zone_benchmarks, save, save_detail
+from depas.store import (connect, mark_notified, refresh_commutes, refresh_zone_benchmarks,
+                         save, save_detail)
 from depas.telegram import chats, format_listing, send_listing
 from depas.uf import normalize, stored_uf
 
@@ -105,6 +108,7 @@ def enrich(args: argparse.Namespace) -> None:
         for index, row in enumerate(pending, start=1):
             _enrich_one(connection, fetcher, row)
             print(f"\r{index}/{len(pending)} enriched", end="", flush=True)
+        refresh_commutes(connection, fetcher, args.limit)
     finally:
         fetcher.close()
         connection.close()
@@ -161,6 +165,11 @@ def _requirement_clauses() -> tuple[list[str], list[object]]:
         if value is not None:
             conditions.append(condition)
             parameters.append(value)
+    reach = optional_int("DEPAS_ALERT_MAX_COMMUTE")
+    if reach is not None:
+        for place in locations():
+            conditions.append(f"json_extract(commute, '$.{place.name}') <= ?")
+            parameters.append(reach)
     communes = alert_communes()
     if communes:
         conditions.append(f"commune IN ({', '.join('?' * len(communes))})")
@@ -234,6 +243,7 @@ def watch(args: argparse.Namespace) -> None:
             _enrich_one(connection, fetcher, row)
         print(f"enrich: {len(pending)} listings")
         print(f"from descriptions: {_infer_stored_descriptions(connection)} listings filled")
+        print(f"commutes: {refresh_commutes(connection, fetcher, args.commute_limit)} routed")
         print(f"zone benchmarks: {refresh_zone_benchmarks(connection)} communes")
         print(f"alerts: {_announce(connection, args.max_alerts)} posted")
     finally:
@@ -285,12 +295,12 @@ def show(args: argparse.Namespace) -> None:
                     key=lambda row: row["score"], reverse=True)
     _print_table([{k: v for k, v in row.items() if k != "score"} for row in graded[:args.limit]])
     if any(row["grade"].endswith("*") for row in graded[:args.limit]):
-        print("\n* graded on partial data — see the 'on' column for how many of 5 components")
+        print("\n* graded on partial data — see the 'on' column for how many components scored")
     connection.close()
 
 
 SUMMARY_COLUMNS = ("commune", "bedrooms", "area", "floor", "gastos", "est", "bod",
-                   "net", "nearest_station", "walk", "url")
+                   "net", "nearest_station", "walk", "commute", "url")
 
 
 def _summarise(row: sqlite3.Row, scale: Scale) -> dict[str, object]:
@@ -299,12 +309,13 @@ def _summarise(row: sqlite3.Row, scale: Scale) -> dict[str, object]:
     return {
         "grade": f"{scored.letter} {scored.score}" + ("*" if scored.missing else ""),
         "score": scored.score,
-        "on": f"{len(scored.parts)}/5",
+        "on": f"{len(scored.parts)}/{len(scored.parts) + len(scored.missing)}",
         "commune": row["commune"], "bedrooms": row["bedrooms"], "area": row["area"],
         "floor": row["floor"], "rent": round(row["price_clp"]),
         "gastos": row["common_expenses"], "est": row["parking_spaces"],
         "bod": row["storage_units"], "net": round(row["net_monthly_clp"]),
-        "metro": row["nearest_station"], "walk": row["walk_minutes"], "url": row["url"],
+        "metro": row["nearest_station"], "walk": row["walk_minutes"],
+        "commute": commute_text(row["commute"]) or "—", "url": row["url"],
     }
 
 
@@ -341,6 +352,8 @@ def main() -> None:
 
     watcher = subparsers.add_parser("watch", help="scheduled pass: scrape then enrich new listings")
     watcher.add_argument("--enrich-limit", type=int, default=60)
+    watcher.add_argument("--commute-limit", type=int, default=40,
+                         help="listings routed per pass; Transitous is somebody else's server")
     watcher.add_argument("--max-alerts", type=int, default=10)
     watcher.set_defaults(func=watch)
 
