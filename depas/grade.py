@@ -117,17 +117,17 @@ def _floor(row: dict) -> float | None:
 
 
 def _metro(row: dict) -> float | None:
-    """Rank the station by the best-preferred line calling at it; an interchange takes its best."""
-    preference = line_preference()
+    """Rank the station by the best-tiered line calling at it; an interchange takes its best."""
+    tiers = line_preference()
     station = row.get("nearest_station")
-    if not preference or station is None:
+    if not tiers or station is None:
         return None
     lines = STATION_LINES.get(station)
     if not lines:
         return None
-    # A line nobody ranked sits one place worse than the last one that was.
-    ranks = [preference.index(line) for line in lines if line in preference]
-    return -(min(ranks) if ranks else len(preference)) / len(preference)
+    # A line nobody ranked sits one tier worse than the last one that was.
+    ranks = [rank for rank, tier in enumerate(tiers) if any(line in tier for line in lines)]
+    return -(min(ranks) if ranks else len(tiers)) / len(tiers)
 
 
 RAW = {"value": _value, "cost": _cost, "location": _location, "size": _size,
