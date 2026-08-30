@@ -1,0 +1,11 @@
+scripts/deploy-remote.sh
+  ai_agent 1-43
+.github/workflows/deploy.yml
+  ai_agent 1-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e2302f0cc1be273bbb1dd8a80a6dd9c0ed2233fb",
+  "prompts": {}
+}
