@@ -24,7 +24,8 @@ def connection(tmp_path, monkeypatch):
 @pytest.fixture
 def sent(monkeypatch):
     posted = []
-    monkeypatch.setattr("depas.cli.send_listing", lambda chat, text: posted.append(text))
+    monkeypatch.setattr("depas.cli.send_listing",
+                        lambda chat, text, image=None: posted.append((text, image)))
     monkeypatch.setattr("depas.cli.time.sleep", lambda _: None)  # no real rate-limit wait
     return posted
 
@@ -69,3 +70,31 @@ def test_the_card_escapes_html_and_keeps_the_link(connection):
 
     assert "&lt;test&gt;" in card and "<test>" not in card
     assert 'href="https://x/1?a=1&amp;b=2"' in card
+
+
+def test_the_card_shows_the_publication_title():
+    """The listing's own title appears, escaped, under the grade line."""
+    from depas.grade import Scale
+
+    row = {"commune": "nunoa", "title": "Depto 2D & luminoso", "area": 50.0,
+           "net_monthly_clp": 600_000, "price_clp": 500_000, "url": "https://x/1"}
+
+    card = format_listing(row, Scale([row]).grade(row))
+
+    assert "<i>Depto 2D &amp; luminoso</i>" in card
+    assert "gastos comunes" in card
+
+
+def test_a_listing_with_a_photo_is_sent_as_one(monkeypatch):
+    """sendPhoto carries the card as a caption; without an image it falls back to text."""
+    calls = []
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr("depas.telegram.call",
+                        lambda method, **params: calls.append(method) or {})
+
+    from depas.telegram import send_listing
+
+    send_listing("-100", "card", "https://img/1.webp")
+    send_listing("-100", "card", None)
+
+    assert calls == ["sendPhoto", "sendMessage"]
