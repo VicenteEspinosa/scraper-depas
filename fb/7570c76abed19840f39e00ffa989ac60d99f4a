@@ -1,0 +1,20 @@
+.github/workflows/deploy.yml
+  s_d5aea67bbb8509::t_6873088f211e75 60
+  s_d5aea67bbb8509::t_bee2507225f7d9 61-63,86-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "fb7570c76abed19840f39e00ffa989ac60d99f4a",
+  "prompts": {},
+  "sessions": {
+    "s_d5aea67bbb8509": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ffa7bb2f-c01d-4bfa-8578-96ba8f3787a7",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
