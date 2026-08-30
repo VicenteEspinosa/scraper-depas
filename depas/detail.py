@@ -43,6 +43,11 @@ DETAIL_COLUMNS: dict[str, str] = {
     "nearest_station": "TEXT",
     "station_distance_m": "INTEGER",
     "walk_minutes": "INTEGER",
+    "walk_source": "TEXT",
+    "transit": "TEXT",
+    "broker": "TEXT",
+    "price_per_m2_uf": "REAL",
+    "zone_price_per_m2_uf": "REAL",
     "detail_fetched_at": "TEXT",
 }
 

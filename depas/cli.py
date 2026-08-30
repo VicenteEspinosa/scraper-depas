@@ -74,10 +74,10 @@ def enrich(args: argparse.Namespace) -> None:
     try:
         for index, row in enumerate(pending, start=1):
             detail = portalinmobiliario.fetch_detail(fetcher, row["url"])
-            if detail.get("lat") is not None:
+            if "nearest_station" not in detail and detail.get("lat") is not None:
                 station, metres, minutes = nearest_station(detail["lat"], detail["lon"])
                 detail |= {"nearest_station": station, "station_distance_m": metres,
-                           "walk_minutes": minutes}
+                           "walk_minutes": minutes, "walk_source": "computed"}
             save_detail(connection, row["portal"], row["external_id"], detail)
             print(f"\r{index}/{len(pending)} enriched", end="", flush=True)
     finally:

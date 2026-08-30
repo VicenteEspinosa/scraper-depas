@@ -1,3 +1,4 @@
+import json
 import re
 from collections.abc import Iterator
 
@@ -5,7 +6,7 @@ from curl_cffi.requests.exceptions import HTTPError
 from selectolax.parser import HTMLParser, Node
 
 from depas.communes import Commune
-from depas.detail import parse_specs, published_days_ago
+from depas.detail import _slug, parse_specs, published_days_ago
 from depas.fetch import Fetcher
 from depas.models import Listing, Query
 
@@ -149,4 +150,60 @@ def fetch_detail(fetcher: Fetcher, url: str) -> dict[str, object]:
         detail["published_label"] = published.group(1).strip()
         detail["published_days_ago"] = published_days_ago(published.group(1))
 
+    transit = _parse_transit(tree)
+    if transit:
+        detail["transit"] = json.dumps(transit, ensure_ascii=False)
+    if stations := transit.get("estaciones_de_metro"):
+        nearest = min(stations, key=lambda station: station["metres"])
+        detail |= {"nearest_station": nearest["name"], "station_distance_m": nearest["metres"],
+                   "walk_minutes": nearest["minutes"], "walk_source": "portal"}
+
+    broker = tree.css_first(".ui-vip-profile-info__info-container")
+    if broker:
+        detail["broker"] = broker.text(strip=True)
+
+    detail |= _parse_price_benchmark(tree)
     return detail
+
+
+POI_SUBTITLE = re.compile(r"(\d+)\s*mins?\s*-\s*([\d.,]+)\s*(metros|km)")
+UF_PER_M2 = re.compile(r"([\d,]+)\s*UF/m")
+
+
+def _parse_transit(tree: HTMLParser) -> dict[str, list[dict[str, object]]]:
+    """Walking times the portal itself publishes, grouped by 'Estaciones de metro' / 'Paraderos'."""
+    transit: dict[str, list[dict[str, object]]] = {}
+    for subsection in tree.css(".ui-vip-poi__subsection"):
+        title = subsection.css_first(".ui-vip-poi__subsection-title")
+        if title is None:
+            continue
+        places = []
+        for item in subsection.css(".ui-vip-poi__item"):
+            name = item.css_first(".ui-vip-poi__item-title")
+            subtitle = item.css_first(".ui-vip-poi__item-subtitle")
+            match = POI_SUBTITLE.search(subtitle.text(strip=True)) if subtitle else None
+            if name and match:
+                metres = float(match.group(2).replace(".", "").replace(",", "."))
+                places.append({
+                    "name": name.text(strip=True),
+                    "minutes": int(match.group(1)),
+                    "metres": round(metres * 1000 if match.group(3) == "km" else metres),
+                })
+        if places:
+            transit[_slug(title.text(strip=True))] = places
+    return transit
+
+
+def _parse_price_benchmark(tree: HTMLParser) -> dict[str, float]:
+    """The portal's own UF/m² comparison of this listing against its zone."""
+    comparison = tree.css_first(".ui-pdp-price-comparison")
+    if comparison is None:
+        return {}
+    labels = [node.text(strip=True) for node in comparison.css("span") if node.text(strip=True)]
+    benchmark = {}
+    for label, column in (("Esta propiedad", "price_per_m2_uf"), ("Promedio en la zona", "zone_price_per_m2_uf")):
+        if label in labels:
+            match = UF_PER_M2.search(labels[labels.index(label) + 1])
+            if match:
+                benchmark[column] = float(match.group(1).replace(",", "."))
+    return benchmark
