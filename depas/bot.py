@@ -9,9 +9,12 @@ from depas.grade import Scale
 from depas.metro import nearest_station
 from depas.portals import PORTALS
 from depas.portals.portalinmobiliario import clean_url
-from depas.store import POOL_QUERY, connect, save, save_detail
+from depas.store import (DISLIKE, LIKE, POOL_QUERY, card_for_message, card_for_thread,
+                         connect, link_thread, remember_card, save, save_detail,
+                         set_interest)
 from depas.uf import normalize, stored_uf
-from depas.telegram import call, format_listing, send_listing
+from depas.telegram import (DISLIKE_BUTTON, LIKE_BUTTON, answer_callback, call, edit_listing,
+                            format_listing, reply, send_listing, verdict_buttons)
 
 POLL_TIMEOUT = 30
 # Telegram and the portals both blip. A blip should cost one poll, not the process:
@@ -78,15 +81,184 @@ def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher,
     return dict(ranked), Scale([dict(item) for item in pool]).grade(dict(ranked))
 
 
+COMMANDS = {"/like": LIKE, "/dislike": DISLIKE}
+VERDICT = {LIKE: "⭐ anotado como interesante",
+           DISLIKE: "🚫 descartado: no volverá a aparecer en las alertas"}
+NO_CARD = ("no sé de qué depto hablas: comenta /like o /dislike en el hilo de una "
+           "tarjeta, o respondiendo a una.")
+# The id every card prints in its header, which is how a card posted before the
+# bot started recording them can still be traced back to its listing.
+CARD_ID = re.compile(r"\[(\d+)\]")
+
+
+def _command(text: str) -> int | None:
+    """The verdict a message asks for, if its first word is one of ours."""
+    words = text.split()
+    if not words:
+        return None
+    # /like@depas_bot is what Telegram sends when more than one bot is in the chat.
+    return COMMANDS.get(words[0].split("@")[0].lower())
+
+
+def _forwarded_from(message: dict) -> tuple[object, int] | None:
+    """The channel post an auto-forwarded copy came from."""
+    origin = message.get("forward_origin") or {}
+    if origin.get("type") == "channel":
+        return origin["chat"]["id"], origin["message_id"]
+    # The pre-7.0 spelling of the same thing, still what older clients send.
+    if message.get("forward_from_chat"):
+        return message["forward_from_chat"]["id"], message["forward_from_message_id"]
+    return None
+
+
+def _remember_forward(connection: sqlite3.Connection, message: dict) -> None:
+    """Pair a card auto-forwarded into the discussion group with the post it copies.
+
+    Telegram publishes that pairing in this update and nowhere else: the copy's own
+    message id is the message_thread_id every comment on the card will carry.
+    """
+    origin = _forwarded_from(message)
+    if origin is not None:
+        link_thread(connection, *origin, message["chat"]["id"], message["message_id"])
+
+
+def _from_card_text(connection: sqlite3.Connection, text: str) -> dict | None:
+    """The listing a card is about, read back from the [id] its header prints."""
+    # The header only, not the whole card: a bracketed number anywhere in a title
+    # or a description would otherwise rate some unrelated listing.
+    found = CARD_ID.search(text.split("\n")[0])
+    if not found:
+        return None
+    row = connection.execute(
+        "SELECT portal, external_id FROM listings WHERE rowid = ?", (int(found.group(1)),)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def _card(connection: sqlite3.Connection, message: dict) -> dict | None:
+    """The card a command refers to: its listing, and the message to edit if we posted it.
+
+    A comment in a channel's Comments names the thread it hangs off; a reply in a
+    plain group only names the message it answers. Reading the [id] out of that
+    message covers what neither does: cards posted before this was recorded.
+    """
+    chat = str(message["chat"]["id"])
+    thread = message.get("message_thread_id")
+    row = card_for_thread(connection, chat, thread) if thread else None
+    replied = message.get("reply_to_message") or {}
+    if row is None and replied:
+        row = card_for_message(connection, chat, replied["message_id"])
+    if row is not None:
+        return dict(row)
+    return _from_card_text(connection, replied.get("text") or replied.get("caption") or "")
+
+
+def _refresh_card(connection: sqlite3.Connection, card: dict) -> None:
+    """Re-render a card we posted, so the verdict shows on the card itself."""
+    if not card.get("message_id"):
+        return  # traced back by its printed id alone; there is no message to edit
+    key = (card["portal"], card["external_id"])
+    row = connection.execute(
+        "SELECT * FROM listings_ranked WHERE portal = ? AND external_id = ?", key
+    ).fetchone()
+    if row is None:
+        return  # a card outliving its listing must not take the bot down with it
+    pool = connection.execute(POOL_QUERY).fetchall()
+    grade = Scale([dict(item) for item in pool]).grade(dict(row))
+    try:
+        edit_listing(card["chat_id"], card["message_id"], format_listing(dict(row), grade),
+                     bool(card["is_photo"]), verdict_buttons(row["id"], row["interest"]))
+    except RuntimeError as error:
+        # Redrawing the card is a nicety: a card too old to edit must not cost the
+        # verdict, which is already stored and already filtering the alerts.
+        print(f"could not redraw card {card['message_id']}: {error}")
+
+
+def _rate(connection: sqlite3.Connection, message: dict, interest: int) -> None:
+    """Record a /like or /dislike against the listing whose thread it was left in."""
+    chat = str(message["chat"]["id"])
+    thread = message.get("message_thread_id")
+    card = _card(connection, message)
+    if card is None:
+        reply(chat, NO_CARD, thread, message["message_id"])
+        return
+    author = message.get("from") or {}
+    set_interest(connection, card["portal"], card["external_id"], interest,
+                 author.get("username") or author.get("first_name"))
+    _refresh_card(connection, card)
+    reply(chat, VERDICT[interest], thread, message["message_id"])
+
+
+BUTTONS = {LIKE_BUTTON: LIKE, DISLIKE_BUTTON: DISLIKE}
+TOAST = {LIKE: "⭐ anotado como interesante", DISLIKE: "🚫 descartado, no vuelve a aparecer"}
+GONE = "ese aviso ya no está en la base"
+
+
+def _pressed_card(connection: sqlite3.Connection, message: dict, listing: dict) -> dict:
+    """The card to redraw after a press: the one pressed, or the original it copies.
+
+    A channel card is copied into the discussion group with its buttons intact, and
+    that copy belongs to the channel rather than to us — the post it came from is
+    the one we can edit, so an unrecognised message falls back to the newest card
+    posted for the listing.
+    """
+    card = card_for_message(connection, message["chat"]["id"], message["message_id"]) \
+        if message else None
+    if card is None:
+        card = connection.execute(
+            "SELECT * FROM card_messages WHERE portal = ? AND external_id = ? "
+            "ORDER BY posted_at DESC LIMIT 1", (listing["portal"], listing["external_id"])
+        ).fetchone()
+    return dict(card) if card else {}
+
+
+def _handle_callback(connection: sqlite3.Connection, callback: dict) -> None:
+    """A button pressed on a card: the same verdict, with nothing typed and no reply posted."""
+    action, _, listing_id = (callback.get("data") or "").partition(":")
+    interest = BUTTONS.get(action)
+    if interest is None or not listing_id.isdigit():
+        answer_callback(callback["id"], "botón no reconocido")
+        return
+    listing = connection.execute(
+        "SELECT portal, external_id FROM listings WHERE rowid = ?", (int(listing_id),)
+    ).fetchone()
+    if listing is None:
+        answer_callback(callback["id"], GONE)
+        return
+
+    author = callback.get("from") or {}
+    set_interest(connection, listing["portal"], listing["external_id"], interest,
+                 author.get("username") or author.get("first_name"))
+    # Acknowledged before the redraw: Telegram gives the answer about ten seconds
+    # before the press times out in the client, and an edit can be slower than that.
+    answer_callback(callback["id"], TOAST[interest])
+    _refresh_card(connection, _pressed_card(connection, callback.get("message") or {},
+                                            dict(listing)))
+
+
 def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) -> None:
+    # A channel card is copied into the discussion group by Telegram itself. That
+    # copy is bookkeeping, never a request: answering it would post the card twice.
+    if message.get("is_automatic_forward"):
+        _remember_forward(connection, message)
+        return
+
     text = message.get("text") or message.get("caption") or ""
+    interest = _command(text)
+    if interest is not None:
+        _rate(connection, message, interest)
+        return
+
     for portal_name, url in find_links(text):
         graded = _grade_link(connection, fetcher, portal_name, url)
         if graded is None:
             continue
         row, grade = graded
-        send_listing(str(message["chat"]["id"]), format_listing(row, grade), row.get("image_url"),
-                     message.get("message_thread_id"))
+        sent = send_listing(str(message["chat"]["id"]), format_listing(row, grade),
+                            row.get("image_url"), message.get("message_thread_id"),
+                            verdict_buttons(row["id"], row.get("interest")))
+        remember_card(connection, sent["chat"]["id"], sent["message_id"],
+                      row["portal"], row["external_id"], "photo" in sent)
 
 
 def run() -> None:
@@ -105,11 +277,15 @@ def run() -> None:
                 continue
             for update in updates:
                 message = update.get("message") or update.get("channel_post")
-                if message:
-                    try:
+                # A pressed button arrives on this same poll — no webhook, no open port.
+                callback = update.get("callback_query")
+                try:
+                    if message:
                         _handle(connection, fetcher, message)
-                    except (RuntimeError, RequestException) as error:
-                        print(f"could not answer update {update['update_id']}: {error}")
+                    elif callback:
+                        _handle_callback(connection, callback)
+                except (RuntimeError, RequestException) as error:
+                    print(f"could not answer update {update['update_id']}: {error}")
                 # Advances even when the reply failed: an update that cannot be
                 # answered must not be redelivered on every restart forever.
                 _remember_offset(connection, update["update_id"] + 1)

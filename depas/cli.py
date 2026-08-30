@@ -14,9 +14,10 @@ from depas.grade import Scale
 from depas.models import Listing, Query
 from depas.portals import PORTALS
 from depas.metro import nearest_station
-from depas.store import (NOT_FURNISHED, POOL_QUERY, clear_notified, connect, mark_notified,
-                        refresh_commutes, refresh_zone_benchmarks, save, save_detail)
-from depas.telegram import chat_type, chats, format_listing, send_listing
+from depas.store import (NOT_FURNISHED, NOT_REJECTED, POOL_QUERY, clear_notified, connect,
+                        mark_notified, refresh_commutes, refresh_zone_benchmarks,
+                        remember_card, save, save_detail)
+from depas.telegram import chat_type, chats, format_listing, send_listing, verdict_buttons
 from depas.uf import normalize, stored_uf
 
 TOP_QUERY = """
@@ -129,8 +130,10 @@ FILTERS = (
 def _build_query(args: argparse.Namespace) -> tuple[str, tuple[object, ...]]:
     """Assemble the ranked query from whichever filters were actually given."""
     # An unenriched listing would be graded on two components and beat everything,
-    # and amoblado is never on the table however good the rest of the row looks.
-    conditions = ["is_project = 0", "detail_fetched_at IS NOT NULL", NOT_FURNISHED]
+    # amoblado is never on the table however good the rest of the row looks, and a
+    # listing already turned down in the chat is not worth scanning past again.
+    conditions = ["is_project = 0", "detail_fetched_at IS NOT NULL", NOT_FURNISHED,
+                  NOT_REJECTED]
     parameters: list[object] = []
     for name, condition in FILTERS:
         value = getattr(args, name)
@@ -206,7 +209,12 @@ def _announce(connection: sqlite3.Connection, limit: int) -> int:
             break
         # Below the bar still gets stamped, so it is never reconsidered later.
         if grade.score >= minimum:
-            send_listing(destination, format_listing(dict(row), grade), row["image_url"])
+            sent = send_listing(destination, format_listing(dict(row), grade), row["image_url"],
+                                buttons=verdict_buttons(row["id"], row["interest"]))
+            # Recorded so a /like or /dislike commented under the card knows which
+            # listing it is about, and so the card can be redrawn with the verdict.
+            remember_card(connection, sent["chat"]["id"], sent["message_id"],
+                          row["portal"], row["external_id"], "photo" in sent)
             posted += 1
             time.sleep(ALERT_DELAY_SECONDS)  # Telegram rate-limits how fast a chat is posted to
         mark_notified(connection, row["portal"], row["external_id"])
@@ -275,7 +283,11 @@ def test_alert(args: argparse.Namespace) -> None:
             raise ValueError("nothing enriched to post; run `depas enrich` first")
         scale = Scale(pool)
         row, grade = max(((row, scale.grade(row)) for row in pool), key=lambda pair: pair[1].score)
-        send_listing(chat_id(), format_listing(row, grade, is_test=True), row["image_url"])
+        sent = send_listing(chat_id(), format_listing(row, grade, is_test=True), row["image_url"],
+                            buttons=verdict_buttons(row["id"], row["interest"]))
+        # Recorded like any other card, so /like and /dislike can be tried on it.
+        remember_card(connection, sent["chat"]["id"], sent["message_id"],
+                      row["portal"], row["external_id"], "photo" in sent)
         print(f"test alert posted: {grade.letter} {grade.score} {row['url']}")
     finally:
         connection.close()

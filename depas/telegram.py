@@ -53,6 +53,9 @@ GRADE_EMOJI = {"A": "🟢", "B": "🟢", "C": "🟡", "D": "🟠", "E": "🔴", 
 COMPLETE_MARK = "✔️"
 PARTIAL_MARK = "❓"
 TEST_MARK = "🧪"
+# The verdict given from the chat, so a scroll through the channel shows at a
+# glance what has already been judged.
+INTEREST_MARK = {1: "⭐", -1: "🚫"}
 AMENITY_LABELS = (
     ("has_elevator", "ascensor"), ("has_concierge", "conserjería"),
     ("has_pool", "piscina"), ("has_gym", "gimnasio"), ("has_heating", "calefacción"),
@@ -96,7 +99,8 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
     """Render one listing as the Telegram HTML card posted to the chat."""
     emoji = GRADE_EMOJI.get(grade.letter, "⚪")
     data_mark = PARTIAL_MARK if grade.missing else COMPLETE_MARK
-    prefix = f"{TEST_MARK} " if is_test else ""
+    prefix = "".join(f"{mark} " for mark in (TEST_MARK if is_test else None,
+                                             INTEREST_MARK.get(row.get("interest"))) if mark)
     commune = (row.get("commune") or "").replace("-", " ").title()
     header = [f"{prefix}{emoji} <b>{grade.letter} {grade.score}</b> {data_mark}"]
     if commune:  # a listing whose portal never stated one would leave a dangling separator
@@ -175,18 +179,74 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
 CAPTION_LIMIT = 1024
 
 
+LIKE_BUTTON, DISLIKE_BUTTON = "like", "dislike"
+
+
+def verdict_buttons(listing_id: int, interest: int | None = None) -> dict[str, Any]:
+    """The keyboard under a card, ticked to show whatever verdict it already carries."""
+    # callback_data is capped at 64 bytes, so what travels is the listing's rowid --
+    # stable for the life of a listing -- rather than the portal and its external id.
+    return {"inline_keyboard": [[
+        {"text": "⭐ Interesa ✓" if interest == 1 else "⭐ Me interesa",
+         "callback_data": f"{LIKE_BUTTON}:{listing_id}"},
+        {"text": "🚫 Descartado ✓" if interest == -1 else "🚫 Descartar",
+         "callback_data": f"{DISLIKE_BUTTON}:{listing_id}"},
+    ]]}
+
+
+def answer_callback(callback_id: str, text: str) -> None:
+    """Stop the button's spinner, saying what happened as a toast rather than a message."""
+    call("answerCallbackQuery", callback_query_id=callback_id, text=text)
+
+
 def send_listing(chat_id: str, text: str, image_url: str | None = None,
-                 thread_id: int | None = None) -> None:
-    """Post the card, as a photo when the listing has one and the caption fits."""
+                 thread_id: int | None = None,
+                 buttons: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Post the card, as a photo when the listing has one and the caption fits.
+
+    Returns Telegram's own record of the message: its ids are what a later edit is
+    addressed to, and what a command commented under the card is traced back through.
+    """
     # Only ever sent when replying inside a comment thread; Telegram rejects a null.
     thread = {"message_thread_id": thread_id} if thread_id else {}
+    if buttons:
+        thread["reply_markup"] = buttons
     if image_url and len(text) <= CAPTION_LIMIT:
         try:
-            call("sendPhoto", chat_id=chat_id, photo=image_url, caption=text,
-                 parse_mode="HTML", **thread)
-            return
+            return call("sendPhoto", chat_id=chat_id, photo=image_url, caption=text,
+                        parse_mode="HTML", **thread)
         except RuntimeError:
             # Telegram rejects some remote images (size, host, format); the card still matters.
             pass
-    call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
-         link_preview_options={"is_disabled": True}, **thread)
+    return call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
+                link_preview_options={"is_disabled": True}, **thread)
+
+
+def edit_listing(chat_id: str, message_id: int, text: str, is_photo: bool = False,
+                 buttons: dict[str, Any] | None = None) -> None:
+    """Re-render a card already posted, in place."""
+    # An edit that omits reply_markup drops the keyboard, so the buttons have to be
+    # sent again every time — there is no such thing as editing only the text.
+    markup = {"reply_markup": buttons} if buttons else {}
+    # A photo card holds its text in the caption, which is a different edit method
+    # and a different field; only a text card has a link preview to suppress.
+    if is_photo:
+        call("editMessageCaption", chat_id=chat_id, message_id=message_id,
+             caption=text, parse_mode="HTML", **markup)
+        return
+    call("editMessageText", chat_id=chat_id, message_id=message_id, text=text,
+         parse_mode="HTML", link_preview_options={"is_disabled": True}, **markup)
+
+
+def reply(chat_id: str, text: str, thread_id: int | None = None,
+          reply_to: int | None = None) -> dict[str, Any]:
+    """Answer one message: in its thread, and quoting the message that asked."""
+    where: dict[str, Any] = {}
+    if thread_id:
+        where["message_thread_id"] = thread_id
+    if reply_to:
+        # allow_sending_without_reply: the answer still matters if the command was
+        # deleted between arriving and being handled.
+        where["reply_parameters"] = {"message_id": reply_to,
+                                     "allow_sending_without_reply": True}
+    return call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML", **where)
