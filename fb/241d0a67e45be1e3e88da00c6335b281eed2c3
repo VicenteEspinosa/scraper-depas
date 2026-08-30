@@ -1,0 +1,9 @@
+depas/cli.py
+  ai_agent 3,7,13-14,118-150,176,266
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "fb241d0a67e45be1e3e88da00c6335b281eed2c3",
+  "prompts": {}
+}
