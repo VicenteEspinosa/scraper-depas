@@ -17,7 +17,7 @@ from depas.metro import nearest_station
 from depas.store import (NOT_FURNISHED, NOT_REJECTED, POOL_QUERY, clear_notified, connect,
                         mark_notified, refresh_commutes, refresh_zone_benchmarks,
                         remember_card, save, save_detail)
-from depas.telegram import chat_type, chats, format_listing, send_listing
+from depas.telegram import chat_type, chats, format_listing, send_listing, verdict_buttons
 from depas.uf import normalize, stored_uf
 
 TOP_QUERY = """
@@ -209,7 +209,8 @@ def _announce(connection: sqlite3.Connection, limit: int) -> int:
             break
         # Below the bar still gets stamped, so it is never reconsidered later.
         if grade.score >= minimum:
-            sent = send_listing(destination, format_listing(dict(row), grade), row["image_url"])
+            sent = send_listing(destination, format_listing(dict(row), grade), row["image_url"],
+                                buttons=verdict_buttons(row["id"], row["interest"]))
             # Recorded so a /like or /dislike commented under the card knows which
             # listing it is about, and so the card can be redrawn with the verdict.
             remember_card(connection, sent["chat"]["id"], sent["message_id"],
@@ -282,7 +283,8 @@ def test_alert(args: argparse.Namespace) -> None:
             raise ValueError("nothing enriched to post; run `depas enrich` first")
         scale = Scale(pool)
         row, grade = max(((row, scale.grade(row)) for row in pool), key=lambda pair: pair[1].score)
-        sent = send_listing(chat_id(), format_listing(row, grade, is_test=True), row["image_url"])
+        sent = send_listing(chat_id(), format_listing(row, grade, is_test=True), row["image_url"],
+                            buttons=verdict_buttons(row["id"], row["interest"]))
         # Recorded like any other card, so /like and /dislike can be tried on it.
         remember_card(connection, sent["chat"]["id"], sent["message_id"],
                       row["portal"], row["external_id"], "photo" in sent)

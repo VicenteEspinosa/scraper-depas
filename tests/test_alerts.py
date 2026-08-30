@@ -26,7 +26,7 @@ def connection(tmp_path, monkeypatch):
 def sent(monkeypatch):
     posted = []
 
-    def send(chat, text, image=None, thread=None):
+    def send(chat, text, image=None, thread=None, buttons=None):
         posted.append((text, image))
         return {"chat": {"id": int(chat)}, "message_id": 500 + len(posted)}
 

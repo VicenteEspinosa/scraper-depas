@@ -179,8 +179,29 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
 CAPTION_LIMIT = 1024
 
 
+LIKE_BUTTON, DISLIKE_BUTTON = "like", "dislike"
+
+
+def verdict_buttons(listing_id: int, interest: int | None = None) -> dict[str, Any]:
+    """The keyboard under a card, ticked to show whatever verdict it already carries."""
+    # callback_data is capped at 64 bytes, so what travels is the listing's rowid --
+    # stable for the life of a listing -- rather than the portal and its external id.
+    return {"inline_keyboard": [[
+        {"text": "⭐ Interesa ✓" if interest == 1 else "⭐ Me interesa",
+         "callback_data": f"{LIKE_BUTTON}:{listing_id}"},
+        {"text": "🚫 Descartado ✓" if interest == -1 else "🚫 Descartar",
+         "callback_data": f"{DISLIKE_BUTTON}:{listing_id}"},
+    ]]}
+
+
+def answer_callback(callback_id: str, text: str) -> None:
+    """Stop the button's spinner, saying what happened as a toast rather than a message."""
+    call("answerCallbackQuery", callback_query_id=callback_id, text=text)
+
+
 def send_listing(chat_id: str, text: str, image_url: str | None = None,
-                 thread_id: int | None = None) -> dict[str, Any]:
+                 thread_id: int | None = None,
+                 buttons: dict[str, Any] | None = None) -> dict[str, Any]:
     """Post the card, as a photo when the listing has one and the caption fits.
 
     Returns Telegram's own record of the message: its ids are what a later edit is
@@ -188,6 +209,8 @@ def send_listing(chat_id: str, text: str, image_url: str | None = None,
     """
     # Only ever sent when replying inside a comment thread; Telegram rejects a null.
     thread = {"message_thread_id": thread_id} if thread_id else {}
+    if buttons:
+        thread["reply_markup"] = buttons
     if image_url and len(text) <= CAPTION_LIMIT:
         try:
             return call("sendPhoto", chat_id=chat_id, photo=image_url, caption=text,
@@ -199,16 +222,20 @@ def send_listing(chat_id: str, text: str, image_url: str | None = None,
                 link_preview_options={"is_disabled": True}, **thread)
 
 
-def edit_listing(chat_id: str, message_id: int, text: str, is_photo: bool = False) -> None:
+def edit_listing(chat_id: str, message_id: int, text: str, is_photo: bool = False,
+                 buttons: dict[str, Any] | None = None) -> None:
     """Re-render a card already posted, in place."""
+    # An edit that omits reply_markup drops the keyboard, so the buttons have to be
+    # sent again every time — there is no such thing as editing only the text.
+    markup = {"reply_markup": buttons} if buttons else {}
     # A photo card holds its text in the caption, which is a different edit method
     # and a different field; only a text card has a link preview to suppress.
     if is_photo:
         call("editMessageCaption", chat_id=chat_id, message_id=message_id,
-             caption=text, parse_mode="HTML")
+             caption=text, parse_mode="HTML", **markup)
         return
     call("editMessageText", chat_id=chat_id, message_id=message_id, text=text,
-         parse_mode="HTML", link_preview_options={"is_disabled": True})
+         parse_mode="HTML", link_preview_options={"is_disabled": True}, **markup)
 
 
 def reply(chat_id: str, text: str, thread_id: int | None = None,

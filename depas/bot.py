@@ -13,7 +13,8 @@ from depas.store import (DISLIKE, LIKE, POOL_QUERY, card_for_message, card_for_t
                          connect, link_thread, remember_card, save, save_detail,
                          set_interest)
 from depas.uf import normalize, stored_uf
-from depas.telegram import call, edit_listing, format_listing, reply, send_listing
+from depas.telegram import (DISLIKE_BUTTON, LIKE_BUTTON, answer_callback, call, edit_listing,
+                            format_listing, reply, send_listing, verdict_buttons)
 
 POLL_TIMEOUT = 30
 # Telegram and the portals both blip. A blip should cost one poll, not the process:
@@ -166,7 +167,7 @@ def _refresh_card(connection: sqlite3.Connection, card: dict) -> None:
     grade = Scale([dict(item) for item in pool]).grade(dict(row))
     try:
         edit_listing(card["chat_id"], card["message_id"], format_listing(dict(row), grade),
-                     bool(card["is_photo"]))
+                     bool(card["is_photo"]), verdict_buttons(row["id"], row["interest"]))
     except RuntimeError as error:
         # Redrawing the card is a nicety: a card too old to edit must not cost the
         # verdict, which is already stored and already filtering the alerts.
@@ -188,6 +189,53 @@ def _rate(connection: sqlite3.Connection, message: dict, interest: int) -> None:
     reply(chat, VERDICT[interest], thread, message["message_id"])
 
 
+BUTTONS = {LIKE_BUTTON: LIKE, DISLIKE_BUTTON: DISLIKE}
+TOAST = {LIKE: "⭐ anotado como interesante", DISLIKE: "🚫 descartado, no vuelve a aparecer"}
+GONE = "ese aviso ya no está en la base"
+
+
+def _pressed_card(connection: sqlite3.Connection, message: dict, listing: dict) -> dict:
+    """The card to redraw after a press: the one pressed, or the original it copies.
+
+    A channel card is copied into the discussion group with its buttons intact, and
+    that copy belongs to the channel rather than to us — the post it came from is
+    the one we can edit, so an unrecognised message falls back to the newest card
+    posted for the listing.
+    """
+    card = card_for_message(connection, message["chat"]["id"], message["message_id"]) \
+        if message else None
+    if card is None:
+        card = connection.execute(
+            "SELECT * FROM card_messages WHERE portal = ? AND external_id = ? "
+            "ORDER BY posted_at DESC LIMIT 1", (listing["portal"], listing["external_id"])
+        ).fetchone()
+    return dict(card) if card else {}
+
+
+def _handle_callback(connection: sqlite3.Connection, callback: dict) -> None:
+    """A button pressed on a card: the same verdict, with nothing typed and no reply posted."""
+    action, _, listing_id = (callback.get("data") or "").partition(":")
+    interest = BUTTONS.get(action)
+    if interest is None or not listing_id.isdigit():
+        answer_callback(callback["id"], "botón no reconocido")
+        return
+    listing = connection.execute(
+        "SELECT portal, external_id FROM listings WHERE rowid = ?", (int(listing_id),)
+    ).fetchone()
+    if listing is None:
+        answer_callback(callback["id"], GONE)
+        return
+
+    author = callback.get("from") or {}
+    set_interest(connection, listing["portal"], listing["external_id"], interest,
+                 author.get("username") or author.get("first_name"))
+    # Acknowledged before the redraw: Telegram gives the answer about ten seconds
+    # before the press times out in the client, and an edit can be slower than that.
+    answer_callback(callback["id"], TOAST[interest])
+    _refresh_card(connection, _pressed_card(connection, callback.get("message") or {},
+                                            dict(listing)))
+
+
 def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) -> None:
     # A channel card is copied into the discussion group by Telegram itself. That
     # copy is bookkeeping, never a request: answering it would post the card twice.
@@ -207,7 +255,8 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) -> 
             continue
         row, grade = graded
         sent = send_listing(str(message["chat"]["id"]), format_listing(row, grade),
-                            row.get("image_url"), message.get("message_thread_id"))
+                            row.get("image_url"), message.get("message_thread_id"),
+                            verdict_buttons(row["id"], row.get("interest")))
         remember_card(connection, sent["chat"]["id"], sent["message_id"],
                       row["portal"], row["external_id"], "photo" in sent)
 
@@ -228,11 +277,15 @@ def run() -> None:
                 continue
             for update in updates:
                 message = update.get("message") or update.get("channel_post")
-                if message:
-                    try:
+                # A pressed button arrives on this same poll — no webhook, no open port.
+                callback = update.get("callback_query")
+                try:
+                    if message:
                         _handle(connection, fetcher, message)
-                    except (RuntimeError, RequestException) as error:
-                        print(f"could not answer update {update['update_id']}: {error}")
+                    elif callback:
+                        _handle_callback(connection, callback)
+                except (RuntimeError, RequestException) as error:
+                    print(f"could not answer update {update['update_id']}: {error}")
                 # Advances even when the reply failed: an update that cannot be
                 # answered must not be redelivered on every restart forever.
                 _remember_offset(connection, update["update_id"] + 1)

@@ -57,27 +57,47 @@ Scraping is two-stage, because detail pages are expensive:
 
 ### Judging a listing from the chat
 
-Comment on a card — in its Comments thread if alerts go to a channel, or as a
-reply to the card in a plain group:
+Every card carries two buttons — **⭐ Me interesa** and **🚫 Descartar**. Pressing
+one records the verdict, ticks the button that won, and redraws the card. Nothing
+is typed and nothing is posted to the chat: the answer comes back as a toast, so
+a thread of judged listings stays a thread of listings.
 
-| Command | Effect |
-| --- | --- |
-| `/like` | Marks the listing interesting. The card gains a ⭐. |
-| `/dislike` | Marks it out. The card gains a 🚫 and the listing leaves the pool: never announced again, gone from `show`, and no longer moving the percentiles everything else is graded against. Not even `resend` brings it back. |
+The same two verdicts are also commands, for cards posted before the buttons
+existed. Comment on the card — in its Comments thread if alerts go to a channel,
+or as a reply to it in a plain group:
 
-No webhook and no open port: the commands ride the same `getUpdates` long poll the
-bot already runs. Which listing a command means comes from where it was left, so
-nothing has to be typed twice. Each card the bot posts is recorded in
-`card_messages`; when Telegram copies a channel post into the linked discussion
-group, that copy's id is the thread id every comment carries, which is how a
-comment is traced back to its apartment and the card itself edited in place. A
-card posted before any of this existed still works — the `[id]` printed in its
-header is read back instead, though there is then no message to redraw.
+| Button | Command | Effect |
+| --- | --- | --- |
+| ⭐ Me interesa | `/like` | Marks the listing interesting. The card gains a ⭐. |
+| 🚫 Descartar | `/dislike` | Marks it out. The card gains a 🚫 and the listing leaves the pool: never announced again, gone from `show`, and no longer moving the percentiles everything else is graded against. Not even `resend` brings it back. |
 
-Two requirements: the bot must be a member of the discussion group (that is where
-comments actually land, not the channel), and its privacy mode must be off in
-@BotFather, which it already needs to be to see pasted links at all. Registering
-the two commands with `/setcommands` is optional and only buys autocomplete.
+Either verdict can be changed by pressing the other button; both stay live on the
+card.
+
+No webhook and no open port: presses arrive as `callback_query` updates and
+commands as ordinary messages, both on the same `getUpdates` long poll the bot
+already runs. A press carries the listing's row id in its `callback_data`, which
+is why a button needs no context at all. A typed command instead takes its
+meaning from where it was left: each card the bot posts is recorded in
+`card_messages`, and when Telegram copies a channel post into the linked
+discussion group, that copy's id is the thread id every comment carries — which
+is how a comment is traced back to its apartment and the card itself edited in
+place. A card posted before any of this existed still answers commands: the
+`[id]` printed in its header is read back instead, though there is then no
+message to redraw.
+
+The buttons are copied into the discussion group along with the card, and pressing
+one there redraws the channel post behind it rather than the copy, which belongs
+to the channel and is not the bot's to edit.
+
+The buttons need nothing set up. The typed commands do: the bot must be a member
+of the discussion group (that is where comments actually land, not the channel),
+and its privacy mode must be off in @BotFather, which it already needs to be to
+see pasted links at all. Registering the two commands with `/setcommands` is
+optional and only buys autocomplete.
+
+Anyone who can see the chat can press a button — there is no per-user check, which
+suits a private channel and would not suit a public one.
 
 A verdict is a column on the listing (`interest`, `rated_at`, `rated_by`), so it
 survives re-scrapes and is queryable:

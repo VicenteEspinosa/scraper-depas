@@ -3,7 +3,8 @@ from types import SimpleNamespace
 import pytest
 from curl_cffi.requests.exceptions import RequestException
 
-from depas.bot import NO_CARD, _handle, _offset, _remember_offset, find_links, run
+from depas.bot import (GONE, NO_CARD, _handle, _handle_callback, _offset, _remember_offset,
+                       find_links, run)
 from depas.models import Listing
 from depas.store import POOL_QUERY, connect, remember_card, save, save_detail
 
@@ -23,7 +24,7 @@ def connection(tmp_path, monkeypatch):
 def sent(monkeypatch):
     posted = []
 
-    def send(chat, text, image=None, thread=None):
+    def send(chat, text, image=None, thread=None, buttons=None):
         posted.append((chat, text, thread))
         # Telegram's own record of the message, which is what the bot stores.
         return {"chat": {"id": int(chat)}, "message_id": 500 + len(posted)}
@@ -39,9 +40,18 @@ def answers(monkeypatch):
     monkeypatch.setattr("depas.bot.reply",
                         lambda chat, text, thread=None, reply_to=None: said.append(text))
     monkeypatch.setattr("depas.bot.edit_listing",
-                        lambda chat, message, text, is_photo=False:
-                        edited.append((chat, message, text)))
+                        lambda chat, message, text, is_photo=False, buttons=None:
+                        edited.append((chat, message, text, buttons)))
     return SimpleNamespace(said=said, edited=edited)
+
+
+@pytest.fixture
+def pressed(monkeypatch):
+    """Every toast the bot answers a pressed button with."""
+    toasts = []
+    monkeypatch.setattr("depas.bot.answer_callback",
+                        lambda callback_id, text: toasts.append(text))
+    return toasts
 
 
 @pytest.mark.parametrize(
@@ -233,7 +243,7 @@ def test_the_card_itself_is_redrawn_with_the_verdict(announced, answers):
     """The mark belongs on the card, so the channel is scannable without opening threads."""
     _handle(announced, None, _comment("/like"))
 
-    chat, message, text = answers.edited[0]
+    chat, message, text, _ = answers.edited[0]
     assert (chat, message) == (str(CHANNEL), CARD)
     assert text.startswith("⭐ ")
 
@@ -301,6 +311,79 @@ def test_a_card_too_old_to_edit_still_keeps_the_verdict(announced, answers, monk
 
     assert _verdict(announced)["interest"] == 1
     assert answers.said == ["⭐ anotado como interesante"]
+
+
+def _press(connection, data, chat=CHANNEL, message_id=CARD):
+    """A button press, as Telegram delivers it: the card it sat on, and what it carries."""
+    return {"id": "cb-1", "data": data, "from": {"username": "vicente"},
+            "message": {"chat": {"id": chat}, "message_id": message_id}}
+
+
+def _listing_id(connection):
+    return connection.execute(
+        "SELECT id FROM listings_ranked WHERE external_id = 'MLC-1'").fetchone()["id"]
+
+
+def test_a_pressed_button_records_the_verdict(announced, answers, pressed):
+    """The whole point of the buttons: a verdict with nothing typed."""
+    _handle_callback(announced, _press(announced, f"like:{_listing_id(announced)}"))
+
+    assert tuple(_verdict(announced)) == (1, "vicente")
+    assert pressed == ["⭐ anotado como interesante"]
+    # A toast, not a message: pressing a button must not fill the thread with replies.
+    assert answers.said == []
+
+
+def test_a_pressed_button_redraws_the_card_it_sat_on(announced, answers, pressed):
+    """The card has to show the new verdict, and keep its buttons — an edit drops them."""
+    _handle_callback(announced, _press(announced, f"dislike:{_listing_id(announced)}"))
+
+    chat, message, text, buttons = answers.edited[0]
+    assert (chat, message) == (str(CHANNEL), CARD)
+    assert text.startswith("🚫 ")
+    assert buttons["inline_keyboard"][0][1]["text"] == "🚫 Descartado ✓"
+
+
+def test_pressing_the_copy_in_the_group_edits_the_channel_post(announced, answers, pressed):
+    """The discussion group's copy belongs to the channel; the post behind it is ours to edit."""
+    _handle_callback(announced, _press(announced, f"like:{_listing_id(announced)}",
+                                       chat=GROUP, message_id=THREAD))
+
+    chat, message, _, _ = answers.edited[0]
+    assert (chat, message) == (str(CHANNEL), CARD)
+
+
+def test_a_button_for_a_listing_that_is_gone_is_answered_anyway(announced, answers, pressed):
+    """An unanswered press spins in the client until it times out, so every path answers."""
+    _handle_callback(announced, _press(announced, "like:9999"))
+
+    assert pressed == [GONE]
+    assert answers.edited == []
+
+
+def test_a_button_press_is_dispatched_by_the_poll_loop(poll, monkeypatch):
+    """Presses ride the same getUpdates poll as messages — there is no second listener."""
+    handled = []
+    monkeypatch.setattr("depas.bot._handle_callback",
+                        lambda connection, callback: handled.append(callback["data"]))
+
+    poll([{"update_id": 7, "callback_query": {"id": "cb-1", "data": "like:1"}}], StopLoop())
+
+    assert handled == ["like:1"]
+
+
+def test_a_new_card_carries_the_buttons(connection, monkeypatch):
+    """A card posted with no keyboard would leave nothing to press."""
+    posted = []
+    monkeypatch.setattr("depas.bot.send_listing",
+                        lambda chat, text, image=None, thread=None, buttons=None:
+                        posted.append(buttons) or {"chat": {"id": -100}, "message_id": 1})
+
+    _handle(connection, None, {"chat": {"id": -100}, "message_id": 1,
+                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"})
+
+    labels = [button["text"] for button in posted[0]["inline_keyboard"][0]]
+    assert labels == ["⭐ Me interesa", "🚫 Descartar"]
 
 
 class StopLoop(Exception):
