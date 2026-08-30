@@ -1,7 +1,7 @@
 import pytest
 
 from depas.models import Listing
-from depas.store import connect, migrate, save, save_detail
+from depas.store import MIGRATIONS_DIR, connect, migrate, save, save_detail
 
 
 def _listing(price: int) -> Listing:
@@ -114,3 +114,20 @@ def test_rescraping_does_not_wipe_detail_data(tmp_path):
 
     row = connection.execute("SELECT * FROM listings").fetchone()
     assert (row["common_expenses"], row["lat"], row["lon"], row["floor"]) == (90_000, -33.4, -70.6, 7)
+
+
+def test_the_backfill_prices_rows_stored_without_one(tmp_path):
+    """Rows the bot saved before it converted prices are repaired, UF converted not copied."""
+    connection = connect(tmp_path / "test.db")
+    save(connection, [_listing(600_000)])
+    connection.executemany(
+        "INSERT INTO listings (portal, external_id, url, price, currency, first_seen, last_seen) "
+        "VALUES (?, ?, ?, ?, ?, 'now', 'now')",
+        [("houm", "43", "https://x/43", 750_000, "CLP"), ("houm", "44", "https://x/44", 12.25, "UF")],
+    )
+
+    connection.executescript((MIGRATIONS_DIR / "004_backfill_price_clp.sql").read_text())
+
+    priced = dict(connection.execute("SELECT external_id, price_clp FROM listings"))
+    assert (priced["42"], priced["43"]) == (600_000, 750_000)
+    assert priced["44"] == pytest.approx(500_687.5)
