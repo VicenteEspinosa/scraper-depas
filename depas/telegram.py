@@ -84,8 +84,12 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
     data_mark = PARTIAL_MARK if grade.missing else COMPLETE_MARK
     prefix = f"{TEST_MARK} " if is_test else ""
     commune = (row.get("commune") or "").replace("-", " ").title()
-    lines = [f"{prefix}{emoji} <b>{grade.letter} {grade.score}</b> {data_mark} "
-             f"· <b>{_escape(commune)}</b>"]
+    header = [f"{prefix}{emoji} <b>{grade.letter} {grade.score}</b> {data_mark}"]
+    if commune:  # a listing whose portal never stated one would leave a dangling separator
+        header.append(f"<b>{_escape(commune)}</b>")
+    if row.get("id"):
+        header.append(f"<code>[{row['id']}]</code>")
+    lines = [" · ".join(header)]
     if row.get("title"):
         lines.append(f"<i>{_escape(row['title'])}</i>")
 

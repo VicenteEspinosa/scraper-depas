@@ -207,3 +207,31 @@ def test_prose_denials_are_read_as_absence():
 
     assert inferred["has_elevator"] == 0
     assert inferred["has_concierge"] == 0
+
+
+def test_the_card_carries_the_listing_number(connection):
+    """Every card shows the row's id so a listing can be looked up from the group."""
+    from depas.grade import Scale
+
+    save(connection, [Listing(portal="p", external_id="1", url="https://x/1", title="t",
+                              price=600_000, currency="CLP", commune="providencia",
+                              bedrooms=2, area_m2=50.0, price_clp=600_000)])
+    row = dict(connection.execute("SELECT * FROM listings_ranked").fetchone())
+
+    card = format_listing(row, Scale([row]).grade(row))
+
+    assert f"[{row['id']}]" in card
+    assert row["id"] == 1
+
+
+def test_a_listing_without_a_commune_leaves_no_dangling_separator():
+    """The header joins only the parts that exist, so a missing commune is not an empty slot."""
+    from depas.grade import Scale
+
+    row = {"id": 7, "commune": None, "area": 50.0, "net_monthly_clp": 600_000,
+           "price_clp": 600_000, "url": "https://x/1"}
+
+    header = format_listing(row, Scale([row]).grade(row)).splitlines()[0]
+
+    assert "·  ·" not in header
+    assert header.endswith("<code>[7]</code>")

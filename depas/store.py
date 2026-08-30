@@ -65,6 +65,8 @@ RANKED_VIEW = """
 DROP VIEW IF EXISTS listings_ranked;
 CREATE VIEW listings_ranked AS
 SELECT *,
+       -- Stable: nothing deletes rows or VACUUMs, so a listing keeps its number for life.
+       rowid                                    AS id,
        COALESCE(area_useful_m2, area_m2)        AS area,
        -- Only Portal Inmobiliario publishes a UF/m2 figure; for everyone else derive it
        -- from the cached UF, which matches the published one to well under a percent.
