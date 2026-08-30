@@ -1,7 +1,7 @@
 import pytest
 
 from depas.models import Listing
-from depas.store import connect, save, save_detail
+from depas.store import connect, migrate, save, save_detail
 
 
 def _listing(price: int) -> Listing:
@@ -73,3 +73,21 @@ def test_a_non_numeric_lease_income_fails_loudly(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="whole number of CLP"):
         connect(tmp_path / "test.db")
+
+
+def test_every_detail_column_exists_in_the_schema(tmp_path):
+    """save_detail writes these names, so a migration that omits one must fail here."""
+    from depas.detail import DETAIL_COLUMNS
+
+    connection = connect(tmp_path / "test.db")
+
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(listings)")}
+    assert set(DETAIL_COLUMNS) <= columns
+
+
+def test_migrations_are_recorded_and_not_reapplied(tmp_path):
+    """A second connect applies nothing new — migrations are tracked, not replayed."""
+    path = tmp_path / "test.db"
+    connect(path).close()
+
+    assert migrate(connect(path)) == []
