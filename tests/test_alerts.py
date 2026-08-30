@@ -99,3 +99,28 @@ def test_a_listing_with_a_photo_is_sent_as_one(monkeypatch):
     send_listing("-100", "card", None)
 
     assert calls == ["sendPhoto", "sendMessage"]
+
+
+def test_requirements_gate_which_listings_are_announced(connection, sent, monkeypatch):
+    """A listing that misses a configured requirement is never posted."""
+    monkeypatch.setenv("DEPAS_ALERT_MAX_WALK", "2")
+
+    posted = _announce(connection, limit=10)
+
+    assert posted == 2  # walk_minutes 1 and 2 qualify; 3 and 4 do not
+    assert len(sent) == 2
+
+
+def test_a_listing_that_misses_a_requirement_stays_eligible(connection, sent, monkeypatch):
+    """Unqualified listings are left unstamped, so a later price drop can still alert."""
+    monkeypatch.setenv("DEPAS_ALERT_MAX_WALK", "2")
+    _announce(connection, limit=10)
+
+    monkeypatch.delenv("DEPAS_ALERT_MAX_WALK")
+
+    assert _announce(connection, limit=10) == 2
+
+
+def test_unset_requirements_impose_no_filter(connection, sent):
+    """With nothing configured, every enriched listing is a candidate."""
+    assert _announce(connection, limit=10) == 4
