@@ -1,0 +1,29 @@
+depas/telegram.py
+  s_79ce7d51f427bf::t_409e267d444883 58-62
+depas/grade.py
+  s_79ce7d51f427bf::t_c51159467ac180 62-75
+.github/workflows/deploy.yml
+  s_79ce7d51f427bf::t_409e267d444883 57,78
+.env.example
+  s_79ce7d51f427bf::t_409e267d444883 41-44
+depas/cli.py
+  s_79ce7d51f427bf::t_c51159467ac180 130
+tests/test_grade.py
+  s_79ce7d51f427bf::t_6d4483e9dd8a01 130-155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2d63d7c55c5fbd9b41c2bb6d2dcedf63ab12cbd1",
+  "prompts": {},
+  "sessions": {
+    "s_79ce7d51f427bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b5c2c0fe-8751-4188-8fb6-338419856ade",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
