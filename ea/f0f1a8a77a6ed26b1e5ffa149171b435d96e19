@@ -1,0 +1,21 @@
+depas/config.py
+  s_ac9b713021ac74::t_169e84fae772bb 58-63
+depas/cli.py
+  s_ac9b713021ac74::t_169e84fae772bb 7,120-140,144,148-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "eaf0f1a8a77a6ed26b1e5ffa149171b435d96e19",
+  "prompts": {},
+  "sessions": {
+    "s_ac9b713021ac74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7cb6a0ba-5179-4899-b03d-3090bfaa406f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
