@@ -263,9 +263,9 @@ def test_a_telegram_failure_reports_the_parameters_it_came_with(monkeypatch):
     monkeypatch.setattr(telegram.requests, "post", lambda *a, **k: type("R", (), {
         "json": staticmethod(lambda: {
             "ok": False, "description": "Bad Request: group chat was upgraded to a supergroup chat",
-            "parameters": {"migrate_to_chat_id": -1004361974965}})})())
+            "parameters": {"migrate_to_chat_id": -1009999999999}})})())
 
-    with pytest.raises(RuntimeError, match="-1004361974965"):
+    with pytest.raises(RuntimeError, match="-1009999999999"):
         telegram.call("sendMessage", chat_id="-123", text="x")
 
 
