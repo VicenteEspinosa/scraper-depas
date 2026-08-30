@@ -118,10 +118,13 @@ def _build_query(args: argparse.Namespace) -> tuple[str, tuple[object, ...]]:
 
 ALERT_DELAY_SECONDS = 3
 
-# Requirements that only exist once a listing is enriched, so they cannot be applied
-# during the scrape the way price and bedrooms are.
+# Every requirement is re-checked here, including the ones the scrape already
+# applied: enrichment overwrites card values (bedrooms among them) with the
+# detail page's, so a listing can stop qualifying after it was stored.
 ALERT_REQUIREMENTS = (
     ("DEPAS_ALERT_MAX_COST", "net_monthly_clp <= ?", optional_int),
+    ("DEPAS_ALERT_MAX_PRICE", "price_clp <= ?", optional_int),
+    ("DEPAS_ALERT_MIN_BEDROOMS", "bedrooms >= ?", optional_int),
     ("DEPAS_ALERT_MAX_WALK", "walk_minutes <= ?", optional_int),
     ("DEPAS_ALERT_MIN_FLOOR", "floor >= ?", optional_int),
     ("DEPAS_ALERT_MIN_AREA", "area >= ?", optional_int),
@@ -137,6 +140,10 @@ def _requirement_clauses() -> tuple[list[str], list[object]]:
         if value is not None:
             conditions.append(condition)
             parameters.append(value)
+    communes = alert_communes()
+    if communes:
+        conditions.append(f"commune IN ({', '.join('?' * len(communes))})")
+        parameters.extend(communes)
     return conditions, parameters
 
 
