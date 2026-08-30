@@ -1,0 +1,26 @@
+depas/portals/assetplan.py
+  s_fd317928344dba::t_0f4393bec309d1 71
+  s_fd317928344dba::t_f6ea1ba3fbd8e3 13,15,34,52
+  s_fd317928344dba::t_2fae60ed9f05fd 103
+  s_fd317928344dba::t_70c1f0533af7ba 1-12,14,16-33,35-51,53-70,72-102,104-121,123-146,148,150-151,153-162
+  s_fd317928344dba::t_a72b0c3db173dd 147,149,152
+  s_fd317928344dba::t_fbbe5e91373d20 122
+depas/portals/__init__.py
+  s_fd317928344dba::t_a709b81a772a41 3,8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "398e8199cc8f0c94f2fa427f0575f25c30e3c4a4",
+  "prompts": {},
+  "sessions": {
+    "s_fd317928344dba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c98daac-dab4-4e97-bdbc-9c6eba2032ae",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
