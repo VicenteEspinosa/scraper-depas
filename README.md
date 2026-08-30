@@ -60,8 +60,8 @@ depas/
 ```
 
 Adding a portal is one file exposing `search(fetcher, query) -> Iterator[Listing]`
-plus one line in the registry. Portal Inmobiliario works; Houm, Goplaceit and
-TocToc are stubs.
+plus one line in the registry. Portal Inmobiliario, Houm and TocToc work;
+Goplaceit is a stub.
 
 ## Things the data will lie to you about
 
