@@ -62,7 +62,7 @@ def _cons(row: dict[str, Any]) -> list[str]:
         cons.append(f"{area:.0f} m², bajo los {target_area}")
     wanted = optional_text("DEPAS_ALERT_SECURITY")
     if wanted and row.get("security_type") != wanted:
-        cons.append(f"sin seguridad {wanted}")
+        cons.append(f"sin conserjería {wanted}")
     return cons
 
 
