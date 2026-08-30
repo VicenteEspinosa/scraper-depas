@@ -1,0 +1,13 @@
+.env.example
+  ai_agent 22-30
+docs/DEPLOY.md
+  ai_agent 41-44,46-55,62-64
+.github/workflows/deploy.yml
+  ai_agent 52,71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "825db9d6d49e93d7da2085818e5e075a6a7854e4",
+  "prompts": {}
+}
