@@ -127,7 +127,6 @@ ALERT_REQUIREMENTS = (
     ("DEPAS_ALERT_MAX_WALK", "walk_minutes <= ?", optional_int),
     ("DEPAS_ALERT_MIN_FLOOR", "floor >= ?", optional_int),
     ("DEPAS_ALERT_MIN_AREA", "area >= ?", optional_int),
-    ("DEPAS_ALERT_SECURITY", "security_type = ?", optional_text),
 )
 
 
