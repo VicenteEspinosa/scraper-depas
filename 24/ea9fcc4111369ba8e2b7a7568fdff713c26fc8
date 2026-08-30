@@ -1,0 +1,11 @@
+tests/fixtures/pi_poi_section.html
+  ai_agent 1
+tests/test_portalinmobiliario.py
+  ai_agent 13,113-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "24ea9fcc4111369ba8e2b7a7568fdff713c26fc8",
+  "prompts": {}
+}
