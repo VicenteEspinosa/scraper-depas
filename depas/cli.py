@@ -7,17 +7,14 @@ from depas.fetch import Fetcher
 from depas.models import Listing, Query
 from depas.portals import PORTALS, portalinmobiliario
 from depas.metro import nearest_station
-from depas.store import connect, save, save_detail, set_setting
+from depas.store import connect, save, save_detail
 from depas.uf import to_clp, uf_in_clp
 
 TOP_QUERY = """
-SELECT commune, bedrooms, area, ROUND(price_clp) AS rent, common_expenses AS gastos,
+SELECT commune, bedrooms, area, floor, ROUND(price_clp) AS rent, common_expenses AS gastos,
        parking_spaces AS est, storage_units AS bod, ROUND(net_monthly_clp) AS net,
-       nearest_station, walk_minutes, url
+       nearest_station, walk_minutes AS walk, security_type, url
 FROM listings_ranked
-WHERE is_project = 0 AND (? IS NULL OR walk_minutes <= ?)
-ORDER BY net_monthly_clp
-LIMIT ?
 """
 
 
@@ -86,17 +83,36 @@ def enrich(args: argparse.Namespace) -> None:
     print(f"\n{len(pending)} listings enriched")
 
 
-def configure(args: argparse.Namespace) -> None:
-    connection = connect()
-    set_setting(connection, args.key.replace("-", "_"), args.value)
-    print(f"{args.key} = {args.value:,} CLP")
-    connection.close()
+FILTERS = (
+    ("max_cost", "net_monthly_clp <= ?"),
+    ("max_walk", "walk_minutes <= ?"),
+    ("min_floor", "floor >= ?"),
+    ("min_bedrooms", "bedrooms >= ?"),
+    ("security", "security_type = ?"),
+)
+
+
+def _build_query(args: argparse.Namespace) -> tuple[str, tuple[object, ...]]:
+    """Assemble the ranked query from whichever filters were actually given."""
+    conditions = ["is_project = 0"]
+    parameters: list[object] = []
+    for name, condition in FILTERS:
+        value = getattr(args, name)
+        if value is not None:
+            conditions.append(condition)
+            parameters.append(value)
+    if args.commune:
+        conditions.append(f"commune IN ({', '.join('?' * len(args.commune))})")
+        parameters.extend(commune.value for commune in args.commune)
+
+    query = f"{TOP_QUERY}\nWHERE {' AND '.join(conditions)}\nORDER BY net_monthly_clp\nLIMIT ?"
+    return query, (*parameters, args.limit)
 
 
 def show(args: argparse.Namespace) -> None:
     connection = connect()
-    parameters = () if args.sql else (args.max_walk, args.max_walk, args.limit)
-    rows = connection.execute(args.sql or TOP_QUERY, parameters).fetchall()
+    query, parameters = (args.sql, ()) if args.sql else _build_query(args)
+    rows = connection.execute(query, parameters).fetchall()
     _print_table(rows)
     connection.close()
 
@@ -136,12 +152,13 @@ def main() -> None:
     viewer.add_argument("sql", nargs="?")
     viewer.add_argument("--limit", type=int, default=20)
     viewer.add_argument("--max-walk", type=int, help="max walking minutes to a metro station")
+    viewer.add_argument("--max-cost", type=int, help="max net monthly cost in CLP")
+    viewer.add_argument("--min-floor", type=int)
+    viewer.add_argument("--min-bedrooms", type=int)
+    viewer.add_argument("--security", help='e.g. "24 horas"')
+    viewer.add_argument("--commune", action="append", default=[], type=Commune,
+                        choices=list(Commune), metavar="SLUG")
     viewer.set_defaults(func=show)
-
-    setter = subparsers.add_parser("set", help="set monthly lease income you expect to collect")
-    setter.add_argument("key", choices=["parking-income", "storage-income"])
-    setter.add_argument("value", type=int)
-    setter.set_defaults(func=configure)
 
     args = parser.parse_args()
     args.func(args)
