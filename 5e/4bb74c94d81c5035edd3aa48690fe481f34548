@@ -1,0 +1,21 @@
+depas/store.py
+  s_ac9b713021ac74::t_bfb05820892d23 45-50,64,68-90
+depas/cli.py
+  s_ac9b713021ac74::t_81724ab5ecc027 9-10,14-16,18-19,77-80,89-95,98-99,138,141-144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "5e4bb74c94d81c5035edd3aa48690fe481f34548",
+  "prompts": {},
+  "sessions": {
+    "s_ac9b713021ac74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7cb6a0ba-5179-4899-b03d-3090bfaa406f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
