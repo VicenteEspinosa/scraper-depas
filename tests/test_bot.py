@@ -120,3 +120,22 @@ def test_tracking_parameters_are_stripped(connection, sent, monkeypatch):
 
     assert clean_url("https://departamento.mercadolibre.cl/MLC-4?matt_tool=9&ua=z#origin=share") \
         == "https://departamento.mercadolibre.cl/MLC-4"
+
+
+def test_a_link_never_scraped_still_gets_its_net_cost(connection, sent, monkeypatch):
+    """Pasting an unseen listing must price it in CLP, so net cost and the comparison appear."""
+    monkeypatch.setenv("DEPAS_CURRENT_COST", "710000")
+    monkeypatch.setattr("depas.bot.uf_in_clp", lambda fetcher: 40_000.0)
+    monkeypatch.setattr(
+        "depas.bot.portalinmobiliario.fetch_standalone",
+        lambda fetcher, url: Listing(portal="portalinmobiliario", external_id="MLC-7",
+                                     url=url, price=20.0, currency="UF"),
+    )
+    monkeypatch.setattr("depas.bot.portalinmobiliario.fetch_detail",
+                        lambda fetcher, url: {"common_expenses": 150_000, "area_useful_m2": 66.0})
+
+    _handle(connection, None, {"chat": {"id": -100},
+                               "text": "https://departamento.mercadolibre.cl/MLC-7"})
+
+    assert "💰 <b>$950.000</b> neto al mes" in sent[0][1]
+    assert "⚖️ 🔺 $240.000 más caro que hoy" in sent[0][1]
