@@ -3,7 +3,7 @@ import os
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from statistics import median
 
@@ -200,3 +200,14 @@ def mark_notified(connection: sqlite3.Connection, portal: str, external_id: str)
         (datetime.now(UTC).isoformat(), portal, external_id),
     )
     connection.commit()
+
+
+def clear_notified(connection: sqlite3.Connection, hours: int) -> int:
+    """Un-stamp recently announced listings so the next watch pass posts them again."""
+    # Same isoformat the stamp was written with, so the comparison stays lexicographic.
+    cutoff = (datetime.now(UTC) - timedelta(hours=hours)).isoformat()
+    cleared = connection.execute(
+        "UPDATE listings SET notified_at = NULL WHERE notified_at >= ?", (cutoff,)
+    ).rowcount
+    connection.commit()
+    return cleared

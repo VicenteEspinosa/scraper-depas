@@ -35,7 +35,7 @@ Repository **secrets**:
 | `SSH_PRIVATE_KEY` | Key authorised on the deploy host |
 | `SSH_HOST`, `SSH_USER`, `DEPLOY_PATH` | Where to deploy |
 | `TELEGRAM_BOT_TOKEN` | From @BotFather |
-| `TELEGRAM_CHAT_ID` | The group the bot posts to |
+| `TELEGRAM_CHAT_ID` | The channel or group the bot posts to |
 
 Repository **variables**: `TZ`, `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME`,
 `DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MIN_BEDROOMS`, `DEPAS_ALERT_MIN_GRADE`,
@@ -87,6 +87,35 @@ blob carries the bot token.
 Secrets travel as that single base64 blob rather than inline `VAR=value` ssh
 arguments, because the remote shell re-expands `$` in those and would corrupt a
 token containing one.
+
+## Where the cards land
+
+`TELEGRAM_CHAT_ID` is one id and it accepts either kind of chat, so moving the
+alerts is a secret change plus a deploy — nothing in the code pins one.
+
+Post to a **channel with a linked discussion group** and Telegram forwards every
+card into that group as its own thread, which is what puts a Comments button on
+each listing and keeps one apartment's conversation off the next one's. Replies
+already come back with `message_thread_id`, and the bot hands it straight back,
+so a link pasted under a card is graded inside that card's thread.
+
+Point the same variable at the group instead and everything still works, minus
+the comments: the cards pile into one flat conversation.
+
+The id cannot be checked by eye — channels and discussion groups are both
+`-100`-prefixed — so every `depas watch` pass asks Telegram and logs
+`alerts: posting to a channel` (or `supergroup`) before it posts. That line is
+the fastest way to confirm a switch landed.
+
+Listings already announced carry a `notified_at` stamp and are never posted
+twice, so repointing the id does not move what already went out. `depas resend
+--hours N` clears the stamp on recent alerts and the next pass re-announces them
+to the new destination:
+
+```bash
+docker compose exec depas-cron depas resend --hours 6
+docker compose exec depas-cron depas watch
+```
 
 ## Schema
 

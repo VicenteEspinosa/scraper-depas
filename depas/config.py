@@ -83,7 +83,7 @@ def locations() -> list[Location]:
 
 
 def chat_id() -> str:
-    """The Telegram chat alerts are posted to."""
+    """The Telegram chat alerts are posted to: a channel for commentable cards, or any group."""
     _load_env_file()
     value = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     if not value:

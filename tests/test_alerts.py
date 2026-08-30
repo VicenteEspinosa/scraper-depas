@@ -1,10 +1,11 @@
 import argparse
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from depas.cli import _announce
 from depas.models import Listing
-from depas.store import connect, save, save_detail
+from depas.store import clear_notified, connect, save, save_detail
 from depas.telegram import format_listing
 
 
@@ -26,6 +27,7 @@ def sent(monkeypatch):
     posted = []
     monkeypatch.setattr("depas.cli.send_listing",
                         lambda chat, text, image=None, thread=None: posted.append((text, image)))
+    monkeypatch.setattr("depas.cli.chat_type", lambda chat: "channel")
     monkeypatch.setattr("depas.cli.time.sleep", lambda _: None)  # no real rate-limit wait
     return posted
 
@@ -265,3 +267,32 @@ def test_a_telegram_failure_reports_the_parameters_it_came_with(monkeypatch):
 
     with pytest.raises(RuntimeError, match="-1004361974965"):
         telegram.call("sendMessage", chat_id="-123", text="x")
+
+
+def test_un_stamping_announces_the_listings_again(connection, sent):
+    """Moving already-posted cards to another chat is exactly this: clear, then re-announce."""
+    _announce(connection, limit=10)
+
+    clear_notified(connection, hours=6)
+
+    assert _announce(connection, limit=10) == 4
+
+
+def test_un_stamping_leaves_older_alerts_where_they_are(connection, sent):
+    """The window is the whole point: a re-point moves the last batch, not the archive."""
+    _announce(connection, limit=10)
+    connection.execute("UPDATE listings SET notified_at = ? WHERE external_id = '0'",
+                       ((datetime.now(UTC) - timedelta(days=2)).isoformat(),))
+
+    cleared = clear_notified(connection, hours=6)
+
+    assert cleared == 3
+
+
+def test_a_pass_with_nothing_to_post_asks_telegram_nothing(connection, sent, monkeypatch):
+    """The destination lookup sits behind the candidate check, so a quiet hour stays quiet."""
+    _announce(connection, limit=10)
+    monkeypatch.setattr("depas.cli.chat_type",
+                        lambda chat: pytest.fail("nothing to post, so nothing to look up"))
+
+    assert _announce(connection, limit=10) == 0

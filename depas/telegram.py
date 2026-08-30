@@ -31,6 +31,11 @@ def call(method: str, **params: Any) -> Any:
     return payload["result"]
 
 
+def chat_type(chat_id: str) -> str:
+    """Whether alerts land in a channel, where each card gets a comment thread, or a group."""
+    return call("getChat", chat_id=chat_id)["type"]
+
+
 def chats() -> list[dict[str, Any]]:
     """Every chat the bot has seen a message from, newest update wins."""
     seen: dict[int, dict[str, Any]] = {}
@@ -84,7 +89,7 @@ def _escape(text: str) -> str:
 
 
 def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> str:
-    """Render one listing as the Telegram HTML card posted to the group."""
+    """Render one listing as the Telegram HTML card posted to the chat."""
     emoji = GRADE_EMOJI.get(grade.letter, "⚪")
     data_mark = PARTIAL_MARK if grade.missing else COMPLETE_MARK
     prefix = f"{TEST_MARK} " if is_test else ""
