@@ -1,0 +1,22 @@
+depas/bot.py
+  s_d5aea67bbb8509::t_de8605e3b19e7a 3-5,17-19,102-107,111-116
+tests/test_bot.py
+  s_d5aea67bbb8509::t_21e504d3e01667 1-2,4,6,171-215,221,226-228
+  s_d5aea67bbb8509::t_baba55ca4de990 216-220,222-225,229
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "838b06f5c8b892a09999684778fffa15368eb33b",
+  "prompts": {},
+  "sessions": {
+    "s_d5aea67bbb8509": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ffa7bb2f-c01d-4bfa-8578-96ba8f3787a7",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
