@@ -1,4 +1,4 @@
-name: Deploy to Oracle
+name: Deploy
 
 on:
   push:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-oracle-depas
+  group: deploy-depas
   cancel-in-progress: false
 
 permissions:
@@ -22,10 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # SSH_HOST / SSH_USER / DEPLOY_PATH are secrets, not vars: this repo is public,
+      # so its Actions logs are public and only secrets get masked in them.
       - name: Set up SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
@@ -35,9 +37,9 @@ jobs:
 
       - name: Apply and restart
         env:
-          SSH_HOST: ${{ vars.SSH_HOST }}
-          SSH_USER: ${{ vars.SSH_USER }}
-          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           TZ: ${{ vars.TZ }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -61,6 +63,10 @@ jobs:
             "DEPAS_ALERT_MIN_BEDROOMS=$DEPAS_ALERT_MIN_BEDROOMS" \
             "DEPAS_ALERT_MIN_GRADE=$DEPAS_ALERT_MIN_GRADE" \
             | base64 -w0)
+
+          # Actions masks a secret's literal value but not its base64 form, and this
+          # blob carries the bot token. Mask it so a failing step can never print it.
+          echo "::add-mask::$ENV_B64"
 
           ssh -o BatchMode=yes "$SSH_USER@$SSH_HOST" \
             "DEPLOY_PATH='$DEPLOY_PATH' GITHUB_SHA='$GITHUB_SHA' ENV_B64='$ENV_B64' bash -s" \
