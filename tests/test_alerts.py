@@ -124,3 +124,30 @@ def test_a_listing_that_misses_a_requirement_stays_eligible(connection, sent, mo
 def test_unset_requirements_impose_no_filter(connection, sent):
     """With nothing configured, every enriched listing is a candidate."""
     assert _announce(connection, limit=10) == 4
+
+
+def test_enrichment_downgrading_bedrooms_blocks_the_alert(connection, sent, monkeypatch):
+    """The card said 2D, the detail page says 1D — the alert must respect the corrected value."""
+    monkeypatch.setenv("DEPAS_ALERT_MIN_BEDROOMS", "2")
+    save(connection, [Listing(portal="pi", external_id="drift", url="https://x/drift",
+                              price=600_000, currency="CLP", price_clp=600_000,
+                              bedrooms=2, area_m2=50.0)])
+    save_detail(connection, "pi", "drift", {"bedrooms": 1, "walk_minutes": 1})
+
+    _announce(connection, limit=10)
+
+    posted_urls = [text for text in sent if "drift" in text]
+    assert posted_urls == []
+
+
+def test_alerts_are_confined_to_the_configured_communes(connection, sent, monkeypatch):
+    """A listing from outside DEPAS_ALERT_COMMUNES is never announced."""
+    monkeypatch.setenv("DEPAS_ALERT_COMMUNES", "nunoa")
+    save(connection, [Listing(portal="pi", external_id="far", url="https://x/far",
+                              price=600_000, currency="CLP", price_clp=600_000,
+                              commune="las-condes", area_m2=50.0)])
+    save_detail(connection, "pi", "far", {"walk_minutes": 1})
+
+    _announce(connection, limit=10)
+
+    assert [text for text in sent if "far" in text] == []
