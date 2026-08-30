@@ -14,3 +14,18 @@ services:
     volumes:
       - ./data:/data              # SQLite .db / .db-wal / .db-shm persist here
     command: ["supercronic", "/app/crontab"]
+
+  # Replies to portal links posted in the group. Long-polls getUpdates, so it
+  # needs no port and nothing needs to reach it. Same image as the cron sidecar.
+  depas-bot:
+    build: .
+    image: depas:local
+    container_name: depas-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=${TZ:-America/Santiago}
+      - DEPAS_DB_PATH=/data/depas.db
+    volumes:
+      - ./data:/data
+    command: ["depas", "bot"]

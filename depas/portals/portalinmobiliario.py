@@ -220,3 +220,37 @@ def _parse_price_benchmark(tree: HTMLParser) -> dict[str, float]:
             if match:
                 benchmark[column] = float(match.group(1).replace(",", "."))
     return benchmark
+
+
+PDP_PRICE = ".ui-pdp-price__second-line"
+
+
+def fetch_standalone(fetcher: Fetcher, url: str) -> Listing | None:
+    """Build a Listing from a detail page alone, for a link we have never scraped."""
+    listing_id = LISTING_ID.search(url)
+    if listing_id is None:
+        return None
+
+    tree = HTMLParser(fetcher.get(url).text)
+    price_block = tree.css_first(PDP_PRICE)
+    title = tree.css_first(".ui-pdp-title")
+    if price_block is None or title is None:
+        return None
+
+    symbol = price_block.css_first(".andes-money-amount__currency-symbol")
+    fraction = price_block.css_first(".andes-money-amount__fraction")
+    if symbol is None or fraction is None:
+        return None
+    amount = float(fraction.text(strip=True).replace(".", ""))
+    cents = price_block.css_first(".andes-money-amount__cents")
+    if cents is not None:
+        amount += float(cents.text(strip=True)) / 100
+
+    return Listing(
+        portal=NAME,
+        external_id=listing_id.group(1),
+        url=url.split("#")[0],
+        title=title.text(strip=True),
+        price=amount,
+        currency="UF" if symbol.text(strip=True) == "UF" else "CLP",
+    )
