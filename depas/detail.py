@@ -26,6 +26,7 @@ SPEC_COLUMNS: dict[str, tuple[str, str]] = {
     "Admite mascotas": ("pets_allowed", "INTEGER"),
     "Ascensor": ("has_elevator", "INTEGER"),
     "Conserjería": ("has_concierge", "INTEGER"),
+    "Tipo de seguridad": ("security_type", "TEXT"),
     "En condominio cerrado": ("gated_community", "INTEGER"),
     "Calefacción": ("has_heating", "INTEGER"),
     "Aire acondicionado": ("has_air_conditioning", "INTEGER"),
