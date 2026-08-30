@@ -6,16 +6,17 @@ from depas.communes import SANTIAGO_PROVINCE, Commune
 from depas.fetch import Fetcher
 from depas.models import Listing, Query
 from depas.portals import PORTALS, portalinmobiliario
-from depas.store import connect, save, save_detail
+from depas.metro import nearest_station
+from depas.store import connect, save, save_detail, set_setting
 from depas.uf import to_clp, uf_in_clp
 
 TOP_QUERY = """
-SELECT commune, bedrooms, area, ROUND(price_clp) AS rent, common_expenses,
-       ROUND(total_monthly_clp) AS total, ROUND(total_clp_per_m2) AS total_per_m2,
-       floor, has_elevator, published_days_ago, url
+SELECT commune, bedrooms, area, ROUND(price_clp) AS rent, common_expenses AS gastos,
+       parking_spaces AS est, storage_units AS bod, ROUND(net_monthly_clp) AS net,
+       nearest_station, walk_minutes, url
 FROM listings_ranked
-WHERE area > 0 AND is_project = 0
-ORDER BY COALESCE(total_clp_per_m2, clp_per_m2)
+WHERE is_project = 0 AND (? IS NULL OR walk_minutes <= ?)
+ORDER BY net_monthly_clp
 LIMIT ?
 """
 
@@ -73,6 +74,10 @@ def enrich(args: argparse.Namespace) -> None:
     try:
         for index, row in enumerate(pending, start=1):
             detail = portalinmobiliario.fetch_detail(fetcher, row["url"])
+            if detail.get("lat") is not None:
+                station, metres, minutes = nearest_station(detail["lat"], detail["lon"])
+                detail |= {"nearest_station": station, "station_distance_m": metres,
+                           "walk_minutes": minutes}
             save_detail(connection, row["portal"], row["external_id"], detail)
             print(f"\r{index}/{len(pending)} enriched", end="", flush=True)
     finally:
@@ -81,9 +86,17 @@ def enrich(args: argparse.Namespace) -> None:
     print(f"\n{len(pending)} listings enriched")
 
 
+def configure(args: argparse.Namespace) -> None:
+    connection = connect()
+    set_setting(connection, args.key.replace("-", "_"), args.value)
+    print(f"{args.key} = {args.value:,} CLP")
+    connection.close()
+
+
 def show(args: argparse.Namespace) -> None:
     connection = connect()
-    rows = connection.execute(args.sql or TOP_QUERY, () if args.sql else (args.limit,)).fetchall()
+    parameters = () if args.sql else (args.max_walk, args.max_walk, args.limit)
+    rows = connection.execute(args.sql or TOP_QUERY, parameters).fetchall()
     _print_table(rows)
     connection.close()
 
@@ -122,7 +135,13 @@ def main() -> None:
     viewer = subparsers.add_parser("show", help="best price per m2, or your own SQL")
     viewer.add_argument("sql", nargs="?")
     viewer.add_argument("--limit", type=int, default=20)
+    viewer.add_argument("--max-walk", type=int, help="max walking minutes to a metro station")
     viewer.set_defaults(func=show)
+
+    setter = subparsers.add_parser("set", help="set monthly lease income you expect to collect")
+    setter.add_argument("key", choices=["parking-income", "storage-income"])
+    setter.add_argument("value", type=int)
+    setter.set_defaults(func=configure)
 
     args = parser.parse_args()
     args.func(args)
