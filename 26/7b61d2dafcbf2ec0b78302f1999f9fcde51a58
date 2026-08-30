@@ -1,0 +1,15 @@
+tests/test_portalinmobiliario.py
+  ai_agent 1-99
+tests/test_store.py
+  ai_agent 1-38
+tests/fixtures/pi_unit_card.html
+  ai_agent 1
+tests/fixtures/pi_project_card.html
+  ai_agent 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "267b61d2dafcbf2ec0b78302f1999f9fcde51a58",
+  "prompts": {}
+}
