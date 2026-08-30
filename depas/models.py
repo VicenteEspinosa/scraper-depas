@@ -24,6 +24,7 @@ class Listing:
     area_m2: float | None = None
     commune: str | None = None
     address: str | None = None
+    image_url: str | None = None
     lat: float | None = None
     lon: float | None = None
     extra: dict = field(default_factory=dict)

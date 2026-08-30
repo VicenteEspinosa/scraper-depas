@@ -70,6 +70,7 @@ def _parse_card(card: Node, commune: Commune | None) -> Listing | None:
     amount, currency = price
     bedrooms, bathrooms, area_m2 = _parse_attributes(card)
     location = card.css_first(".poly-component__location")
+    picture = card.css_first("img.poly-component__picture")
     return Listing(
         portal=NAME,
         external_id=listing_id.group(1),
@@ -83,7 +84,19 @@ def _parse_card(card: Node, commune: Commune | None) -> Listing | None:
         area_m2=area_m2,
         commune=commune.value if commune else None,
         address=location.text(strip=True) if location else None,
+        image_url=_picture_url(picture),
     )
+
+
+def _picture_url(picture: Node | None) -> str | None:
+    """Cards above the fold carry a real src; lazy ones keep it in data-src."""
+    if picture is None:
+        return None
+    for attribute in ("src", "data-src"):
+        url = picture.attributes.get(attribute) or ""
+        if url.startswith("http"):
+            return url
+    return None
 
 
 def _parse_price(card: Node) -> tuple[float, str] | None:

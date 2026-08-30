@@ -17,7 +17,7 @@ def db_path() -> Path:
 
 FIELDS = (
     "url", "title", "price", "currency", "common_expenses", "is_project", "price_clp",
-    "bedrooms", "bathrooms", "area_m2", "commune", "address", "lat", "lon",
+    "bedrooms", "bathrooms", "area_m2", "commune", "address", "image_url", "lat", "lon",
 )
 
 
