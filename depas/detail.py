@@ -26,6 +26,7 @@ SPEC_COLUMNS: dict[str, tuple[str, str]] = {
     "Admite mascotas": ("pets_allowed", "INTEGER"),
     "Ascensor": ("has_elevator", "INTEGER"),
     "Conserjería": ("has_concierge", "INTEGER"),
+    "Tipo de seguridad": ("security_type", "TEXT"),
     "En condominio cerrado": ("gated_community", "INTEGER"),
     "Calefacción": ("has_heating", "INTEGER"),
     "Aire acondicionado": ("has_air_conditioning", "INTEGER"),
@@ -40,6 +41,14 @@ DETAIL_COLUMNS: dict[str, str] = {
     "published_label": "TEXT",
     "published_days_ago": "INTEGER",
     "features": "TEXT",
+    "nearest_station": "TEXT",
+    "station_distance_m": "INTEGER",
+    "walk_minutes": "INTEGER",
+    "walk_source": "TEXT",
+    "transit": "TEXT",
+    "broker": "TEXT",
+    "price_per_m2_uf": "REAL",
+    "zone_price_per_m2_uf": "REAL",
     "detail_fetched_at": "TEXT",
 }
 

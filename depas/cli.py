@@ -6,17 +6,15 @@ from depas.communes import SANTIAGO_PROVINCE, Commune
 from depas.fetch import Fetcher
 from depas.models import Listing, Query
 from depas.portals import PORTALS, portalinmobiliario
+from depas.metro import nearest_station
 from depas.store import connect, save, save_detail
 from depas.uf import to_clp, uf_in_clp
 
 TOP_QUERY = """
-SELECT commune, bedrooms, area, ROUND(price_clp) AS rent, common_expenses,
-       ROUND(total_monthly_clp) AS total, ROUND(total_clp_per_m2) AS total_per_m2,
-       floor, has_elevator, published_days_ago, url
+SELECT commune, bedrooms, area, floor, ROUND(price_clp) AS rent, common_expenses AS gastos,
+       parking_spaces AS est, storage_units AS bod, ROUND(net_monthly_clp) AS net,
+       nearest_station, walk_minutes AS walk, security_type, url
 FROM listings_ranked
-WHERE area > 0 AND is_project = 0
-ORDER BY COALESCE(total_clp_per_m2, clp_per_m2)
-LIMIT ?
 """
 
 
@@ -73,6 +71,10 @@ def enrich(args: argparse.Namespace) -> None:
     try:
         for index, row in enumerate(pending, start=1):
             detail = portalinmobiliario.fetch_detail(fetcher, row["url"])
+            if "nearest_station" not in detail and detail.get("lat") is not None:
+                station, metres, minutes = nearest_station(detail["lat"], detail["lon"])
+                detail |= {"nearest_station": station, "station_distance_m": metres,
+                           "walk_minutes": minutes, "walk_source": "computed"}
             save_detail(connection, row["portal"], row["external_id"], detail)
             print(f"\r{index}/{len(pending)} enriched", end="", flush=True)
     finally:
@@ -81,9 +83,37 @@ def enrich(args: argparse.Namespace) -> None:
     print(f"\n{len(pending)} listings enriched")
 
 
+FILTERS = (
+    ("max_cost", "net_monthly_clp <= ?"),
+    ("max_walk", "walk_minutes <= ?"),
+    ("min_floor", "floor >= ?"),
+    ("min_bedrooms", "bedrooms >= ?"),
+    ("min_area", "area >= ?"),
+    ("security", "security_type = ?"),
+)
+
+
+def _build_query(args: argparse.Namespace) -> tuple[str, tuple[object, ...]]:
+    """Assemble the ranked query from whichever filters were actually given."""
+    conditions = ["is_project = 0"]
+    parameters: list[object] = []
+    for name, condition in FILTERS:
+        value = getattr(args, name)
+        if value is not None:
+            conditions.append(condition)
+            parameters.append(value)
+    if args.commune:
+        conditions.append(f"commune IN ({', '.join('?' * len(args.commune))})")
+        parameters.extend(commune.value for commune in args.commune)
+
+    query = f"{TOP_QUERY}\nWHERE {' AND '.join(conditions)}\nORDER BY net_monthly_clp\nLIMIT ?"
+    return query, (*parameters, args.limit)
+
+
 def show(args: argparse.Namespace) -> None:
     connection = connect()
-    rows = connection.execute(args.sql or TOP_QUERY, () if args.sql else (args.limit,)).fetchall()
+    query, parameters = (args.sql, ()) if args.sql else _build_query(args)
+    rows = connection.execute(query, parameters).fetchall()
     _print_table(rows)
     connection.close()
 
@@ -122,6 +152,14 @@ def main() -> None:
     viewer = subparsers.add_parser("show", help="best price per m2, or your own SQL")
     viewer.add_argument("sql", nargs="?")
     viewer.add_argument("--limit", type=int, default=20)
+    viewer.add_argument("--max-walk", type=int, help="max walking minutes to a metro station")
+    viewer.add_argument("--max-cost", type=int, help="max net monthly cost in CLP")
+    viewer.add_argument("--min-floor", type=int)
+    viewer.add_argument("--min-bedrooms", type=int)
+    viewer.add_argument("--min-area", type=float, help="minimum useful m2")
+    viewer.add_argument("--security", help='e.g. "24 horas"')
+    viewer.add_argument("--commune", action="append", default=[], type=Commune,
+                        choices=list(Commune), metavar="SLUG")
     viewer.set_defaults(func=show)
 
     args = parser.parse_args()

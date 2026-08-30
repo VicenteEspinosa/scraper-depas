@@ -3,6 +3,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from depas.config import lease_income
 from depas.detail import DETAIL_COLUMNS
 from depas.models import Listing
 
@@ -42,14 +43,12 @@ CREATE TABLE IF NOT EXISTS price_history (
 CREATE INDEX IF NOT EXISTS idx_price_history_listing
     ON price_history (portal, external_id, seen_at);
 
-CREATE VIEW IF NOT EXISTS listings_ranked AS
-SELECT *,
-       COALESCE(area_useful_m2, area_m2)              AS area,
-       price_clp / NULLIF(COALESCE(area_useful_m2, area_m2), 0) AS clp_per_m2,
-       price_clp + COALESCE(common_expenses, 0)       AS total_monthly_clp,
-       (price_clp + COALESCE(common_expenses, 0))
-           / NULLIF(COALESCE(area_useful_m2, area_m2), 0) AS total_clp_per_m2
-FROM listings;
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+);
+
+INSERT OR IGNORE INTO settings (key, value) VALUES ('parking_income', 0), ('storage_income', 0);
 """
 
 FIELDS = (
@@ -63,7 +62,32 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     connection.executescript(SCHEMA)
     _add_detail_columns(connection)
+    connection.executescript(RANKED_VIEW)
+    _sync_lease_income(connection)
     return connection
+
+
+RANKED_VIEW = """
+DROP VIEW IF EXISTS listings_ranked;
+CREATE VIEW listings_ranked AS
+SELECT *,
+       COALESCE(area_useful_m2, area_m2)        AS area,
+       price_clp + COALESCE(common_expenses, 0) AS total_monthly_clp,
+       price_clp + COALESCE(common_expenses, 0)
+           - COALESCE(parking_spaces, 0) * (SELECT value FROM settings WHERE key = 'parking_income')
+           - COALESCE(storage_units, 0)  * (SELECT value FROM settings WHERE key = 'storage_income')
+                                                AS net_monthly_clp
+FROM listings;
+"""
+
+
+def _sync_lease_income(connection: sqlite3.Connection) -> None:
+    """Mirror the environment into `settings` so the ranked view can read it from SQL."""
+    for kind in ("parking", "storage"):
+        connection.execute(
+            "UPDATE settings SET value = ? WHERE key = ?", (lease_income(kind), f"{kind}_income")
+        )
+    connection.commit()
 
 
 def _add_detail_columns(connection: sqlite3.Connection) -> None:

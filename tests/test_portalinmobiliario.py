@@ -8,8 +8,9 @@ from selectolax.parser import HTMLParser
 
 from depas.communes import Commune
 from depas.detail import parse_specs, published_days_ago
+from depas.metro import DETOUR_FACTOR, WALK_SPEED_M_PER_MIN, nearest_station
 from depas.models import Query
-from depas.portals.portalinmobiliario import _build_url, _parse_card, search
+from depas.portals.portalinmobiliario import _build_url, _parse_card, _parse_transit, search
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -97,3 +98,38 @@ def test_specs_promote_known_fields_and_keep_the_rest_as_features():
 
     assert (parsed["common_expenses"], parsed["has_elevator"]) == (90_000, 1)
     assert json.loads(parsed["features"]) == {"salon_de_usos_multiples": True}
+
+
+def test_nearest_station_finds_the_station_at_its_own_coordinates():
+    """A listing on top of El Golf resolves to El Golf at zero distance."""
+    assert nearest_station(-33.41662, -70.59571) == ("El Golf", 0, 0)
+
+
+def test_walk_minutes_scale_with_distance():
+    """Walking time applies the detour factor to the straight-line distance."""
+    _, metres, minutes = nearest_station(-33.4727258, -70.6191702)
+
+    assert minutes == round(metres * DETOUR_FACTOR / WALK_SPEED_M_PER_MIN)
+
+
+def test_portal_transit_beats_the_computed_estimate():
+    """The portal's own routed walk times are parsed per section, metro and bus separately."""
+    tree = HTMLParser((FIXTURES / "pi_poi_section.html").read_text())
+
+    transit = _parse_transit(tree)
+
+    assert [p["name"] for p in transit["estaciones_de_metro"]][:2] == ["Rodrigo de Araya", "Ñuble"]
+    assert transit["estaciones_de_metro"][0] == {"name": "Rodrigo de Araya", "minutes": 12, "metres": 927}
+    assert transit["paraderos"][0]["metres"] == 262
+
+
+def test_kilometre_distances_are_normalised_to_metres():
+    """A '1,1 km' subtitle becomes 1100 metres, not 1.1."""
+    html = ('<div class="ui-vip-poi__subsection">'
+            '<span class="ui-vip-poi__subsection-title">Estaciones de metro</span>'
+            '<div class="ui-vip-poi__item"><div class="ui-vip-poi__item-title">Lejana</div>'
+            '<div class="ui-vip-poi__item-subtitle">14 mins - 1,1 km</div></div></div>')
+
+    transit = _parse_transit(HTMLParser(html))
+
+    assert transit["estaciones_de_metro"][0]["metres"] == 1100

@@ -1,0 +1,25 @@
+import os
+from pathlib import Path
+
+ENV_FILE = Path(".env")
+
+
+def _load_env_file() -> None:
+    """Read .env into the environment without overriding anything already exported."""
+    if not ENV_FILE.exists():
+        return
+    for line in ENV_FILE.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+def lease_income(kind: str) -> int:
+    """Monthly CLP a parking space or storage unit is expected to earn, from the environment."""
+    _load_env_file()
+    raw = os.environ.get(f"DEPAS_{kind.upper()}_INCOME", "0")
+    if not raw.isdigit():
+        raise ValueError(f"DEPAS_{kind.upper()}_INCOME must be a whole number of CLP, got {raw!r}")
+    return int(raw)
