@@ -15,9 +15,12 @@ def db_path() -> Path:
     return Path(os.environ.get("DEPAS_DB_PATH", "depas.db"))
 
 
+# Only what a search card actually carries. Detail-page columns (gastos comunes,
+# coordinates, specs) are owned by save_detail — listing them here would blank
+# them on the next re-scrape, because the card has nothing to put in their place.
 FIELDS = (
-    "url", "title", "price", "currency", "common_expenses", "is_project", "price_clp",
-    "bedrooms", "bathrooms", "area_m2", "commune", "address", "image_url", "lat", "lon",
+    "url", "title", "price", "currency", "is_project", "price_clp",
+    "bedrooms", "bathrooms", "area_m2", "commune", "address", "image_url",
 )
 
 
