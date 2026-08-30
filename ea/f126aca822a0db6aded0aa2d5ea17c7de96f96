@@ -1,0 +1,32 @@
+tests/test_grade.py
+  s_79ce7d51f427bf::t_4b8cac222cd465 3,70-71
+  s_79ce7d51f427bf::t_18a3eee668a09d 97-129
+.github/workflows/deploy.yml
+  s_79ce7d51f427bf::t_66db0de17e4c39 75
+  s_79ce7d51f427bf::t_73191f445009a2 55
+depas/grade.py
+  s_79ce7d51f427bf::t_45d8f98d82655c 12,84-101
+depas/cli.py
+  s_79ce7d51f427bf::t_bf811485d2f90d 124-125
+depas/telegram.py
+  s_79ce7d51f427bf::t_bf811485d2f90d 6,49-63,122-124
+.env.example
+  s_79ce7d51f427bf::t_cd36cd05204cb9 13-14,40
+  s_79ce7d51f427bf::t_18a3eee668a09d 37-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "eaf126aca822a0db6aded0aa2d5ea17c7de96f96",
+  "prompts": {},
+  "sessions": {
+    "s_79ce7d51f427bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b5c2c0fe-8751-4188-8fb6-338419856ade",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
