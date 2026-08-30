@@ -1,0 +1,19 @@
+depas/telegram.py
+  s_79ce7d51f427bf::t_14ceec8fb319b4 65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "206008a0edc45e3f09fbbf3cb8fe0630e55d0238",
+  "prompts": {},
+  "sessions": {
+    "s_79ce7d51f427bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b5c2c0fe-8751-4188-8fb6-338419856ade",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
