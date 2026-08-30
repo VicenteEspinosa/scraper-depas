@@ -81,7 +81,8 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) -> 
         if graded is None:
             continue
         row, grade = graded
-        send_listing(str(message["chat"]["id"]), format_listing(row, grade), row.get("image_url"))
+        send_listing(str(message["chat"]["id"]), format_listing(row, grade), row.get("image_url"),
+                     message.get("message_thread_id"))
 
 
 def run() -> None:
