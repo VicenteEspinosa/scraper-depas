@@ -4,7 +4,7 @@ import time
 from collections.abc import Iterator
 
 from depas.communes import SANTIAGO_PROVINCE, Commune
-from depas.config import alert_communes, chat_id, optional_int
+from depas.config import alert_communes, chat_id, optional_int, optional_text
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.models import Listing, Query
@@ -117,12 +117,36 @@ def _build_query(args: argparse.Namespace) -> tuple[str, tuple[object, ...]]:
 
 ALERT_DELAY_SECONDS = 3
 
+# Requirements that only exist once a listing is enriched, so they cannot be applied
+# during the scrape the way price and bedrooms are.
+ALERT_REQUIREMENTS = (
+    ("DEPAS_ALERT_MAX_COST", "net_monthly_clp <= ?", optional_int),
+    ("DEPAS_ALERT_MAX_WALK", "walk_minutes <= ?", optional_int),
+    ("DEPAS_ALERT_MIN_FLOOR", "floor >= ?", optional_int),
+    ("DEPAS_ALERT_MIN_AREA", "area >= ?", optional_int),
+    ("DEPAS_ALERT_SECURITY", "security_type = ?", optional_text),
+)
+
+
+def _requirement_clauses() -> tuple[list[str], list[object]]:
+    """Only the requirements actually configured become WHERE conditions."""
+    conditions, parameters = [], []
+    for name, condition, read in ALERT_REQUIREMENTS:
+        value = read(name)
+        if value is not None:
+            conditions.append(condition)
+            parameters.append(value)
+    return conditions, parameters
+
 
 def _announce(connection: sqlite3.Connection, limit: int) -> int:
     """Post enriched, un-announced listings that clear DEPAS_ALERT_MIN_GRADE."""
+    conditions, parameters = _requirement_clauses()
     candidates = connection.execute(
         "SELECT * FROM listings_ranked "
         "WHERE notified_at IS NULL AND detail_fetched_at IS NOT NULL AND is_project = 0"
+        + "".join(f" AND {condition}" for condition in conditions),
+        parameters,
     ).fetchall()
     if not candidates:
         return 0

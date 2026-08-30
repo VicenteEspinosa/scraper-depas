@@ -55,3 +55,9 @@ def chat_id() -> str:
     if not value:
         raise ValueError("set TELEGRAM_CHAT_ID (run `depas chats` to find it)")
     return value
+
+
+def optional_text(name: str) -> str | None:
+    _load_env_file()
+    value = os.environ.get(name, "").strip()
+    return value or None
