@@ -4,6 +4,7 @@ from collections.abc import Iterator
 
 from depas.communes import SANTIAGO_PROVINCE, Commune
 from depas.fetch import Fetcher
+from depas.grade import Scale
 from depas.models import Listing, Query
 from depas.portals import PORTALS, portalinmobiliario
 from depas.metro import nearest_station
@@ -11,10 +12,7 @@ from depas.store import connect, save, save_detail
 from depas.uf import to_clp, uf_in_clp
 
 TOP_QUERY = """
-SELECT commune, bedrooms, area, floor, ROUND(price_clp) AS rent, common_expenses AS gastos,
-       parking_spaces AS est, storage_units AS bod, ROUND(net_monthly_clp) AS net,
-       nearest_station, walk_minutes AS walk, security_type, url
-FROM listings_ranked
+SELECT * FROM listings_ranked
 """
 
 
@@ -106,19 +104,49 @@ def _build_query(args: argparse.Namespace) -> tuple[str, tuple[object, ...]]:
         conditions.append(f"commune IN ({', '.join('?' * len(args.commune))})")
         parameters.extend(commune.value for commune in args.commune)
 
-    query = f"{TOP_QUERY}\nWHERE {' AND '.join(conditions)}\nORDER BY net_monthly_clp\nLIMIT ?"
-    return query, (*parameters, args.limit)
+    return f"{TOP_QUERY}\nWHERE {' AND '.join(conditions)}", tuple(parameters)
 
 
 def show(args: argparse.Namespace) -> None:
     connection = connect()
     query, parameters = (args.sql, ()) if args.sql else _build_query(args)
     rows = connection.execute(query, parameters).fetchall()
-    _print_table(rows)
+    if args.sql:
+        _print_table(rows)
+        return
+    pool = connection.execute(
+        "SELECT * FROM listings_ranked WHERE detail_fetched_at IS NOT NULL"
+    ).fetchall()
+    scale = Scale([dict(row) for row in pool])
+    # grading ranks against the whole pool, so the limit can only be applied afterwards
+    graded = sorted((_summarise(row, scale) for row in rows),
+                    key=lambda row: row["score"], reverse=True)
+    _print_table([{k: v for k, v in row.items() if k != "score"} for row in graded[:args.limit]])
+    if any(row["grade"].endswith("*") for row in graded[:args.limit]):
+        print("\n* graded on partial data — see the 'on' column for how many of 5 components")
     connection.close()
 
 
-def _print_table(rows: list[sqlite3.Row]) -> None:
+SUMMARY_COLUMNS = ("commune", "bedrooms", "area", "floor", "gastos", "est", "bod",
+                   "net", "nearest_station", "walk", "url")
+
+
+def _summarise(row: sqlite3.Row, scale: Scale) -> dict[str, object]:
+    """One display row: the fields worth scanning, led by the grade."""
+    scored = scale.grade(dict(row))
+    return {
+        "grade": f"{scored.letter} {scored.score}" + ("*" if scored.missing else ""),
+        "score": scored.score,
+        "on": f"{len(scored.parts)}/5",
+        "commune": row["commune"], "bedrooms": row["bedrooms"], "area": row["area"],
+        "floor": row["floor"], "rent": round(row["price_clp"]),
+        "gastos": row["common_expenses"], "est": row["parking_spaces"],
+        "bod": row["storage_units"], "net": round(row["net_monthly_clp"]),
+        "metro": row["nearest_station"], "walk": row["walk_minutes"], "url": row["url"],
+    }
+
+
+def _print_table(rows: list[sqlite3.Row] | list[dict[str, object]]) -> None:
     if not rows:
         print("no rows")
         return
