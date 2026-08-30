@@ -133,3 +133,14 @@ def test_kilometre_distances_are_normalised_to_metres():
     transit = _parse_transit(HTMLParser(html))
 
     assert transit["estaciones_de_metro"][0]["metres"] == 1100
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("160 CLP", None), ("2 CLP", None),
+                                               ("90.000 CLP", 90_000), ("10.000 CLP", 10_000)])
+def test_implausibly_low_gastos_are_treated_as_undeclared(raw, expected):
+    """A publisher typing 160 for 160.000 would silently understate the net cost."""
+    parsed = parse_specs([("Gastos comunes", raw)])
+
+    assert parsed.get("common_expenses") == expected
+    if expected is None:
+        assert json.loads(parsed["features"])["gastos_comunes"] == raw

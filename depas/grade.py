@@ -2,14 +2,14 @@ import os
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 
-from depas.config import _load_env_file, optional_int, target_cost
+from depas.config import _load_env_file, optional_int, optional_text, target_cost
 
 # Amenities a listing is credited for having; the raw score is the fraction present.
 AMENITIES = (
     "has_elevator", "has_concierge", "has_heating", "has_air_conditioning",
     "has_pool", "has_gym", "has_terrace", "gated_community", "pets_allowed",
 )
-COMPONENTS = ("value", "cost", "location", "size", "amenities")
+COMPONENTS = ("value", "cost", "location", "size", "amenities", "security")
 LETTERS = ((90, "A"), (75, "B"), (50, "C"), (25, "D"))
 
 
@@ -29,29 +29,33 @@ def _value(row: dict) -> float | None:
     return None if not asking or not zone else -(asking / zone)
 
 
-def _cost(row: dict) -> float | None:
-    """Cheaper ranks better; with a target set, anything within budget ties at the top.
+def _against_target(value: float, target: int | None, ceiling: int | None) -> float:
+    """Lower is better. Meeting the target ties at the top; past it, score falls to the ceiling.
 
-    Being under budget is not a competition — once a listing is affordable the other
-    components should decide it. Without a target this falls back to plain percentile.
+    Beating a target is not a competition — once a listing qualifies the other components
+    should decide it. Without a target this is just the negated value, i.e. a percentile.
     """
+    if target is None:
+        return -value
+    if value <= target:
+        return 0.0
+    span = (ceiling - target) if ceiling and ceiling > target else target
+    return -min((value - target) / span, 1.0)
+
+
+def _cost(row: dict) -> float | None:
     net = row.get("net_monthly_clp")
     if not net:
         return None
-    target = target_cost()
-    if target is None:
-        return -net
-    if net <= target:
-        return 0.0
-    ceiling = optional_int("DEPAS_ALERT_MAX_COST")
-    overspend = net - target
-    span = (ceiling - target) if ceiling and ceiling > target else target
-    return -min(overspend / span, 1.0)
+    return _against_target(net, target_cost(), optional_int("DEPAS_ALERT_MAX_COST"))
 
 
 def _location(row: dict) -> float | None:
     walk = row.get("walk_minutes")
-    return None if walk is None else -walk
+    if walk is None:
+        return None
+    return _against_target(walk, optional_int("DEPAS_TARGET_WALK"),
+                           optional_int("DEPAS_ALERT_MAX_WALK"))
 
 
 def _size(row: dict) -> float | None:
@@ -65,8 +69,20 @@ def _amenities(row: dict) -> float | None:
     return sum(bool(value) for value in present) / len(AMENITIES)
 
 
+def _security(row: dict) -> float | None:
+    """Wanted security is a preference, not a cutoff: missing it costs score, not the alert.
+
+    An undeclared type counts as unmet rather than unknown — otherwise listings that
+    simply omit the field would skip the component and outrank ones that state it.
+    """
+    wanted = optional_text("DEPAS_ALERT_SECURITY")
+    if wanted is None:
+        return None
+    return float(row.get("security_type") == wanted)
+
+
 RAW = {"value": _value, "cost": _cost, "location": _location,
-       "size": _size, "amenities": _amenities}
+       "size": _size, "amenities": _amenities, "security": _security}
 
 
 def _weights() -> dict[str, float]:
@@ -101,6 +117,9 @@ class Scale:
             name: sorted(value for row in rows if (value := RAW[name](row)) is not None)
             for name in COMPONENTS
         }
+        # `security` scores nothing unless the preference is set; treating that as
+        # missing data would put a partial-data mark on every listing.
+        self.applicable = {name for name, values in self.components.items() if values}
         self.composites = sorted(self._composite(row) for row in rows) if rows else []
 
     def _composite(self, row: dict) -> float:
@@ -108,6 +127,8 @@ class Scale:
         if not parts:
             return 0.0
         weight = sum(self.weights[name] for name in parts)
+        if weight == 0:
+            return 0.0
         return sum(parts[name] * self.weights[name] for name in parts) / weight
 
     def _parts(self, row: dict) -> dict[str, float]:
@@ -125,5 +146,5 @@ class Scale:
             return Grade(0, "?", {}, COMPONENTS)
         score = round(_percentile(self.composites, self._composite(row)))
         letter = next((letter for cutoff, letter in LETTERS if score >= cutoff), "E")
-        missing = tuple(name for name in COMPONENTS if name not in parts)
+        missing = tuple(name for name in self.applicable if name not in parts)
         return Grade(score, letter, {k: round(v) for k, v in parts.items()}, missing)

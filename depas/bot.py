@@ -4,17 +4,12 @@ import sqlite3
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.metro import nearest_station
-from depas.portals import portalinmobiliario
-from depas.portals.portalinmobiliario import LISTING_HOSTS, clean_url
+from depas.portals import PORTALS
+from depas.portals.portalinmobiliario import clean_url
 from depas.store import connect, save, save_detail
+from depas.uf import normalize
 from depas.telegram import call, format_listing, send_listing
-from depas.uf import to_clp, uf_in_clp
 
-# Both hosts serve the same listings under the same MLC ids, so a link to either
-# resolves to one row.
-LISTING_LINK = re.compile(
-    r"https?://[\w.-]*(?:" + "|".join(h.replace(".", r"\.") for h in LISTING_HOSTS) + r")/\S*?MLC-\d+\S*"
-)
 POLL_TIMEOUT = 30
 OFFSET_KEY = "telegram_offset"
 
@@ -33,27 +28,37 @@ def _remember_offset(connection: sqlite3.Connection, offset: int) -> None:
     connection.commit()
 
 
-def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher, url: str) -> tuple[dict, object] | None:
+def find_links(text: str) -> list[tuple[str, str]]:
+    """Every recognised listing link in a message, as (portal name, canonical url)."""
+    # finditer, not findall: a pattern with a capture group would yield the group.
+    found = [(name, clean_url(match.group(0)))
+             for name, portal in PORTALS.items()
+             for match in portal.LISTING_URL.finditer(text)]
+    return list(dict.fromkeys(found))
+
+
+def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher,
+                portal_name: str, url: str) -> tuple[dict, object] | None:
     """Return the stored row for a pasted link, fetching and enriching it if unseen."""
-    listing_id = portalinmobiliario.LISTING_ID.search(url)
-    if listing_id is None:
+    portal = PORTALS[portal_name]
+    identifier = portal.listing_id(url)
+    if identifier is None:
         return None
-    key = (portalinmobiliario.NAME, listing_id.group(1))
+    key = (portal_name, identifier)
 
     if connection.execute(
         "SELECT 1 FROM listings WHERE portal = ? AND external_id = ?", key
     ).fetchone() is None:
-        listing = portalinmobiliario.fetch_standalone(fetcher, url)
+        listing = portal.fetch_standalone(fetcher, url)
         if listing is None:
             return None
-        listing.price_clp = to_clp(listing.price, listing.currency, uf_in_clp(fetcher))
-        save(connection, [listing])
+        save(connection, [normalize(listing, fetcher)])
 
     row = connection.execute(
         "SELECT * FROM listings WHERE portal = ? AND external_id = ?", key
     ).fetchone()
     if row["detail_fetched_at"] is None:
-        detail = portalinmobiliario.fetch_detail(fetcher, row["url"])
+        detail = portal.fetch_detail(fetcher, row["url"])
         if "nearest_station" not in detail and detail.get("lat") is not None:
             station, metres, minutes = nearest_station(detail["lat"], detail["lon"])
             detail |= {"nearest_station": station, "station_distance_m": metres,
@@ -70,9 +75,9 @@ def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher, url: str) -> t
 
 
 def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) -> None:
-    links = LISTING_LINK.findall(message.get("text") or message.get("caption") or "")
-    for url in dict.fromkeys(clean_url(link) for link in links):
-        graded = _grade_link(connection, fetcher, url)
+    text = message.get("text") or message.get("caption") or ""
+    for portal_name, url in find_links(text):
+        graded = _grade_link(connection, fetcher, portal_name, url)
         if graded is None:
             continue
         row, grade = graded

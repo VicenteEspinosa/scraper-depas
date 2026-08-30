@@ -67,8 +67,30 @@ def test_weights_shift_the_ranking(monkeypatch):
 
 def test_all_weights_zero_fails_loudly(monkeypatch):
     """A .env that zeroes everything must raise, not divide by zero."""
-    for component in ("VALUE", "COST", "LOCATION", "SIZE", "AMENITIES"):
+    for component in ("VALUE", "COST", "LOCATION", "SIZE", "AMENITIES", "SECURITY"):
         monkeypatch.setenv(f"DEPAS_WEIGHT_{component}", "0")
 
     with pytest.raises(ValueError, match="at least one"):
         Scale(_pool())
+
+
+def test_security_is_scored_not_filtered(monkeypatch):
+    """Wanting 24h security lowers the score of listings without it, never excludes them."""
+    monkeypatch.setenv("DEPAS_ALERT_SECURITY", "24 horas")
+    pool = [{"security_type": s, "net_monthly_clp": 700_000, "area": 50.0, "walk_minutes": 5}
+            for s in ("24 horas", None, "conserje diurno")]
+    scale = Scale(pool)
+
+    wanted, absent, other = (scale.grade(row) for row in pool)
+
+    assert wanted.score > absent.score
+    assert absent.score == other.score
+    assert all(g.letter != "?" for g in (wanted, absent, other))
+
+
+def test_an_unset_security_preference_is_not_a_missing_component(monkeypatch):
+    """Without the preference set, no listing should be marked as partially graded for it."""
+    monkeypatch.delenv("DEPAS_ALERT_SECURITY", raising=False)
+    pool = [{"net_monthly_clp": 700_000, "area": 50.0, "walk_minutes": 5, "has_elevator": 1}]
+
+    assert "security" not in Scale(pool).grade(pool[0]).missing

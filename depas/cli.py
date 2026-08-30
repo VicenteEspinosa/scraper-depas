@@ -9,11 +9,11 @@ from depas.config import alert_communes, chat_id, max_rent, optional_int, option
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.models import Listing, Query
-from depas.portals import PORTALS, portalinmobiliario
+from depas.portals import PORTALS
 from depas.metro import nearest_station
 from depas.store import connect, mark_notified, save, save_detail
 from depas.telegram import chats, format_listing, send_listing
-from depas.uf import to_clp, uf_in_clp
+from depas.uf import normalize
 
 TOP_QUERY = """
 SELECT * FROM listings_ranked
@@ -33,7 +33,7 @@ def scrape(args: argparse.Namespace) -> None:
     try:
         for name in args.portals or PORTALS:
             try:
-                counts = save(connection, _matching(PORTALS[name](fetcher, query), fetcher, query))
+                counts = save(connection, _matching(PORTALS[name].search(fetcher, query), fetcher, query))
             except NotImplementedError as error:
                 print(f"{name}: skipped ({error})")
                 continue
@@ -47,9 +47,8 @@ def _matching(
     listings: Iterator[Listing], fetcher: Fetcher, query: Query
 ) -> Iterator[Listing]:
     """Normalize UF prices to CLP; portal-side filters are unreliable, so re-check them here."""
-    uf_value = uf_in_clp(fetcher)
     for listing in listings:
-        listing.price_clp = to_clp(listing.price, listing.currency, uf_value)
+        normalize(listing, fetcher)
         if query.min_price is not None and listing.price_clp < query.min_price:
             continue
         if query.max_price is not None and listing.price_clp > query.max_price:
@@ -63,7 +62,7 @@ def _matching(
 
 def _enrich_one(connection: sqlite3.Connection, fetcher: Fetcher, row: sqlite3.Row) -> None:
     """Fetch one detail page, falling back to a computed walk when the portal omits one."""
-    detail = portalinmobiliario.fetch_detail(fetcher, row["url"])
+    detail = PORTALS[row["portal"]].fetch_detail(fetcher, row["url"])
     if "nearest_station" not in detail and detail.get("lat") is not None:
         station, metres, minutes = nearest_station(detail["lat"], detail["lon"])
         detail |= {"nearest_station": station, "station_distance_m": metres,
@@ -75,8 +74,8 @@ def enrich(args: argparse.Namespace) -> None:
     connection = connect()
     pending = connection.execute(
         "SELECT portal, external_id, url FROM listings "
-        "WHERE detail_fetched_at IS NULL AND portal = ? LIMIT ?",
-        (portalinmobiliario.NAME, args.limit),
+        "WHERE detail_fetched_at IS NULL LIMIT ?",
+        (args.limit,),
     ).fetchall()
 
     fetcher = Fetcher()
@@ -102,7 +101,8 @@ FILTERS = (
 
 def _build_query(args: argparse.Namespace) -> tuple[str, tuple[object, ...]]:
     """Assemble the ranked query from whichever filters were actually given."""
-    conditions = ["is_project = 0"]
+    # An unenriched listing would be graded on two components and beat everything.
+    conditions = ["is_project = 0", "detail_fetched_at IS NOT NULL"]
     parameters: list[object] = []
     for name, condition in FILTERS:
         value = getattr(args, name)
@@ -127,7 +127,6 @@ ALERT_REQUIREMENTS = (
     ("DEPAS_ALERT_MAX_WALK", "walk_minutes <= ?", optional_int),
     ("DEPAS_ALERT_MIN_FLOOR", "floor >= ?", optional_int),
     ("DEPAS_ALERT_MIN_AREA", "area >= ?", optional_int),
-    ("DEPAS_ALERT_SECURITY", "security_type = ?", optional_text),
 )
 
 
@@ -194,8 +193,12 @@ def watch(args: argparse.Namespace) -> None:
     fetcher = Fetcher()
     connection = connect()
     try:
-        counts = save(connection, _matching(portalinmobiliario.search(fetcher, query), fetcher, query))
-        print(f"scrape: {counts['new']} new, {counts['price_changed']} price changed")
+        for name, portal in PORTALS.items():
+            try:
+                counts = save(connection, _matching(portal.search(fetcher, query), fetcher, query))
+            except NotImplementedError:
+                continue
+            print(f"scrape {name}: {counts['new']} new, {counts['price_changed']} price changed")
 
         pending = connection.execute(
             "SELECT portal, external_id, url FROM listings WHERE detail_fetched_at IS NULL LIMIT ?",

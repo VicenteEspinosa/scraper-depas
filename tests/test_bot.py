@@ -1,6 +1,6 @@
 import pytest
 
-from depas.bot import LISTING_LINK, _handle, _offset, _remember_offset
+from depas.bot import _handle, _offset, _remember_offset, find_links
 from depas.models import Listing
 from depas.store import connect, save, save_detail
 
@@ -36,14 +36,14 @@ def sent(monkeypatch):
 )
 def test_link_detection(text, expected):
     """Only Portal Inmobiliario listing URLs are picked out of ordinary chat."""
-    assert len(LISTING_LINK.findall(text)) == expected
+    assert len(find_links(text)) == expected
 
 
 def test_a_known_link_is_answered_without_refetching(connection, sent, monkeypatch):
     """A listing already in the database is graded from storage, with no HTTP call."""
-    monkeypatch.setattr("depas.bot.portalinmobiliario.fetch_standalone",
+    monkeypatch.setattr("depas.portals.portalinmobiliario.fetch_standalone",
                         lambda *a: pytest.fail("should not refetch a known listing"))
-    monkeypatch.setattr("depas.bot.portalinmobiliario.fetch_detail",
+    monkeypatch.setattr("depas.portals.portalinmobiliario.fetch_detail",
                         lambda *a: pytest.fail("should not re-enrich"))
 
     _handle(connection, None, {"chat": {"id": -100},
@@ -88,7 +88,7 @@ def test_the_offset_survives_a_restart(connection):
 )
 def test_mercadolibre_links_are_recognised(url):
     """Portal Inmobiliario is MercadoLibre's vertical, so either host is the same listing."""
-    assert LISTING_LINK.search(url)
+    assert find_links(url)
 
 
 @pytest.mark.parametrize(
@@ -98,14 +98,14 @@ def test_mercadolibre_links_are_recognised(url):
 )
 def test_other_links_are_left_alone(url):
     """Another country's site, another portal, or a non-listing page must not trigger a reply."""
-    assert not LISTING_LINK.search(url)
+    assert not find_links(url)
 
 
 def test_the_same_listing_on_either_host_is_one_row(connection, sent, monkeypatch):
     """A shared MercadoLibre link for a listing scraped from Portal Inmobiliario is not refetched."""
-    monkeypatch.setattr("depas.bot.portalinmobiliario.fetch_standalone",
+    monkeypatch.setattr("depas.portals.portalinmobiliario.fetch_standalone",
                         lambda *a: pytest.fail("should recognise the id, not refetch"))
-    monkeypatch.setattr("depas.bot.portalinmobiliario.fetch_detail",
+    monkeypatch.setattr("depas.portals.portalinmobiliario.fetch_detail",
                         lambda *a: pytest.fail("should not re-enrich"))
 
     _handle(connection, None, {"chat": {"id": -100},
@@ -125,13 +125,13 @@ def test_tracking_parameters_are_stripped(connection, sent, monkeypatch):
 def test_a_link_never_scraped_still_gets_its_net_cost(connection, sent, monkeypatch):
     """Pasting an unseen listing must price it in CLP, so net cost and the comparison appear."""
     monkeypatch.setenv("DEPAS_CURRENT_COST", "710000")
-    monkeypatch.setattr("depas.bot.uf_in_clp", lambda fetcher: 40_000.0)
+    monkeypatch.setattr("depas.uf.uf_in_clp", lambda fetcher: 40_000.0)
     monkeypatch.setattr(
-        "depas.bot.portalinmobiliario.fetch_standalone",
+        "depas.portals.portalinmobiliario.fetch_standalone",
         lambda fetcher, url: Listing(portal="portalinmobiliario", external_id="MLC-7",
                                      url=url, price=20.0, currency="UF"),
     )
-    monkeypatch.setattr("depas.bot.portalinmobiliario.fetch_detail",
+    monkeypatch.setattr("depas.portals.portalinmobiliario.fetch_detail",
                         lambda fetcher, url: {"common_expenses": 150_000, "area_useful_m2": 66.0})
 
     _handle(connection, None, {"chat": {"id": -100},
@@ -139,3 +139,21 @@ def test_a_link_never_scraped_still_gets_its_net_cost(connection, sent, monkeypa
 
     assert "💰 <b>$950.000</b> neto al mes" in sent[0][1]
     assert "⚖️ 🔺 $240.000 más caro que hoy" in sent[0][1]
+
+@pytest.mark.parametrize(
+    ("text", "portal"),
+    [
+        ("https://portalinmobiliario.com/MLC-1-x-_JM", "portalinmobiliario"),
+        ("https://departamento.mercadolibre.cl/MLC-2?ua=x", "portalinmobiliario"),
+        ("https://houm.com/cl/arriendo-departamento-region-metropolitana/nunoa/178918", "houm"),
+    ],
+)
+def test_links_are_attributed_to_the_right_portal(text, portal):
+    """The bot must know which portal a pasted link belongs to before fetching it."""
+    assert find_links(text)[0][0] == portal
+
+
+def test_a_houm_page_that_is_not_a_listing_is_ignored():
+    """Marketing pages on a supported host must not be mistaken for listings."""
+    assert find_links("https://houm.com/cl/propietario/arriendo") == []
+

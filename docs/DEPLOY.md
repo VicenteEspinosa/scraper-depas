@@ -39,7 +39,8 @@ Repository **secrets**:
 
 Repository **variables**: `TZ`, `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME`,
 `DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MIN_BEDROOMS`, `DEPAS_ALERT_MIN_GRADE`,
-`DEPAS_TARGET_COST`, `DEPAS_ALERT_MAX_COST`, `DEPAS_ALERT_MAX_WALK`,
+`DEPAS_TARGET_COST`, `DEPAS_ALERT_MAX_COST`, `DEPAS_TARGET_WALK`,
+`DEPAS_ALERT_MAX_WALK`,
 `DEPAS_ALERT_MIN_FLOOR`, `DEPAS_ALERT_MIN_AREA`, `DEPAS_ALERT_SECURITY`,
 `DEPAS_CURRENT_COST`.
 
@@ -59,9 +60,14 @@ queryable. Note `MAX_PRICE` is the asking rent and `MAX_COST` is what you
 actually pay (rent + gastos comunes − sublet income); a listing can clear the
 first and fail the second.
 
-`TARGET_COST` is not a filter: at or under it a listing gets full marks on the
-cost component, and above it the score degrades to zero at `MAX_COST`. Nothing is
-excluded for being over target, it just ranks lower.
+`TARGET_COST` and `TARGET_WALK` are not filters: at or under them a listing gets
+full marks on that component, and beyond them the score degrades to zero at the
+matching `MAX_`. Nothing is excluded for being over target, it just ranks lower.
+
+`ALERT_SECURITY` is a preference too, not a cutoff. Many publishers never declare
+a security type, so filtering on it dropped roughly three quarters of Houm's
+listings for missing data rather than for being a bad fit; it now costs score
+instead.
 
 A listing that misses a requirement is left unstamped rather than marked
 notified, so a later price drop can still bring it into range. A listing that
