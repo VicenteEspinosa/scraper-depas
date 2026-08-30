@@ -5,6 +5,11 @@ import unicodedata
 NUMBER = re.compile(r"-?\d[\d.]*(?:,\d+)?")
 YES_NO = {"Sí": True, "No": False}
 
+# Publishers sometimes type "160" meaning 160.000. Real gastos comunes are never
+# this low, and a wrong figure quietly understates the net cost, so treat it as
+# undeclared rather than guess at the intended magnitude.
+MIN_PLAUSIBLE_COMMON_EXPENSES = 10_000
+
 # Spec rows worth filtering on get their own column; everything else lands in `features`.
 SPEC_COLUMNS: dict[str, tuple[str, str]] = {
     "Superficie total": ("area_total_m2", "REAL"),
@@ -62,7 +67,9 @@ def parse_specs(rows: list[tuple[str, str]]) -> dict[str, object]:
         if label in SPEC_COLUMNS:
             column, sql_type = SPEC_COLUMNS[label]
             value = _coerce(raw, sql_type)
-            # keep the raw text rather than lose a value we simply could not parse
+            if column == "common_expenses" and value is not None and value < MIN_PLAUSIBLE_COMMON_EXPENSES:
+                value = None
+            # keep the raw text rather than lose a value we could not parse or trust
             if value is None:
                 features[_slug(label)] = raw
             else:
