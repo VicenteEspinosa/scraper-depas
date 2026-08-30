@@ -1,0 +1,23 @@
+.github/workflows/deploy.yml
+  s_ac9b713021ac74::t_5c31713b2cc843 52-56,70-74
+.env.example
+  s_ac9b713021ac74::t_5c31713b2cc843 23-32
+docs/DEPLOY.md
+  ai_agent 42-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "46ef1d132c7e6b1716e2779fa95cd7813f758b16",
+  "prompts": {},
+  "sessions": {
+    "s_ac9b713021ac74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7cb6a0ba-5179-4899-b03d-3090bfaa406f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
