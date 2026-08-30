@@ -1,0 +1,24 @@
+[project]
+name = "depas"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "curl-cffi>=0.16.2",
+    "selectolax>=0.4.11",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[project.scripts]
+depas = "depas.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9.7,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "depas"
+module-root = ""
