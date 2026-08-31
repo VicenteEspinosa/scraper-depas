@@ -3,7 +3,7 @@ import sqlite3
 import time
 from collections.abc import Iterator
 
-from depas.bot import run as run_bot
+from depas.bot import refresh_card, run as run_bot
 from depas.communes import SANTIAGO_PROVINCE, Commune
 from depas.commute import as_text as commute_text
 from depas.detail import infer_from_description
@@ -309,6 +309,28 @@ def resend(args: argparse.Namespace) -> None:
     print(f"{cleared} listings un-stamped; `depas watch` will announce them again")
 
 
+def redraw(args: argparse.Namespace) -> None:
+    """Re-render cards already posted, newest first, with today's grades and today's rules.
+
+    Which is how a card posted with the keyboard that hid its «Comentarios» button
+    gets that button back: the redraw withholds the keyboard wherever it would cost
+    the comments, and an edit that omits reply_markup drops what is there.
+    """
+    connection = connect()
+    try:
+        cards = connection.execute(
+            "SELECT * FROM card_messages ORDER BY posted_at DESC LIMIT ?", (args.limit,)
+        ).fetchall()
+        redrawn = 0
+        for card in cards:
+            if refresh_card(connection, dict(card)):
+                redrawn += 1
+            time.sleep(ALERT_DELAY_SECONDS)  # Telegram rate-limits edits like anything else
+        print(f"redraw: {redrawn} of {len(cards)} cards re-rendered")
+    finally:
+        connection.close()
+
+
 def show(args: argparse.Namespace) -> None:
     connection = connect()
     query, parameters = (args.sql, ()) if args.sql else _build_query(args)
@@ -405,6 +427,12 @@ def main() -> None:
     resender.add_argument("--hours", type=int, default=6,
                           help="how far back to un-stamp; older alerts are left alone")
     resender.set_defaults(func=resend)
+
+    redrawer = subparsers.add_parser(
+        "redraw", help="re-render cards already posted, newest first")
+    redrawer.add_argument("--limit", type=int, default=25,
+                          help="how many cards back to re-render")
+    redrawer.set_defaults(func=redraw)
 
     viewer = subparsers.add_parser("show", help="best price per m2, or your own SQL")
     viewer.add_argument("sql", nargs="?")

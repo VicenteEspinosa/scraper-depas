@@ -36,9 +36,45 @@ def call(method: str, **params: Any) -> Any:
     return payload["result"]
 
 
+_CHATS: dict[str, dict[str, Any]] = {}
+
+
+def _chat(chat_id: str) -> dict[str, Any]:
+    """getChat for one chat, asked once per process rather than once per card.
+
+    What is read out of it — the type, and whether a discussion group is linked —
+    only changes when the channel itself is reconfigured, which is a restart.
+    """
+    if chat_id not in _CHATS:
+        _CHATS[chat_id] = call("getChat", chat_id=chat_id)
+    return _CHATS[chat_id]
+
+
 def chat_type(chat_id: str) -> str:
     """Whether alerts land in a channel, where each card gets a comment thread, or a group."""
-    return call("getChat", chat_id=chat_id)["type"]
+    return _chat(str(chat_id)).get("type", "")
+
+
+def hides_comments(chat_id: str) -> bool:
+    """Whether an inline keyboard posted here would hide the way into a card's comments.
+
+    A channel post's «Comentarios» button and a bot's inline keyboard share the one
+    slot under the message, and the keyboard wins: attach one to a card in a channel
+    with a linked discussion group and the thread can no longer be opened from the
+    channel at all (bugs.telegram.org/c/41803). So a card posted there carries no
+    keyboard, and the verdict buttons are posted into the thread instead.
+    """
+    chat = _chat(str(chat_id))
+    return chat.get("type") == "channel" and chat.get("linked_chat_id") is not None
+
+
+def _markup(chat_id: str, buttons: dict[str, Any] | None) -> dict[str, Any]:
+    """The reply_markup for a card, left off wherever a keyboard would cost the comments."""
+    # Asked only when there is a keyboard to place, so a card with no buttons never
+    # spends a getChat call.
+    if not buttons or hides_comments(chat_id):
+        return {}
+    return {"reply_markup": buttons}
 
 
 def chats() -> list[dict[str, Any]]:
@@ -312,6 +348,24 @@ def answer_callback(callback_id: str, text: str) -> None:
     call("answerCallbackQuery", callback_query_id=callback_id, text=text)
 
 
+def send_buttons(chat_id: str, text: str, thread_id: int,
+                 buttons: dict[str, Any]) -> dict[str, Any]:
+    """Post the verdict keyboard as a comment inside a card's thread.
+
+    Where the card itself cannot hold the keyboard — see `hides_comments` — this is
+    where it goes: one level down, in the discussion group, which is a plain group
+    as far as reply markup is concerned.
+    """
+    return call("sendMessage", chat_id=chat_id, text=text, message_thread_id=thread_id,
+                reply_markup=buttons, link_preview_options={"is_disabled": True})
+
+
+def edit_buttons(chat_id: str, message_id: int, buttons: dict[str, Any]) -> None:
+    """Re-tick a keyboard in place, leaving the text it hangs off alone."""
+    call("editMessageReplyMarkup", chat_id=chat_id, message_id=message_id,
+         reply_markup=buttons)
+
+
 def send_listing(chat_id: str, text: str, image_url: str | None = None,
                  thread_id: int | None = None,
                  buttons: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -322,8 +376,7 @@ def send_listing(chat_id: str, text: str, image_url: str | None = None,
     """
     # Only ever sent when replying inside a comment thread; Telegram rejects a null.
     thread = {"message_thread_id": thread_id} if thread_id else {}
-    if buttons:
-        thread["reply_markup"] = buttons
+    thread |= _markup(chat_id, buttons)
     if image_url and len(text) <= CAPTION_LIMIT:
         try:
             return call("sendPhoto", chat_id=chat_id, photo=image_url, caption=text,
@@ -339,8 +392,10 @@ def edit_listing(chat_id: str, message_id: int, text: str, is_photo: bool = Fals
                  buttons: dict[str, Any] | None = None) -> None:
     """Re-render a card already posted, in place."""
     # An edit that omits reply_markup drops the keyboard, so the buttons have to be
-    # sent again every time — there is no such thing as editing only the text.
-    markup = {"reply_markup": buttons} if buttons else {}
+    # sent again every time — there is no such thing as editing only the text. That
+    # also means redrawing a channel card, where `_markup` withholds them, is what
+    # gives a card posted with a keyboard its «Comentarios» button back.
+    markup = _markup(chat_id, buttons)
     # A photo card holds its text in the caption, which is a different edit method
     # and a different field; only a text card has a link preview to suppress.
     if is_photo:
