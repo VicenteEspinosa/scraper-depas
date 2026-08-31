@@ -68,6 +68,9 @@ jobs:
           DEPAS_TARGET_AGE: ${{ vars.DEPAS_TARGET_AGE }}
           DEPAS_ALERT_SECURITY: ${{ vars.DEPAS_ALERT_SECURITY }}
           DEPAS_CURRENT_COST: ${{ vars.DEPAS_CURRENT_COST }}
+          # A secret for the same reason as DEPAS_LOCATIONS: it describes where you
+          # actually live, down to the coordinates, and this repo's logs are public.
+          DEPAS_CURRENT_HOME: ${{ secrets.DEPAS_CURRENT_HOME }}
         run: |
           # Values are expanded exactly once here, then base64'd, so a literal $
           # inside a token survives the remote shell verbatim.
@@ -94,6 +97,7 @@ jobs:
             "DEPAS_TARGET_AGE=$DEPAS_TARGET_AGE" \
             "DEPAS_ALERT_SECURITY=$DEPAS_ALERT_SECURITY" \
             "DEPAS_CURRENT_COST=$DEPAS_CURRENT_COST" \
+            "DEPAS_CURRENT_HOME=$DEPAS_CURRENT_HOME" \
             | base64 -w0)
 
           # Actions masks a secret's literal value but not its base64 form, and this
