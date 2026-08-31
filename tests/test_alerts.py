@@ -1,5 +1,5 @@
 import argparse
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -401,3 +401,64 @@ def test_the_card_shows_the_age_and_flags_it_when_over_target(monkeypatch):
 
     assert "8 años" in format_listing(young, scale.grade(young))
     assert "44 años, sobre los 25" in format_listing(old, scale.grade(old))
+
+
+@pytest.fixture
+def today(monkeypatch):
+    """Freeze the clock: a date published with no year is read relative to today."""
+    class Frozen(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 8, 30)
+
+    monkeypatch.setattr("depas.detail.date", Frozen)
+    return Frozen.today()
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("INMEDIATA", "2026-08-30"), ("hoy", "2026-08-30"), ("Entrega inmediata", "2026-08-30"),
+    ("15/08/2026", "2026-08-15"), ("01 / 09 / 2026", "2026-09-01"),
+    ("2026-06-01 00:00:00", "2026-06-01"), ("2026-09-30T02:03:42.681824Z", "2026-09-30"),
+    ("domingo, 4 de octubre de 2026", "2026-10-04"), ("Agosto 15 del 2026", "2026-08-15"),
+    ("Octubre 2026", "2026-10-01"), ("1° de Septiembre", "2026-09-01"),
+    ("31 de septiembre 2026", "2026-09-30"), ("conversable", None),
+])
+def test_availability_is_read_however_the_portal_words_it(raw, expected, today):
+    """Every portal writes the move-in date its own way, and one of them writes prose."""
+    from depas.detail import available_on
+
+    parsed = available_on(raw)
+
+    assert parsed == expected
+
+
+def test_a_month_with_no_year_takes_the_occurrence_nearest_today(today):
+    """"Agosto" typed on the 30th is this August, not next year's."""
+    from depas.detail import available_on
+
+    assert available_on("Agosto") == "2026-08-01"
+    assert available_on("Enero") == "2027-01-01"
+
+
+def test_prose_states_the_move_in_date_when_the_spec_table_does_not(today):
+    """Chilepropiedades publishes no availability row at all, only the sentence."""
+    from depas.detail import infer_from_description
+
+    assert infer_from_description(
+        "Depto luminoso. Disponible desde el 15 de octubre.")["available_from"] == "2026-10-15"
+    assert "available_from" not in infer_from_description("Bodega disponible en el subterráneo.")
+
+
+def test_a_listing_free_only_after_the_move_in_date_is_not_announced(connection, sent, monkeypatch):
+    """A flat that frees up in December is no use when you need it by November."""
+    monkeypatch.setenv("DEPAS_AVAILABLE_BY", "2026-11-01")
+    save_detail(connection, "pi", "0", {"available_from": "2026-12-01"})
+    save_detail(connection, "pi", "1", {"available_from": "2026-10-01"})
+
+    _announce(connection, limit=10)
+
+    announced = " ".join(text for text, _ in sent)
+    assert "https://x/0" not in announced
+    assert "https://x/1" in announced
+    # Nobody publishes this field reliably; silence must not cost a listing its alert.
+    assert "https://x/2" in announced

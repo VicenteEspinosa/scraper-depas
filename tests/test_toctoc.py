@@ -67,4 +67,4 @@ def test_abbreviated_spec_labels_land_in_the_shared_columns():
 
     assert dict(specs) == {"Dormitorios": "1", "Superficie útil": "32 m²",
                            "Superficie de terraza": "3 m²",
-                           "Estado del proyecto": "Entrega inmediata"}
+                           "Disponible desde": "Entrega inmediata"}
