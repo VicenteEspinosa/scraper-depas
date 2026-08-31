@@ -19,7 +19,8 @@ LISTING_URL = re.compile(r"https?://(?:www\.)?toctoc\.com/\S*?/[a-z]_[0-9a-f]{40
 LISTING_ID = re.compile(r"/[a-z]_([0-9a-f]{40})")
 
 # TocToc labels the same specs Portal Inmobiliario does, just abbreviated.
-SPEC_LABELS = {"Superf. útil": "Superficie útil", "Superf. terraza": "Superficie de terraza"}
+SPEC_LABELS = {"Superf. útil": "Superficie útil", "Superf. terraza": "Superficie de terraza",
+               "Estado del proyecto": "Disponible desde"}
 
 
 def listing_id(url: str) -> str | None:

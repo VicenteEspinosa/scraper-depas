@@ -150,6 +150,14 @@ Found the hard way, and handled in code:
 - **Amoblado is often only in the title.** Most portals publish no `Amoblado` spec
   row, so the exclusion also reads the description and the title. In prose,
   *cocina amoblada* is fitted cabinets rather than furniture, and does not count.
+- **Every portal words availability differently.** Portal Inmobiliario leaves
+  *Disponible desde* as free text and gets `INMEDIATA`, `15 julio`, `01 / 09 /
+  2026`, `domingo, 4 de octubre de 2026` and `conversable`; TocToc states it as
+  the project's delivery status, Houm and Assetplan as timestamps, and
+  Chilepropiedades only in the description. All of it parses to one ISO date in
+  `available_from`, and a date already reached reads as *entrega inmediata*. A
+  month with no year means its nearest occurrence, so `Agosto` read in late
+  August is that August, not next year's.
 - **Assetplan's headline price is a promotion**, typically half of one month.
   The standing rent is the other figure, and that is the one stored.
 - Listings graded on partial data are marked `*` with an `on` column, so a high
@@ -164,6 +172,7 @@ Everything personal lives in `.env` (gitignored) — see `.env.example`.
 | `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME` | Monthly CLP you would collect subletting. Default 0 — net then equals total, rather than inventing a market rate. |
 | `DEPAS_WEIGHT_*` | Relative weight per grading component. Default 1 each. |
 | `DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MAX_PRICE`, `DEPAS_ALERT_MIN_BEDROOMS` | What the scheduled `watch` pass scrapes. |
+| `DEPAS_AVAILABLE_BY` | Latest move-in date you would accept, `YYYY-MM-DD`. A listing that only frees up after it is not alerted on; one that never stated a date still is, because most portals simply do not publish the field. |
 | `DEPAS_TARGET_AGE` | Ideal antigüedad in years. Defaults to **25 even when unset** — unlike the other targets, leaving it blank does not switch the component off. Full marks at or under it, then the score falls away; never a cutoff, and an undeclared antigüedad is left unscored rather than assumed old. |
 | `DEPAS_LOCATIONS` | `name,lat,lon` per place you need to reach, `;`-separated, any number of them. |
 | `DEPAS_TARGET_COMMUTE`, `DEPAS_ALERT_MAX_COMMUTE` | Minutes to the location a listing reaches worst, by whichever of walking, bus and Metro is fastest. Full marks at or under the target, no alert over the ceiling. |

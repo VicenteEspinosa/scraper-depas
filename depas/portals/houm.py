@@ -7,6 +7,7 @@ from typing import Any
 from selectolax.parser import HTMLParser
 
 from depas.communes import Commune
+from depas.detail import available_on
 from depas.fetch import Fetcher
 from depas.models import Listing, Query
 
@@ -167,6 +168,7 @@ def fetch_detail(fetcher: Fetcher, url: str) -> dict[str, Any]:
         "parking_spaces": details.get("estacionamientos"),
         "storage_units": details.get("warehouse_quantity"),
         "orientation": details.get("orientacion"),
+        "available_from": available_on(details.get("first_available_handover_date") or ""),
         "furnished": int(details.get("furnished") not in (None, "non")),
         "pets_allowed": int(bool(details.get("mascotas"))),
         "has_terrace": int(bool(details.get("terraza"))),
