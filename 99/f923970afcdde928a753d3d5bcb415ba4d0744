@@ -1,0 +1,41 @@
+depas/detail.py
+  s_ab3906355ea353::t_7d724bed08bed7 4-5,34,91-93,98-149,168-176,192-194,222-223
+depas/portals/toctoc.py
+  s_ab3906355ea353::t_7d724bed08bed7 22-23
+.env.example
+  s_ab3906355ea353::t_7d724bed08bed7 69-73
+depas/portals/assetplan.py
+  s_ab3906355ea353::t_7d724bed08bed7 7,135
+.github/workflows/deploy.yml
+  s_ab3906355ea353::t_7d724bed08bed7 69,99
+tests/test_assetplan.py
+  s_ab3906355ea353::t_7d724bed08bed7 42,162
+tests/test_toctoc.py
+  s_ab3906355ea353::t_7d724bed08bed7 70
+depas/portals/houm.py
+  s_ab3906355ea353::t_7d724bed08bed7 10,171
+depas/cli.py
+  s_ab3906355ea353::t_7d724bed08bed7 119-122,131,167,351-352,420
+README.md
+  s_ab3906355ea353::t_7d724bed08bed7 171-178,193
+tests/test_alerts.py
+  s_ab3906355ea353::t_7d724bed08bed7 2,404-464
+migrations/009_available_from_as_a_date.sql
+  s_ab3906355ea353::t_7d724bed08bed7 1-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "99f923970afcdde928a753d3d5bcb415ba4d0744",
+  "prompts": {},
+  "sessions": {
+    "s_ab3906355ea353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbe4fbd2-b62e-43c2-a724-6671c6a4a5e1",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
