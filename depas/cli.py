@@ -116,6 +116,10 @@ def enrich(args: argparse.Namespace) -> None:
     print(f"\n{len(pending)} listings enriched")
 
 
+# Most listings never state when they free up, and an undeclared date must not be read
+# as "never": it is the portals that are silent, not the apartment.
+AVAILABLE_BY = "(available_from IS NULL OR available_from <= ?)"
+
 FILTERS = (
     ("max_cost", "net_monthly_clp <= ?"),
     ("max_walk", "walk_minutes <= ?"),
@@ -124,6 +128,7 @@ FILTERS = (
     ("min_area", "area >= ?"),
     ("max_age", "age <= ?"),
     ("security", "security_type = ?"),
+    ("available_by", AVAILABLE_BY),
 )
 
 
@@ -159,6 +164,7 @@ ALERT_REQUIREMENTS = (
     ("DEPAS_ALERT_MIN_BEDROOMS", "bedrooms >= ?", optional_int),
     ("DEPAS_ALERT_MAX_WALK", "walk_minutes <= ?", optional_int),
     ("DEPAS_ALERT_MIN_AREA", "(area IS NULL OR area >= ?)", optional_int),
+    ("DEPAS_AVAILABLE_BY", AVAILABLE_BY, optional_text),
 )
 
 
@@ -342,7 +348,8 @@ def _summarise(row: sqlite3.Row, scale: Scale) -> dict[str, object]:
         "gastos": _gastos(row["common_expenses"]), "est": row["parking_spaces"],
         "bod": row["storage_units"], "net": round(row["net_monthly_clp"]),
         "metro": row["nearest_station"], "walk": row["walk_minutes"],
-        "commute": commute_text(row["commute"]) or "—", "url": row["url"],
+        "commute": commute_text(row["commute"]) or "—",
+        "desde": row["available_from"] or "—", "url": row["url"],
     }
 
 
@@ -410,6 +417,7 @@ def main() -> None:
     viewer.add_argument("--max-age", type=int,
                         help="max years since the building went up; alerts never filter on it")
     viewer.add_argument("--security", help='e.g. "24 horas"')
+    viewer.add_argument("--available-by", help="latest move-in date, as 2026-11-01")
     viewer.add_argument("--commune", action="append", default=[], type=Commune,
                         choices=list(Commune), metavar="SLUG")
     viewer.set_defaults(func=show)

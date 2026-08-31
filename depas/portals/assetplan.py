@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from depas.communes import Commune
+from depas.detail import available_on
 from depas.fetch import Fetcher
 from depas.models import Listing, Query
 from depas.uf import uf_in_clp
@@ -131,6 +132,7 @@ def fetch_detail(fetcher: Fetcher, url: str) -> dict[str, Any]:
         "bathrooms": unit["typology"]["bathrooms"],
         "floor": unit["piso"],
         "orientation": ORIENTATIONS.get(unit["orientacion"]),
+        "available_from": available_on(unit["available_date"] or ""),
         "common_expenses": int(float(unit["ggcc_final"])) or None,
         "parking_spaces": int(unit["has_parking"]),
         "storage_units": int(unit["has_store"]),

@@ -39,6 +39,7 @@ UNIT = {
     "id": 523940, "unidad": "206-B", "piso": 2, "orientacion": "SO",
     "m2_utiles": "32", "m2_terraza": "3", "acepta_mascotas": True, "furnished": 0,
     "has_parking": False, "has_store": True, "ggcc_final": "77000.00",
+    "available_date": "2026-09-30T02:03:42.681824Z",
     "typology": {"id": 1, "bedrooms": 1, "bathrooms": 1},
     "price": {"monto_depto": "412000.00", "gc_depto": "77000.00",
               "porcentaje_descuento": "50.00", "precio_recomendado": "380000.00"},
@@ -158,6 +159,7 @@ def test_the_unit_endpoint_fills_the_shared_spec_columns(monkeypatch):
     assert (detail["common_expenses"], detail["pets_allowed"]) == (77000, 1)
     assert (detail["parking_spaces"], detail["storage_units"]) == (0, 1)
     assert (detail["lat"], detail["lon"]) == (-33.471947, -70.623199)
+    assert detail["available_from"] == "2026-09-30"
     assert fetcher.urls[0].endswith("/units/523940")
 
 

@@ -1,6 +1,7 @@
 import json
 import os
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
 from curl_cffi import requests
@@ -8,6 +9,7 @@ from curl_cffi import requests
 from depas.commute import as_text as commute_text
 from depas.config import (DEFAULT_COMMON_EXPENSES, _load_env_file, current_cost,
                           optional_int, optional_text, target_age)
+from depas.detail import MONTH_NAMES
 from depas.metro import STATION_LINES
 
 API = "https://api.telegram.org"
@@ -87,6 +89,14 @@ def _cons(row: dict[str, Any]) -> list[str]:
     if wanted and row.get("security_type") != wanted:
         cons.append(f"sin conserjería {wanted}")
     return cons
+
+
+def _availability(available_from: str) -> str:
+    """When the flat frees up; a date already reached is simply entrega inmediata."""
+    when = date.fromisoformat(available_from)
+    if when <= date.today():
+        return "entrega inmediata"
+    return f"disponible desde el {when.day} de {MONTH_NAMES[when.month - 1]}"
 
 
 def _clp(amount: float | None) -> str:
@@ -174,6 +184,9 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
     cons = _cons(row)
     if cons:
         lines.append("👎 " + " · ".join(cons))
+
+    if row.get("available_from"):
+        lines.append(f"🗓️ {_availability(row['available_from'])}")
 
     if row.get("published_days_ago") is not None:
         lines.append(f"🕐 publicado hace {row['published_days_ago']} días")

@@ -1,6 +1,8 @@
 import json
 import re
 import unicodedata
+from calendar import monthrange
+from datetime import date
 
 NUMBER = re.compile(r"-?\d[\d.]*(?:,\d+)?")
 YES_NO = {"Sí": True, "No": False}
@@ -29,7 +31,7 @@ SPEC_COLUMNS: dict[str, tuple[str, str]] = {
     "Año de construcción": ("age_years", "INTEGER"),
     "Gastos comunes": ("common_expenses", "INTEGER"),
     "Orientación": ("orientation", "TEXT"),
-    "Disponible desde": ("available_from", "TEXT"),
+    "Disponible desde": ("available_from", "DATE"),
     "Amoblado": ("furnished", "INTEGER"),
     "Admite mascotas": ("pets_allowed", "INTEGER"),
     "Ascensor": ("has_elevator", "INTEGER"),
@@ -86,8 +88,63 @@ DENIAL = re.compile(r"\b(?:sin|no)\s+(?:\w+\s+)?$", re.I)
 # furniture, so a room named just before the word disowns it; the comma or full stop
 # that ends a clause is what stops the disowning from reaching across sentences.
 FURNISHED_IN_TEXT = re.compile(r"\bamoblad[oa]s?\b|\bamueblad[oa]s?\b|\bamoblar\b", re.I)
+# Chilepropiedades publishes no availability row at all, and the other portals leave
+# it empty as often as not; the clause that announces it is where they all say so.
+AVAILABILITY_IN_TEXT = re.compile(r"(?:disponib|entrega)\w*[^.]{0,40}", re.I)
 ROOM_BEFORE = re.compile(
     r"\b(?:cocina|kitchenette|closets?|logia|ba[ñn]os?|terraza)s?\b[\w\s]{0,20}$", re.I)
+
+
+MONTHS = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
+          "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11,
+          "diciembre": 12}
+MONTH_NAMES = list(MONTHS)
+IMMEDIATE = re.compile(r"inmediat|\bhoy\b", re.I)
+ISO_DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+# "15/08/2026", "18-08-2026", "01 / 09 / 2026" — day first, as Chile writes them.
+NUMERIC_DATE = re.compile(r"\b(\d{1,2})\s*[/-]\s*(\d{1,2})\s*[/-]\s*(\d{4})\b")
+MONTH_NAME = re.compile("|".join(MONTHS), re.I)
+YEAR = re.compile(r"\b(20\d{2})\b")
+DAY = re.compile(r"\b(\d{1,2})\b")
+
+
+def available_on(text: str) -> str | None:
+    """The day a listing frees up, however its portal words it ("Inmediata", "15 de agosto").
+
+    Portals leave this field free text, so it arrives as a keyword, a numeric date, a
+    timestamp, or a month with or without a day. A month alone reads as its first.
+    """
+    if IMMEDIATE.search(text):
+        return date.today().isoformat()
+    iso = ISO_DATE.search(text)
+    if iso:
+        year, month, day = (int(part) for part in iso.groups())
+        return _on(year, month, day).isoformat()
+    numeric = NUMERIC_DATE.search(text)
+    if numeric:
+        day, month, year = (int(part) for part in numeric.groups())
+        return _on(year, month, day).isoformat()
+
+    named = MONTH_NAME.search(text)
+    if named is None:
+        return None
+    month = MONTHS[named.group().lower()]
+    # The year is taken out before looking for a day, so 2026 cannot be read as one.
+    day_match = DAY.search(YEAR.sub("", text))
+    day = int(day_match.group(1)) if day_match else 1
+    year_match = YEAR.search(text)
+    if year_match:
+        return _on(int(year_match.group(1)), month, day).isoformat()
+    today = date.today()
+    # No year given: the occurrence nearest today. A "1 agosto" read on the 30th is the
+    # August that just went by, and a date already past simply means available now.
+    return min((_on(today.year, month, day), _on(today.year + 1, month, day)),
+               key=lambda when: abs(when - today)).isoformat()
+
+
+def _on(year: int, month: int, day: int) -> date:
+    """A calendar date, with an impossible day ("31 de septiembre") pulled into the month."""
+    return date(year, month, min(day, monthrange(year, month)[1]))
 
 
 def _claimed(text: str, pattern: re.Pattern[str]) -> bool | None:
@@ -108,6 +165,15 @@ def _furnished(text: str) -> int | None:
     return None
 
 
+def _available_from(text: str) -> str | None:
+    """The first clause that announces availability and actually names a date."""
+    for match in AVAILABILITY_IN_TEXT.finditer(text):
+        available = available_on(match.group())
+        if available is not None:
+            return available
+    return None
+
+
 def infer_from_description(text: str) -> dict[str, object]:
     """Read off the fields a portal omitted from its spec table but stated in prose."""
     inferred: dict[str, object] = {}
@@ -123,6 +189,9 @@ def infer_from_description(text: str) -> dict[str, object]:
     furnished = _furnished(text)
     if furnished is not None:
         inferred["furnished"] = furnished
+    available = _available_from(text)
+    if available is not None:
+        inferred["available_from"] = available
     return inferred
 
 
@@ -150,6 +219,8 @@ def parse_specs(rows: list[tuple[str, str]]) -> dict[str, object]:
 
 
 def _coerce(raw: str, sql_type: str) -> object | None:
+    if sql_type == "DATE":
+        return available_on(raw)
     if sql_type == "TEXT":
         return raw or None
     if raw in YES_NO:
