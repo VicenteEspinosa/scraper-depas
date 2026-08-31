@@ -1,3 +1,4 @@
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -102,9 +103,41 @@ def optional_text(name: str) -> str | None:
     return value or None
 
 
+HOME_VAR = "DEPAS_CURRENT_HOME"
+# Everything a comparison cannot fake: what your place costs, how big it is, where it is.
+HOME_REQUIRED = ("price_clp", "common_expenses", "area_m2", "lat", "lon")
+
+
+def current_home() -> dict | None:
+    """Your own apartment as one JSON object, or None when you have not described it."""
+    _load_env_file()
+    raw = os.environ.get(HOME_VAR, "").strip()
+    if not raw:
+        return None
+    try:
+        home = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{HOME_VAR} must be a single JSON object: {error}") from None
+    missing = [name for name in HOME_REQUIRED if home.get(name) is None]
+    if missing:
+        raise ValueError(f"{HOME_VAR} is missing {', '.join(missing)}")
+    return home
+
+
+def home_net_monthly_clp(home: dict) -> int:
+    """What your place costs a month, priced on the same terms as a listing."""
+    return round(home["price_clp"] + home["common_expenses"]
+                 - (home.get("parking_spaces") or 0) * lease_income("parking")
+                 - (home.get("storage_units") or 0) * lease_income("storage"))
+
+
 def current_cost() -> int | None:
     """What you pay now, net, so every listing can be shown as a difference."""
-    return optional_int("DEPAS_CURRENT_COST")
+    configured = optional_int("DEPAS_CURRENT_COST")
+    if configured is not None:
+        return configured
+    home = current_home()
+    return None if home is None else home_net_monthly_clp(home)
 
 
 def target_cost() -> int | None:
