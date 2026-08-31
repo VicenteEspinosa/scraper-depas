@@ -6,6 +6,7 @@ from curl_cffi.requests.exceptions import RequestException
 
 from depas.fetch import Fetcher
 from depas.grade import Scale
+from depas.home import row as home_row
 from depas.metro import nearest_station
 from depas.portals import PORTALS
 from depas.portals.portalinmobiliario import clean_url
@@ -14,7 +15,8 @@ from depas.store import (DISLIKE, LIKE, POOL_QUERY, card_for_message, card_for_t
                          set_interest)
 from depas.uf import normalize, stored_uf
 from depas.telegram import (DISLIKE_BUTTON, LIKE_BUTTON, answer_callback, call, edit_listing,
-                            format_listing, reply, send_listing, verdict_buttons)
+                            format_comparison, format_listing, reply, send_listing,
+                            verdict_buttons)
 
 POLL_TIMEOUT = 30
 # Telegram and the portals both blip. A blip should cost one poll, not the process:
@@ -82,22 +84,24 @@ def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher,
 
 
 COMMANDS = {"/like": LIKE, "/dislike": DISLIKE}
+COMPARE = "/compare"
 VERDICT = {LIKE: "⭐ anotado como interesante",
            DISLIKE: "🚫 descartado: no volverá a aparecer en las alertas"}
-NO_CARD = ("no sé de qué depto hablas: comenta /like o /dislike en el hilo de una "
-           "tarjeta, o respondiendo a una.")
+NO_CARD = ("no sé de qué depto hablas: comenta /like, /dislike o /compare en el hilo "
+           "de una tarjeta, o respondiendo a una.")
+NO_HOME = ("no sé dónde vives: define DEPAS_CURRENT_HOME con el JSON de tu depto "
+           "actual (ver .env.example) y vuelve a intentarlo.")
+GONE = "ese aviso ya no está en la base"
 # The id every card prints in its header, which is how a card posted before the
 # bot started recording them can still be traced back to its listing.
 CARD_ID = re.compile(r"\[(\d+)\]")
 
 
-def _command(text: str) -> int | None:
-    """The verdict a message asks for, if its first word is one of ours."""
+def _first_word(text: str) -> str:
+    """The command a message opens with, stripped of the bot it is addressed to."""
     words = text.split()
-    if not words:
-        return None
     # /like@depas_bot is what Telegram sends when more than one bot is in the chat.
-    return COMMANDS.get(words[0].split("@")[0].lower())
+    return words[0].split("@")[0].lower() if words else ""
 
 
 def _forwarded_from(message: dict) -> tuple[object, int] | None:
@@ -189,9 +193,33 @@ def _rate(connection: sqlite3.Connection, message: dict, interest: int) -> None:
     reply(chat, VERDICT[interest], thread, message["message_id"])
 
 
+def _compare(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) -> None:
+    """Answer /compare with this card's listing set against the place you live in now."""
+    chat = str(message["chat"]["id"])
+    thread = message.get("message_thread_id")
+    card = _card(connection, message)
+    if card is None:
+        reply(chat, NO_CARD, thread, message["message_id"])
+        return
+    home = home_row(connection, fetcher)
+    if home is None:
+        reply(chat, NO_HOME, thread, message["message_id"])
+        return
+    listing = connection.execute(
+        "SELECT * FROM listings_ranked WHERE portal = ? AND external_id = ?",
+        (card["portal"], card["external_id"]),
+    ).fetchone()
+    if listing is None:
+        reply(chat, GONE, thread, message["message_id"])
+        return
+    scale = Scale([dict(item) for item in connection.execute(POOL_QUERY).fetchall()])
+    reply(chat, format_comparison(dict(listing), scale.grade(dict(listing)),
+                                  home, scale.grade(home)),
+          thread, message["message_id"])
+
+
 BUTTONS = {LIKE_BUTTON: LIKE, DISLIKE_BUTTON: DISLIKE}
 TOAST = {LIKE: "⭐ anotado como interesante", DISLIKE: "🚫 descartado, no vuelve a aparecer"}
-GONE = "ese aviso ya no está en la base"
 
 
 def _pressed_card(connection: sqlite3.Connection, message: dict, listing: dict) -> dict:
@@ -244,9 +272,12 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) -> 
         return
 
     text = message.get("text") or message.get("caption") or ""
-    interest = _command(text)
-    if interest is not None:
-        _rate(connection, message, interest)
+    command = _first_word(text)
+    if command in COMMANDS:
+        _rate(connection, message, COMMANDS[command])
+        return
+    if command == COMPARE:
+        _compare(connection, fetcher, message)
         return
 
     for portal_name, url in find_links(text):

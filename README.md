@@ -74,6 +74,24 @@ or as a reply to it in a plain group:
 Either verdict can be changed by pressing the other button; both stay live on the
 card.
 
+### Comparing a listing with where you live now
+
+`/compare`, left in the same place a verdict is, answers with the listing set
+against your own apartment figure by figure: both grades, commune, net cost and
+the rent and gastos comunes behind it, surface, bedrooms, bathrooms, floor,
+antigüedad, UF/m², the Metro station and its lines, the minutes to every
+`DEPAS_LOCATIONS` place, and the amenities the move would gain or lose. Each line
+reads `tuyo → este aviso` with the difference marked **mejor** or **peor**, and a
+figure neither side states simply leaves its line out.
+
+Your apartment is one secret, `DEPAS_CURRENT_HOME`, holding a single JSON object
+whose keys are the listing column names — see `.env.example` for a filled-in one.
+`price_clp`, `common_expenses`, `area_m2`, `lat` and `lon` are required; the rest
+is optional. Travel times are routed from the coordinates on each `/compare`, so
+they are measured exactly the way a listing's are. Setting this also makes
+`DEPAS_CURRENT_COST` redundant: the net cost is worked out from the same object,
+sublet income included, and an explicit `DEPAS_CURRENT_COST` still overrides it.
+
 No webhook and no open port: presses arrive as `callback_query` updates and
 commands as ordinary messages, both on the same `getUpdates` long poll the bot
 already runs. A press carries the listing's row id in its `callback_data`, which
@@ -176,6 +194,7 @@ Everything personal lives in `.env` (gitignored) — see `.env.example`.
 | `DEPAS_TARGET_AGE` | Ideal antigüedad in years. Defaults to **25 even when unset** — unlike the other targets, leaving it blank does not switch the component off. Full marks at or under it, then the score falls away; never a cutoff, and an undeclared antigüedad is left unscored rather than assumed old. |
 | `DEPAS_LOCATIONS` | `name,lat,lon` per place you need to reach, `;`-separated, any number of them. |
 | `DEPAS_TARGET_COMMUTE`, `DEPAS_ALERT_MAX_COMMUTE` | Minutes to the location a listing reaches worst, by whichever of walking, bus and Metro is fastest. Full marks at or under the target, no alert over the ceiling. |
+| `DEPAS_CURRENT_HOME` | Your own apartment as one JSON object, which `/compare` sets a listing against and which `DEPAS_CURRENT_COST` falls back to. Requires `price_clp`, `common_expenses`, `area_m2`, `lat`, `lon`. |
 | `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. |
 | `TELEGRAM_BOT_TOKEN` | From @BotFather. |
 | `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread, which is also where `/like` and `/dislike` are read from; a group takes the cards but leaves them undiscussable, so verdicts have to be replies. Switching between the two is only this value. |

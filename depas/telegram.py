@@ -1,4 +1,6 @@
+import json
 import os
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
@@ -105,6 +107,12 @@ def _escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _station(name: str) -> str:
+    """A station with the lines calling at it, blank when the portal named one we do not know."""
+    calling = STATION_LINES.get(name, ())
+    return f"{_escape(name)} (L{'/L'.join(calling)})" if calling else _escape(name)
+
+
 def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> str:
     """Render one listing as the Telegram HTML card posted to the chat."""
     emoji = GRADE_EMOJI.get(grade.letter, "⚪")
@@ -156,9 +164,7 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
 
     station = row.get("nearest_station")
     if station:
-        calling = STATION_LINES.get(station, ())
-        label = f" (L{'/L'.join(calling)})" if calling else ""
-        lines.append(f"🚇 {_escape(station)}{label} · {row.get('walk_minutes')} min caminando")
+        lines.append(f"🚇 {_station(station)} · {row.get('walk_minutes')} min caminando")
 
     travel = commute_text(row.get("commute"))
     if travel:
@@ -185,6 +191,100 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
     if row.get("published_days_ago") is not None:
         lines.append(f"🕐 publicado hace {row['published_days_ago']} días")
 
+    lines.append(f'\n<a href="{_escape(row["url"])}">Ver aviso →</a>')
+    return "\n".join(lines)
+
+
+def _m2(value: float) -> str:
+    return f"{value:.0f} m²"
+
+
+def _years(value: float) -> str:
+    return f"{value:.0f} años"
+
+
+def _uf_m2(value: float) -> str:
+    return f"{value:.2f} UF/m²"
+
+
+def _minutes(value: float) -> str:
+    return f"{value:.0f} min"
+
+
+def _count(value: float) -> str:
+    return f"{value:.0f}"
+
+
+# Every figure both a listing and your own place carry, and which way is better.
+COMPARED = (
+    ("💰 neto al mes", "net_monthly_clp", _clp, True),
+    ("🏷️ arriendo", "price_clp", _clp, True),
+    ("🧾 gastos comunes", "common_expenses", _clp, True),
+    ("📐 superficie", "area", _m2, False),
+    ("🛏️ dormitorios", "bedrooms", _count, False),
+    ("🚿 baños", "bathrooms", _count, False),
+    ("🏢 piso", "floor", _count, False),
+    ("🏗️ antigüedad", "age", _years, True),
+    ("📊 precio por m²", "price_per_m2_uf_effective", _uf_m2, True),
+    ("🚶 caminata al metro", "walk_minutes", _minutes, True),
+)
+
+
+def _difference(label: str, before: float, after: float,
+                render: Callable[[float], str], lower_is_better: bool) -> str:
+    """One figure as `tuyo → este`, with the gap named mejor or peor for that figure."""
+    if before == after:
+        return f"{label}: {render(after)} · igual"
+    mark = "🔻" if after < before else "🔺"
+    verdict = "mejor" if (after < before) == lower_is_better else "peor"
+    return (f"{label}: {render(before)} → {render(after)} · "
+            f"{mark} {render(abs(after - before))} {verdict}")
+
+
+def _commute_lines(home: dict[str, Any], row: dict[str, Any]) -> list[str]:
+    """One line per configured location, so a move is judged on every trip it changes."""
+    here = json.loads(home.get("commute") or "{}")
+    there = json.loads(row.get("commute") or "{}")
+    return [_difference(f"🧭 {name}", here[name], minutes, _minutes, True)
+            for name, minutes in there.items() if name in here]
+
+
+def _amenity_lines(home: dict[str, Any], row: dict[str, Any]) -> list[str]:
+    """What the move would add and what it would cost, so a swap is not read as a gain."""
+    gained = [label for column, label in AMENITY_LABELS
+              if row.get(column) and not home.get(column)]
+    lost = [label for column, label in AMENITY_LABELS
+            if home.get(column) and not row.get(column)]
+    lines = []
+    if gained:
+        lines.append(f"✨ gana: {' · '.join(gained)}")
+    if lost:
+        lines.append(f"👎 pierde: {' · '.join(lost)}")
+    return lines
+
+
+def format_comparison(row: dict[str, Any], grade: Any,
+                      home: dict[str, Any], home_grade: Any) -> str:
+    """Render one listing against the place you live in now, as `tuyo → este` per figure."""
+    commune = (row.get("commune") or "").replace("-", " ").title()
+    lines = [f"⚖️ <b>Tu depto → este aviso</b> · <code>[{row['id']}]</code>",
+             f"{GRADE_EMOJI.get(home_grade.letter, '⚪')} {home_grade.letter} {home_grade.score}"
+             f" → {GRADE_EMOJI.get(grade.letter, '⚪')} <b>{grade.letter} {grade.score}</b>"]
+    if commune:
+        home_commune = (home.get("commune") or "").replace("-", " ").title()
+        lines.append(f"📍 {_escape(home_commune) or '—'} → <b>{_escape(commune)}</b>")
+
+    for label, column, render, lower_is_better in COMPARED:
+        before, after = home.get(column), row.get(column)
+        if before is not None and after is not None:
+            lines.append(_difference(label, before, after, render, lower_is_better))
+
+    station, home_station = row.get("nearest_station"), home.get("nearest_station")
+    if station and home_station:
+        lines.append(f"🚇 {_station(home_station)} → {_station(station)}")
+
+    lines += _commute_lines(home, row)
+    lines += _amenity_lines(home, row)
     lines.append(f'\n<a href="{_escape(row["url"])}">Ver aviso →</a>')
     return "\n".join(lines)
 
