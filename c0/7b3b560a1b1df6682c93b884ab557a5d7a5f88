@@ -1,0 +1,26 @@
+docs/DEPLOY.md
+  s_0eff7f6f50a4be::t_8bcdd8aaa71aa0 75-77
+README.md
+  s_0eff7f6f50a4be::t_8fe205afa626a3 16,20,32,106,174,222,224,286,289
+  s_0eff7f6f50a4be::t_5c73d5eaf0c49b 21-27,223,284-285,291
+  s_0eff7f6f50a4be::t_8bcdd8aaa71aa0 39
+  s_0eff7f6f50a4be::t_cd85dccf33db35 40-42
+  s_0eff7f6f50a4be::t_28c9daf28e4378 28-31
+  s_0eff7f6f50a4be::t_96fc7d1f81e3e1 33-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c07b3b560a1b1df6682c93b884ab557a5d7a5f88",
+  "prompts": {},
+  "sessions": {
+    "s_0eff7f6f50a4be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c891ce53-8511-4593-b1d5-d9e5be9ad035",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
