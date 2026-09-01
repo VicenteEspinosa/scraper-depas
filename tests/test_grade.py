@@ -43,8 +43,8 @@ def test_missing_components_are_reported_not_guessed():
 
     graded = scale.grade({"net_monthly_clp": 500_000, "area": 60.0})
 
-    assert set(graded.missing) == {"value", "location", "amenities"}
-    assert set(graded.parts) == {"cost", "size"}
+    assert set(graded.missing) == {"value", "walk", "amenities"}
+    assert set(graded.parts) == {"cost", "area"}
 
 
 def test_a_listing_with_no_usable_data_scores_nothing():
@@ -59,10 +59,10 @@ def test_weights_shift_the_ranking(monkeypatch):
     pool = _pool()
     far_but_cheap = _listing(net_monthly_clp=100_000, walk_minutes=30, area=99.0)
 
-    monkeypatch.setenv("DEPAS_WEIGHT_VALUE", "0")
-    monkeypatch.setenv("DEPAS_WEIGHT_COST", "0")
-    monkeypatch.setenv("DEPAS_WEIGHT_SIZE", "0")
-    monkeypatch.setenv("DEPAS_WEIGHT_AMENITIES", "0")
+    monkeypatch.setenv("DEPAS_VALUE_WEIGHT", "0")
+    monkeypatch.setenv("DEPAS_COST_WEIGHT", "0")
+    monkeypatch.setenv("DEPAS_AREA_WEIGHT", "0")
+    monkeypatch.setenv("DEPAS_AMENITIES_WEIGHT", "0")
 
     assert Scale(pool, prefs()).grade(far_but_cheap).score == 0
 
@@ -70,7 +70,7 @@ def test_weights_shift_the_ranking(monkeypatch):
 def test_all_weights_zero_fails_loudly(monkeypatch):
     """A .env that zeroes everything must raise, not divide by zero."""
     for component in COMPONENTS:
-        monkeypatch.setenv(f"DEPAS_WEIGHT_{component.upper()}", "0")
+        monkeypatch.setenv(f"DEPAS_{component.upper()}_WEIGHT", "0")
 
     with pytest.raises(ValueError, match="at least one"):
         Scale(_pool(), prefs())
@@ -78,7 +78,7 @@ def test_all_weights_zero_fails_loudly(monkeypatch):
 
 def test_security_is_scored_not_filtered(monkeypatch):
     """Wanting 24h security lowers the score of listings without it, never excludes them."""
-    monkeypatch.setenv("DEPAS_ALERT_SECURITY", "24 horas")
+    monkeypatch.setenv("DEPAS_SECURITY_WANTED", "24 horas")
     pool = [{"security_type": s, "net_monthly_clp": 700_000, "area": 50.0, "walk_minutes": 5}
             for s in ("24 horas", None, "conserje diurno")]
     scale = Scale(pool, prefs())
@@ -92,7 +92,7 @@ def test_security_is_scored_not_filtered(monkeypatch):
 
 def test_an_unset_security_preference_is_not_a_missing_component(monkeypatch):
     """Without the preference set, no listing should be marked as partially graded for it."""
-    monkeypatch.delenv("DEPAS_ALERT_SECURITY", raising=False)
+    monkeypatch.delenv("DEPAS_SECURITY_WANTED", raising=False)
     pool = [{"net_monthly_clp": 700_000, "area": 50.0, "walk_minutes": 5, "has_elevator": 1}]
 
     assert "security" not in Scale(pool, prefs()).grade(pool[0]).missing
@@ -100,7 +100,7 @@ def test_an_unset_security_preference_is_not_a_missing_component(monkeypatch):
 
 def test_floor_below_target_scores_lower_without_being_excluded(monkeypatch):
     """A low floor costs score, so listings on it still alert rather than disappearing."""
-    monkeypatch.setenv("DEPAS_TARGET_FLOOR", "5")
+    monkeypatch.setenv("DEPAS_FLOOR_TARGET", "5")
     pool = [_listing(floor=floor, building_floors=20) for floor in (8, 5, 3, 1)]
     scale = Scale(pool, prefs())
 
@@ -112,7 +112,7 @@ def test_floor_below_target_scores_lower_without_being_excluded(monkeypatch):
 
 def test_the_top_floor_is_docked(monkeypatch):
     """Being the highest floor scores below the identical unit one floor down."""
-    monkeypatch.setenv("DEPAS_TARGET_FLOOR", "5")
+    monkeypatch.setenv("DEPAS_FLOOR_TARGET", "5")
     pool = [_listing(floor=20, building_floors=20), _listing(floor=19, building_floors=20)]
     scale = Scale(pool, prefs())
 
@@ -123,7 +123,7 @@ def test_the_top_floor_is_docked(monkeypatch):
 
 def test_an_unknown_floor_is_missing_not_penalised(monkeypatch):
     """A portal that never publishes a floor must not be graded as if it were floor zero."""
-    monkeypatch.setenv("DEPAS_TARGET_FLOOR", "5")
+    monkeypatch.setenv("DEPAS_FLOOR_TARGET", "5")
     pool = [_listing(floor=5, building_floors=20), _listing(floor=None)]
     scale = Scale(pool, prefs())
 
@@ -133,8 +133,8 @@ def test_an_unknown_floor_is_missing_not_penalised(monkeypatch):
 
 def test_area_at_the_target_ties_at_the_top(monkeypatch):
     """Past the ideal size, extra square metres stop earning score."""
-    monkeypatch.setenv("DEPAS_TARGET_AREA", "50")
-    monkeypatch.setenv("DEPAS_ALERT_MIN_AREA", "42")
+    monkeypatch.setenv("DEPAS_AREA_TARGET", "50")
+    monkeypatch.setenv("DEPAS_AREA_MIN", "42")
     pool = [_listing(area=a) for a in (80.0, 50.0, 46.0, 42.0)]
     scale = Scale(pool, prefs())
 
@@ -145,8 +145,8 @@ def test_area_at_the_target_ties_at_the_top(monkeypatch):
 
 def test_an_unknown_area_scores_bottom_but_still_grades(monkeypatch):
     """A listing that hides its size must not outrank one that states it, nor be dropped."""
-    monkeypatch.setenv("DEPAS_TARGET_AREA", "50")
-    monkeypatch.setenv("DEPAS_ALERT_MIN_AREA", "42")
+    monkeypatch.setenv("DEPAS_AREA_TARGET", "50")
+    monkeypatch.setenv("DEPAS_AREA_MIN", "42")
     pool = [_listing(area=50.0), _listing(area=42.0), _listing(area=None)]
     scale = Scale(pool, prefs())
 
@@ -159,9 +159,9 @@ def test_an_unknown_area_scores_bottom_but_still_grades(monkeypatch):
 
 def test_a_thin_grade_cannot_outrank_a_complete_one(monkeypatch):
     """Winning four axes must not beat winning the same four plus three more."""
-    monkeypatch.setenv("DEPAS_TARGET_FLOOR", "5")
-    monkeypatch.setenv("DEPAS_TARGET_AREA", "50")
-    monkeypatch.setenv("DEPAS_ALERT_SECURITY", "24 horas")
+    monkeypatch.setenv("DEPAS_FLOOR_TARGET", "5")
+    monkeypatch.setenv("DEPAS_AREA_TARGET", "50")
+    monkeypatch.setenv("DEPAS_SECURITY_WANTED", "24 horas")
     shared = {"net_monthly_clp": 500_000, "walk_minutes": 2, "area": 90.0,
               "security_type": "24 horas"}
     complete = shared | {"price_per_m2_uf": 0.2, "zone_price_per_m2_uf": 0.5,
@@ -177,7 +177,7 @@ def test_a_thin_grade_cannot_outrank_a_complete_one(monkeypatch):
 
 def test_coverage_only_pulls_toward_the_middle(monkeypatch):
     """Shrinking must never flip a thin listing below a genuinely worse complete one."""
-    monkeypatch.setenv("DEPAS_TARGET_AREA", "50")
+    monkeypatch.setenv("DEPAS_AREA_TARGET", "50")
     good_thin = {"net_monthly_clp": 500_000, "area": 90.0}
     bad_complete = {"net_monthly_clp": 950_000, "area": 42.0, "walk_minutes": 15,
                     "price_per_m2_uf": 0.9, "zone_price_per_m2_uf": 0.5, "has_pool": 0}
@@ -188,7 +188,7 @@ def test_coverage_only_pulls_toward_the_middle(monkeypatch):
 
 def test_a_preferred_line_scores_above_a_less_preferred_one(monkeypatch):
     """Ranking line 1 first must lift its stations above stations on lines ranked later."""
-    monkeypatch.setenv("DEPAS_LINE_PREFERENCE", "1 > 6 > 2")
+    monkeypatch.setenv("DEPAS_METRO_TIERS", "1 > 6 > 2")
     pool = [_listing(nearest_station=station)
             for station in ("Manuel Montt", "Ñuñoa", "Cementerios")]
     scale = Scale(pool, prefs())
@@ -200,7 +200,7 @@ def test_a_preferred_line_scores_above_a_less_preferred_one(monkeypatch):
 
 def test_an_interchange_is_judged_on_its_better_line(monkeypatch):
     """Baquedano is on 1 and 5; ranking 1 first must score it as a line 1 station."""
-    monkeypatch.setenv("DEPAS_LINE_PREFERENCE", "1 > 5")
+    monkeypatch.setenv("DEPAS_METRO_TIERS", "1 > 5")
     pool = [_listing(nearest_station="Baquedano"), _listing(nearest_station="Manuel Montt"),
             _listing(nearest_station="Bellavista de La Florida")]
     scale = Scale(pool, prefs())
@@ -212,7 +212,7 @@ def test_an_interchange_is_judged_on_its_better_line(monkeypatch):
 
 def test_an_unranked_line_falls_below_every_ranked_one(monkeypatch):
     """Naming only line 1 must not make every other line tie with it."""
-    monkeypatch.setenv("DEPAS_LINE_PREFERENCE", "1")
+    monkeypatch.setenv("DEPAS_METRO_TIERS", "1")
     pool = [_listing(nearest_station="Manuel Montt"), _listing(nearest_station="Ñuñoa")]
     scale = Scale(pool, prefs())
 
@@ -221,7 +221,7 @@ def test_an_unranked_line_falls_below_every_ranked_one(monkeypatch):
 
 def test_no_preference_leaves_the_line_unscored(monkeypatch):
     """Without the setting, the metro line must not become a missing component."""
-    monkeypatch.delenv("DEPAS_LINE_PREFERENCE", raising=False)
+    monkeypatch.delenv("DEPAS_METRO_TIERS", raising=False)
     pool = [_listing(nearest_station="Manuel Montt")]
 
     assert "metro" not in Scale(pool, prefs()).grade(pool[0]).missing
@@ -229,7 +229,7 @@ def test_no_preference_leaves_the_line_unscored(monkeypatch):
 
 def test_lines_sharing_a_tier_score_the_same(monkeypatch):
     """Lines 3 and 6 in one tier must tie, and both sit between line 1 and the rest."""
-    monkeypatch.setenv("DEPAS_LINE_PREFERENCE", "1 > 3,6 > 2,4,4A,5")
+    monkeypatch.setenv("DEPAS_METRO_TIERS", "1 > 3,6 > 2,4,4A,5")
     pool = [_listing(nearest_station=station) for station in
             ("Manuel Montt", "Ñuñoa", "Chile España", "Cementerios")]
     scale = Scale(pool, prefs())
@@ -241,7 +241,7 @@ def test_lines_sharing_a_tier_score_the_same(monkeypatch):
 
 def test_an_older_building_scores_lower_without_being_excluded(monkeypatch):
     """Age is a preference: past the target a listing loses score, never the alert."""
-    monkeypatch.setenv("DEPAS_TARGET_AGE", "25")
+    monkeypatch.setenv("DEPAS_AGE_TARGET", "25")
     pool = [_listing(age=age) for age in (0, 25, 40, 60)]
     scale = Scale(pool, prefs())
 
@@ -253,7 +253,7 @@ def test_an_older_building_scores_lower_without_being_excluded(monkeypatch):
 
 def test_an_unknown_age_is_missing_not_penalised(monkeypatch):
     """Most portals never publish an antigüedad, so its absence must not be graded as old."""
-    monkeypatch.setenv("DEPAS_TARGET_AGE", "25")
+    monkeypatch.setenv("DEPAS_AGE_TARGET", "25")
     pool = [_listing(age=5), _listing(age=None)]
     scale = Scale(pool, prefs())
 
@@ -263,7 +263,7 @@ def test_an_unknown_age_is_missing_not_penalised(monkeypatch):
 
 def test_age_at_or_under_the_target_ties_at_the_top(monkeypatch):
     """Beating 25 years is not a competition; the other components decide it."""
-    monkeypatch.setenv("DEPAS_TARGET_AGE", "25")
+    monkeypatch.setenv("DEPAS_AGE_TARGET", "25")
     pool = [_listing(age=age) for age in (2, 25, 30)]
     scale = Scale(pool, prefs())
 
@@ -273,7 +273,7 @@ def test_age_at_or_under_the_target_ties_at_the_top(monkeypatch):
 
 
 def test_under_25_years_is_the_target_with_nothing_configured():
-    """The rule stands whether or not DEPAS_TARGET_AGE was ever set."""
+    """The rule stands whether or not DEPAS_AGE_TARGET was ever set."""
     pool = [_listing(age=age) for age in (10, 24, 40)]
     scale = Scale(pool, prefs())
 

@@ -163,10 +163,10 @@ ALERT_DELAY_SECONDS = 3
 # Floor is deliberately absent: it grades rather than excludes, because the
 # portals that publish the most listings never publish a floor number at all.
 ALERT_REQUIREMENTS = (
-    ("DEPAS_ALERT_MAX_COST", "net_monthly_clp <= ?"),
-    ("DEPAS_ALERT_MIN_BEDROOMS", "bedrooms >= ?"),
-    ("DEPAS_ALERT_MAX_WALK", "walk_minutes <= ?"),
-    ("DEPAS_ALERT_MIN_AREA", "(area IS NULL OR area >= ?)"),
+    ("DEPAS_COST_MAX", "net_monthly_clp <= ?"),
+    ("DEPAS_BEDROOMS_MIN", "bedrooms >= ?"),
+    ("DEPAS_WALK_MAX", "walk_minutes <= ?"),
+    ("DEPAS_AREA_MIN", "(area IS NULL OR area >= ?)"),
     ("DEPAS_AVAILABLE_BY", AVAILABLE_BY),
 )
 
@@ -179,12 +179,12 @@ def _requirement_clauses(prefs: Preferences) -> tuple[list[str], list[object]]:
         if value is not None:
             conditions.append(condition)
             parameters.append(value)
-    reach = prefs.value("DEPAS_ALERT_MAX_COMMUTE")
+    reach = prefs.commute.maximum
     if reach is not None:
         for place in prefs.locations():
             conditions.append(f"json_extract(commute, '$.{place.name}') <= ?")
             parameters.append(reach)
-    communes = prefs.alert_communes()
+    communes = prefs.communes()
     if communes:
         conditions.append(f"commune IN ({', '.join('?' * len(communes))})")
         parameters.extend(communes)
@@ -192,7 +192,7 @@ def _requirement_clauses(prefs: Preferences) -> tuple[list[str], list[object]]:
 
 
 def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) -> int:
-    """Post enriched, un-announced listings that clear DEPAS_ALERT_MIN_GRADE."""
+    """Post enriched, un-announced listings that clear DEPAS_GRADE_MIN."""
     conditions, parameters = _requirement_clauses(prefs)
     candidates = connection.execute(
         f"{POOL_QUERY} AND notified_at IS NULL"
@@ -204,7 +204,7 @@ def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) ->
 
     pool = connection.execute(POOL_QUERY).fetchall()
     scale = Scale([dict(row) for row in pool], prefs)
-    minimum = prefs.value("DEPAS_ALERT_MIN_GRADE") or 0
+    minimum = prefs.value("DEPAS_GRADE_MIN") or 0
 
     graded = sorted(((row, scale.grade(dict(row))) for row in candidates),
                     key=lambda pair: pair[1].score, reverse=True)
@@ -239,15 +239,15 @@ def watch(args: argparse.Namespace) -> None:
         # Inside the try: the settings are read from the database now, so everything
         # that decides what this pass even scrapes happens after both are open.
         prefs = Preferences.load(connection)
-        communes = [Commune(slug) for slug in prefs.alert_communes()]
+        communes = [Commune(slug) for slug in prefs.communes()]
         if not communes:
-            raise ValueError("set DEPAS_ALERT_COMMUNES to the commune slugs you want watched")
+            raise ValueError("set DEPAS_COMMUNES to the commune slugs you want watched")
 
         query = Query(
             operation="rent",
             communes=communes,
             max_price=prefs.max_rent(),  # derived from the budget, not configured
-            min_bedrooms=prefs.value("DEPAS_ALERT_MIN_BEDROOMS"),
+            min_bedrooms=prefs.value("DEPAS_BEDROOMS_MIN"),
         )
         # The ranked view prices listings per m2 straight from this, so cache it before
         # anything reads the view.
@@ -556,7 +556,7 @@ def main() -> None:
 
     setter = actions.add_parser("set", help="write one setting, checked before it is stored")
     setter.add_argument("name")
-    # nargs="+": DEPAS_ALERT_SECURITY is "24 horas" and the home JSON has spaces in it.
+    # nargs="+": DEPAS_SECURITY_WANTED is "24 horas" and the home JSON has spaces in it.
     setter.add_argument("value", nargs="+")
     setter.set_defaults(func=config_set)
 

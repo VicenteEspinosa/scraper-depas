@@ -211,9 +211,9 @@ setting editable from a chat rather than from a shell on the box.
 
 ```bash
 uv run depas config                       # every setting, its value, and where it came from
-uv run depas config get DEPAS_TARGET_COST # one setting, with what it means
-uv run depas config set DEPAS_TARGET_COST 850000
-uv run depas config unset DEPAS_TARGET_COST   # back to its default, or off
+uv run depas config get DEPAS_COST_TARGET # one setting, with what it means
+uv run depas config set DEPAS_COST_TARGET 850000
+uv run depas config unset DEPAS_COST_TARGET   # back to its default, or off
 uv run depas config import-env --force        # pull .env in again, on purpose
 uv run depas config check                     # validate .env, touching nothing
 ```
@@ -235,12 +235,12 @@ opened or must not be stored beside the data: `TELEGRAM_BOT_TOKEN` and `DEPAS_DB
 | Setting | Meaning |
 | --- | --- |
 | `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME` | Monthly CLP you would collect subletting. Default 0 — net then equals total, rather than inventing a market rate. |
-| `DEPAS_WEIGHT_*` | Relative weight per grading component. Default 1 each. |
-| `DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MAX_COST`, `DEPAS_ALERT_MIN_BEDROOMS` | What the scheduled `watch` pass scrapes. The rent ceiling used while crawling is derived from the cost budget, so there is no separate asking-rent setting. |
+| `DEPAS_*_WEIGHT` | Relative weight per grading component. Default 1 each. |
+| `DEPAS_COMMUNES`, `DEPAS_COST_MAX`, `DEPAS_BEDROOMS_MIN` | What the scheduled `watch` pass scrapes. The rent ceiling used while crawling is derived from the cost budget, so there is no separate asking-rent setting. |
 | `DEPAS_AVAILABLE_BY` | Latest move-in date you would accept, `YYYY-MM-DD`. A listing that only frees up after it is not alerted on; one that never stated a date still is, because most portals simply do not publish the field. |
-| `DEPAS_TARGET_AGE` | Ideal antigüedad in years. Defaults to **25 even when unset** — unlike the other targets, leaving it blank does not switch the component off. Full marks at or under it, then the score falls away; never a cutoff, and an undeclared antigüedad is left unscored rather than assumed old. |
+| `DEPAS_AGE_TARGET` | Ideal antigüedad in years. Defaults to **25 even when unset** — unlike the other targets, leaving it blank does not switch the component off. Full marks at or under it, then the score falls away; never a cutoff, and an undeclared antigüedad is left unscored rather than assumed old. |
 | `DEPAS_LOCATIONS` | `name,lat,lon` per place you need to reach, `;`-separated, any number of them. |
-| `DEPAS_TARGET_COMMUTE`, `DEPAS_ALERT_MAX_COMMUTE` | Minutes to the location a listing reaches worst, by whichever of walking, bus and Metro is fastest. Full marks at or under the target, no alert over the ceiling. |
+| `DEPAS_COMMUTE_TARGET`, `DEPAS_COMMUTE_MAX` | Minutes to the location a listing reaches worst, by whichever of walking, bus and Metro is fastest. Full marks at or under the target, no alert over the ceiling. |
 | `DEPAS_CURRENT_HOME` | Your own apartment as one JSON object, which `/compare` sets a listing against and which `DEPAS_CURRENT_COST` falls back to. Requires `price_clp`, `common_expenses`, `area_m2`, `lat`, `lon`. |
 | `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. Environment only — it says where the settings live, so it cannot be one of them. |
 | `TELEGRAM_BOT_TOKEN` | From @BotFather. Environment only: a credential does not belong in the table beside the data. |

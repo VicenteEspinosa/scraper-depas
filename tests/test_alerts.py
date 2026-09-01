@@ -55,7 +55,7 @@ def test_the_limit_caps_one_pass_without_losing_the_rest(connection, sent):
 
 def test_listings_below_the_minimum_grade_are_never_reconsidered(connection, sent, monkeypatch):
     """Sub-threshold listings are stamped, so they cannot resurface as the pool shifts."""
-    monkeypatch.setenv("DEPAS_ALERT_MIN_GRADE", "90")
+    monkeypatch.setenv("DEPAS_GRADE_MIN", "90")
 
     posted = _announce(connection, prefs(), limit=10)
 
@@ -214,7 +214,7 @@ def test_a_reply_inside_a_comment_thread_stays_in_it(monkeypatch):
 
 def test_requirements_gate_which_listings_are_announced(connection, sent, monkeypatch):
     """A listing that misses a configured requirement is never posted."""
-    monkeypatch.setenv("DEPAS_ALERT_MAX_WALK", "2")
+    monkeypatch.setenv("DEPAS_WALK_MAX", "2")
 
     posted = _announce(connection, prefs(), limit=10)
 
@@ -224,10 +224,10 @@ def test_requirements_gate_which_listings_are_announced(connection, sent, monkey
 
 def test_a_listing_that_misses_a_requirement_stays_eligible(connection, sent, monkeypatch):
     """Unqualified listings are left unstamped, so a later price drop can still alert."""
-    monkeypatch.setenv("DEPAS_ALERT_MAX_WALK", "2")
+    monkeypatch.setenv("DEPAS_WALK_MAX", "2")
     _announce(connection, prefs(), limit=10)
 
-    monkeypatch.delenv("DEPAS_ALERT_MAX_WALK")
+    monkeypatch.delenv("DEPAS_WALK_MAX")
 
     assert _announce(connection, prefs(), limit=10) == 2
 
@@ -260,7 +260,7 @@ def test_announced_cards_are_recorded_so_a_command_can_find_them(connection, sen
 
 def test_enrichment_downgrading_bedrooms_blocks_the_alert(connection, sent, monkeypatch):
     """The card said 2D, the detail page says 1D — the alert must respect the corrected value."""
-    monkeypatch.setenv("DEPAS_ALERT_MIN_BEDROOMS", "2")
+    monkeypatch.setenv("DEPAS_BEDROOMS_MIN", "2")
     save(connection, [Listing(portal="pi", external_id="drift", url="https://x/drift",
                               price=600_000, currency="CLP", price_clp=600_000,
                               bedrooms=2, area_m2=50.0)])
@@ -273,8 +273,8 @@ def test_enrichment_downgrading_bedrooms_blocks_the_alert(connection, sent, monk
 
 
 def test_alerts_are_confined_to_the_configured_communes(connection, sent, monkeypatch):
-    """A listing from outside DEPAS_ALERT_COMMUNES is never announced."""
-    monkeypatch.setenv("DEPAS_ALERT_COMMUNES", "nunoa")
+    """A listing from outside DEPAS_COMMUNES is never announced."""
+    monkeypatch.setenv("DEPAS_COMMUNES", "nunoa")
     save(connection, [Listing(portal="pi", external_id="far", url="https://x/far",
                               price=600_000, currency="CLP", price_clp=600_000,
                               commune="las-condes", area_m2=50.0)])
@@ -290,7 +290,7 @@ def test_the_card_marks_how_complete_the_grade_is(monkeypatch):
     from depas.grade import Scale
     from depas.telegram import COMPLETE_MARK, PARTIAL_MARK
 
-    monkeypatch.setenv("DEPAS_TARGET_FLOOR", "5")
+    monkeypatch.setenv("DEPAS_FLOOR_TARGET", "5")
     complete = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000,
                 "price_clp": 600_000, "url": "https://x/1", "walk_minutes": 5, "floor": 6}
     thin = complete | {"floor": None, "url": "https://x/2"}
@@ -468,7 +468,7 @@ def test_the_card_shows_the_age_and_flags_it_when_over_target(monkeypatch):
     """The antigüedad reads in the spec line, and an old building says so in the cons."""
     from depas.grade import Scale
 
-    monkeypatch.setenv("DEPAS_TARGET_AGE", "25")
+    monkeypatch.setenv("DEPAS_AGE_TARGET", "25")
     young = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000, "age": 8,
              "price_clp": 600_000, "url": "https://x/1"}
     old = young | {"age": 44, "url": "https://x/2"}

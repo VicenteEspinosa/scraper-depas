@@ -135,92 +135,124 @@ class Setting:
         return None if text is None else self.parse(self.name, text)
 
 
-WEIGHTED = ("value", "cost", "location", "size", "amenities", "security", "floor",
+# Every component that carries a weight, named for what it measures rather than for a
+# category: `walk` is minutes to the metro and `area` is square metres, which is what
+# DEPAS_WALK_* and DEPAS_AREA_* configure.
+WEIGHTED = ("value", "cost", "walk", "area", "amenities", "security", "floor",
             "metro", "commute", "age")
 
 
-def _weight_settings() -> list[Setting]:
-    return [Setting(f"DEPAS_WEIGHT_{component.upper()}", _number,
-                    f"Peso relativo del componente «{component}» en la nota.",
-                    example="1", default="1")
-            for component in WEIGHTED]
+def _weight(component: str) -> Setting:
+    """The weight slot every graded component has, declared beside the rest of its slots."""
+    return Setting(f"DEPAS_{component.upper()}_WEIGHT", _number,
+                   f"Peso relativo del componente «{component}» en la nota.",
+                   example="1", default="1")
 
 
+# Named DEPAS_<PARAMETER>_<SLOT>, so every knob for one parameter sorts together and
+# the slot says what it does to a listing:
+#   MIN / MAX  a hard bound -- outside it there is no alert at all
+#   TARGET     an ideal -- being short of it costs score and nothing else
+#   WEIGHT     how much that component moves the final grade
+#   WANTED     a value to match, scored on equality
+#   TIERS      a ranked preference, best first
 SETTINGS: tuple[Setting, ...] = (
     Setting("TELEGRAM_CHAT_ID", _text,
             "Dónde se publican las alertas: un canal (cada tarjeta con sus comentarios) "
             "o un grupo. `depas chats` lista lo que el bot ve.",
             example="-1001234567890"),
 
-    Setting("DEPAS_ALERT_COMMUNES", _communes,
+    # -- what is even looked at ---------------------------------------------------
+    Setting("DEPAS_COMMUNES", _communes,
             "Comunas que revisa la pasada horaria, como slugs separados por coma.",
             example="nunoa,santiago"),
-    Setting("DEPAS_ALERT_MIN_BEDROOMS", _whole,
+    Setting("DEPAS_BEDROOMS_MIN", _whole,
             "Mínimo de dormitorios. Se aplica al buscar y otra vez al alertar.",
             example="2"),
-    Setting("DEPAS_ALERT_MAX_COST", _whole,
-            "Techo duro del costo neto mensual: por encima no hay alerta. De aquí sale "
-            "también el tope de arriendo que se usa al crawlear.",
-            example="950000"),
-    Setting("DEPAS_TARGET_COST", _whole,
-            "Lo que apuntamos a gastar al mes, neto. En o bajo esto la nota de costo es "
-            "máxima; sobre esto baja hasta cero en el techo, sin excluir nada.",
-            example="850000"),
-    Setting("DEPAS_ALERT_MAX_WALK", _whole,
-            "Máximos minutos caminando al metro: por encima no hay alerta.",
-            example="15"),
-    Setting("DEPAS_TARGET_WALK", _whole,
-            "Caminata ideal al metro. En o bajo esto la nota de ubicación es máxima.",
-            example="10"),
-    Setting("DEPAS_ALERT_MIN_AREA", _whole,
-            "Piso duro de metraje, pero un aviso que no publica superficie igual alerta: "
-            "solo puntúa al fondo del componente.",
-            example="42"),
-    Setting("DEPAS_TARGET_AREA", _whole,
-            "Metraje ideal. En o sobre esto la nota de tamaño es máxima.",
-            example="50"),
-    Setting("DEPAS_TARGET_FLOOR", _whole,
-            "Piso ideal. Más abajo puntúa peor sin excluirse, y el último piso se castiga "
-            "por el techo que tiene encima. Nunca es un corte.",
-            example="5"),
-    Setting("DEPAS_TARGET_AGE", _whole,
-            "Antigüedad ideal en años. Es el único objetivo que rige aun sin configurarse: "
-            "borrarlo no apaga la preferencia, vuelve al estándar de 25.",
-            example="25", default=str(DEFAULT_TARGET_AGE)),
-    Setting("DEPAS_ALERT_MAX_COMMUTE", _whole,
-            "Máximos minutos de viaje al lugar peor conectado: por encima no hay alerta.",
-            example="60"),
-    Setting("DEPAS_TARGET_COMMUTE", _whole,
-            "Viaje ideal en minutos al lugar peor conectado de DEPAS_LOCATIONS.",
-            example="25"),
-    Setting("DEPAS_ALERT_SECURITY", _text,
-            "Conserjería buscada. No es un corte: quien no la declara puntúa más bajo.",
-            example="24 horas"),
-    Setting("DEPAS_ALERT_MIN_GRADE", _whole,
-            "Nota mínima para publicar una tarjeta. Lo que queda debajo se marca igual, "
-            "así que no reaparece cuando el pool se mueve.",
-            example="70"),
     Setting("DEPAS_AVAILABLE_BY", _day,
             "Última fecha de entrega que aceptarías. Un aviso que no declara fecha nunca "
             "pierde su alerta por esto.",
             example="2026-11-01"),
+    Setting("DEPAS_GRADE_MIN", _whole,
+            "Nota mínima para publicar una tarjeta. Lo que queda debajo se marca igual, "
+            "así que no reaparece cuando el pool se mueve.",
+            example="70"),
 
+    # -- cost ---------------------------------------------------------------------
+    Setting("DEPAS_COST_MAX", _whole,
+            "Techo duro del costo neto mensual: por encima no hay alerta. De aquí sale "
+            "también el tope de arriendo que se usa al crawlear.",
+            example="950000"),
+    Setting("DEPAS_COST_TARGET", _whole,
+            "Lo que apuntamos a gastar al mes, neto. En o bajo esto la nota de costo es "
+            "máxima; sobre esto baja hasta cero en el techo, sin excluir nada.",
+            example="850000"),
+    _weight("cost"),
+
+    # -- walk to the metro ---------------------------------------------------------
+    Setting("DEPAS_WALK_MAX", _whole,
+            "Máximos minutos caminando al metro: por encima no hay alerta.",
+            example="15"),
+    Setting("DEPAS_WALK_TARGET", _whole,
+            "Caminata ideal al metro. En o bajo esto la nota de caminata es máxima.",
+            example="10"),
+    _weight("walk"),
+
+    # -- area ----------------------------------------------------------------------
+    Setting("DEPAS_AREA_MIN", _whole,
+            "Piso duro de metraje, pero un aviso que no publica superficie igual alerta: "
+            "solo puntúa al fondo del componente.",
+            example="42"),
+    Setting("DEPAS_AREA_TARGET", _whole,
+            "Metraje ideal. En o sobre esto la nota de tamaño es máxima.",
+            example="50"),
+    _weight("area"),
+
+    # -- commute -------------------------------------------------------------------
+    Setting("DEPAS_COMMUTE_MAX", _whole,
+            "Máximos minutos de viaje al lugar peor conectado: por encima no hay alerta.",
+            example="60"),
+    Setting("DEPAS_COMMUTE_TARGET", _whole,
+            "Viaje ideal en minutos al lugar peor conectado de DEPAS_LOCATIONS.",
+            example="25"),
+    _weight("commute"),
     Setting("DEPAS_LOCATIONS", _locations,
             "Cada lugar al que tienes que poder llegar, como `nombre,lat,lon` separados "
             "por `;`. El nombre es la etiqueta que imprimen las tarjetas.",
             example="pega,-33.41720,-70.60600; gimnasio,-33.49830,-70.61140"),
-    Setting("DEPAS_LINE_PREFERENCE", _tiers,
+
+    # -- the rest of the graded parameters ------------------------------------------
+    Setting("DEPAS_FLOOR_TARGET", _whole,
+            "Piso ideal. Más abajo puntúa peor sin excluirse, y el último piso se castiga "
+            "por el techo que tiene encima. Nunca es un corte.",
+            example="5"),
+    _weight("floor"),
+    Setting("DEPAS_AGE_TARGET", _whole,
+            "Antigüedad ideal en años. Es el único objetivo que rige aun sin configurarse: "
+            "borrarlo no apaga la preferencia, vuelve al estándar de 25.",
+            example="25", default=str(DEFAULT_TARGET_AGE)),
+    _weight("age"),
+    Setting("DEPAS_SECURITY_WANTED", _text,
+            "Conserjería buscada. No es un corte: quien no la declara puntúa más bajo.",
+            example="24 horas"),
+    _weight("security"),
+    Setting("DEPAS_METRO_TIERS", _tiers,
             "Líneas de metro por tramos, mejor primero: `>` separa tramos y `,` lista "
             "líneas que valen lo mismo. Una línea que no aparece va bajo todas.",
             example="1 > 3,6 > 2,4,4A,5"),
+    _weight("metro"),
 
+    # Graded off the listing alone, so they weigh something without configuring anything.
+    _weight("value"),
+    _weight("amenities"),
+
+    # -- what a listing is priced and compared against --------------------------------
     Setting("DEPAS_PARKING_INCOME", _clp,
             "CLP al mes que esperas cobrar arrendando el estacionamiento.",
             example="60000", default="0"),
     Setting("DEPAS_STORAGE_INCOME", _clp,
             "CLP al mes que esperas cobrar arrendando la bodega.",
             example="30000", default="0"),
-
     Setting("DEPAS_CURRENT_COST", _whole,
             "Lo que pagas hoy, neto. Déjalo vacío si definiste DEPAS_CURRENT_HOME: de ahí "
             "se calcula solo.",
@@ -231,7 +263,6 @@ SETTINGS: tuple[Setting, ...] = (
             example='{"commune":"nunoa","price_clp":800000,"common_expenses":130000,'
                     '"area_m2":62,"lat":-33.45590,"lon":-70.59780}'),
 
-    *_weight_settings(),
 )
 
 BY_NAME: Mapping[str, Setting] = {setting.name: setting for setting in SETTINGS}
@@ -288,6 +319,20 @@ def setting(name: str) -> Setting:
 # ── a snapshot of what is configured ────────────────────────────────────────────
 
 
+@dataclass(frozen=True, slots=True)
+class Bounds:
+    """One numeric parameter's three slots, already parsed.
+
+    `minimum` and `maximum` exclude a listing outright; `target` only costs it score.
+    Any of them being None means that slot was never configured, which is why the
+    scorers can take a Bounds without asking whether it is complete.
+    """
+
+    minimum: int | None = None
+    target: int | None = None
+    maximum: int | None = None
+
+
 class Preferences:
     """What one reader wants, as raw text per setting, parsed on demand and cached.
 
@@ -296,7 +341,7 @@ class Preferences:
     readers the only thing that changes is which snapshot gets passed in.
     """
 
-    __slots__ = ("_raw", "_parsed")
+    __slots__ = ("_raw", "_parsed", "cost", "walk", "area", "commute", "age", "floor")
 
     def __init__(self, raw: Mapping[str, str]) -> None:
         # Validated here rather than at first read: a typo in a setting nothing happens
@@ -305,6 +350,20 @@ class Preferences:
         self._parsed: dict[str, object | None] = {}
         for name in self._raw:
             self.value(name)
+        # Built once, from the one query that filled `raw`: the scorers run per listing
+        # per component, so they read an attribute rather than re-parsing a name.
+        self.cost = self._bounds("COST")
+        self.walk = self._bounds("WALK")
+        self.area = self._bounds("AREA")
+        self.commute = self._bounds("COMMUTE")
+        self.age = self._bounds("AGE")
+        self.floor = self._bounds("FLOOR")
+
+    def _bounds(self, parameter: str) -> Bounds:
+        """The MIN/TARGET/MAX a parameter declares; slots it has no setting for stay None."""
+        return Bounds(*(self.value(f"DEPAS_{parameter}_{slot}")
+                        if f"DEPAS_{parameter}_{slot}" in BY_NAME else None
+                        for slot in ("MIN", "TARGET", "MAX")))
 
     def __repr__(self) -> str:
         return f"Preferences({len(self._raw)} set)"
@@ -352,20 +411,23 @@ class Preferences:
         return self.value(f"DEPAS_{kind.upper()}_INCOME")
 
     def weights(self) -> dict[str, float]:
-        weights = {name: self.value(f"DEPAS_WEIGHT_{name.upper()}") for name in WEIGHTED}
+        weights = {name: self.value(f"DEPAS_{name.upper()}_WEIGHT") for name in WEIGHTED}
         if sum(weights.values()) <= 0:
-            raise ValueError("at least one DEPAS_WEIGHT_* must be positive")
+            raise ValueError("at least one DEPAS_*_WEIGHT must be positive")
         return weights
 
     def locations(self) -> list[Location]:
         """Every place you have to be able to reach from the apartment."""
         return self.value("DEPAS_LOCATIONS") or []
 
-    def line_preference(self) -> list[list[str]]:
-        return self.value("DEPAS_LINE_PREFERENCE") or []
+    def metro_tiers(self) -> list[list[str]]:
+        return self.value("DEPAS_METRO_TIERS") or []
 
-    def alert_communes(self) -> list[str]:
-        return self.value("DEPAS_ALERT_COMMUNES") or []
+    def communes(self) -> list[str]:
+        return self.value("DEPAS_COMMUNES") or []
+
+    def security_wanted(self) -> str | None:
+        return self.value("DEPAS_SECURITY_WANTED")
 
     def chat_id(self) -> str:
         """The Telegram chat alerts are posted to."""
@@ -398,7 +460,7 @@ class Preferences:
         Gastos comunes only add to the net cost and sublet income is the only thing that
         subtracts, so rent above budget-plus-maximum-sublet can never come in under budget.
         """
-        budget = self.value("DEPAS_ALERT_MAX_COST")
+        budget = self.cost.maximum
         if budget is None:
             return None
         return budget + 2 * self.lease_income("parking") + self.lease_income("storage")
@@ -484,6 +546,7 @@ def described(preferences: Preferences) -> list[tuple[Setting, str | None, str]]
     return rows
 
 
-__all__ = ["BOOTSTRAP", "BY_NAME", "DEFAULTED", "Preferences", "SET", "SETTINGS", "Setting",
+__all__ = ["BOOTSTRAP", "BY_NAME", "Bounds", "DEFAULTED", "Preferences", "SET", "SETTINGS",
+           "Setting",
            "UNSET", "WEIGHTED", "check_environment", "clear_preference", "described",
            "seed_from_env", "set_preference", "setting"]
