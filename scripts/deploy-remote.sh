@@ -44,8 +44,12 @@ docker compose build
 # loop, not an error anybody reads. Checking here, after the build and before the
 # restart, turns it into a failed deploy with the old containers still serving. It
 # opens nothing and writes nothing.
+#
+# stdin is this script: the workflow pipes it into `bash -s`. `run` attaches the
+# container's stdin, so without </dev/null it reads the rest of the file and the
+# deploy ends here, green, having restarted nothing.
 log "validate .env against the settings registry"
-docker compose run --rm depas-bot depas config check
+docker compose run --rm -T depas-bot depas config check < /dev/null
 
 log "docker compose up -d"
 docker compose up -d
