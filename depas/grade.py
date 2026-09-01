@@ -3,7 +3,7 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 
 from depas.metro import STATION_LINES
-# The components are exactly the things that carry a DEPAS_WEIGHT_*, so the registry
+# The components are exactly the things that carry a DEPAS_*_WEIGHT, so the registry
 # owns the list and this reads it rather than keeping a second copy in step.
 from depas.preferences import WEIGHTED as COMPONENTS
 from depas.preferences import Preferences
@@ -53,31 +53,29 @@ def _cost(row: dict, prefs: Preferences) -> float | None:
     net = row.get("net_monthly_clp")
     if not net:
         return None
-    return _against_target(net, prefs.value("DEPAS_TARGET_COST"),
-                           prefs.value("DEPAS_ALERT_MAX_COST"))
+    return _against_target(net, prefs.cost.target, prefs.cost.maximum)
 
 
-def _location(row: dict, prefs: Preferences) -> float | None:
+def _walk(row: dict, prefs: Preferences) -> float | None:
     walk = row.get("walk_minutes")
     if walk is None:
         return None
-    return _against_target(walk, prefs.value("DEPAS_TARGET_WALK"),
-                           prefs.value("DEPAS_ALERT_MAX_WALK"))
+    return _against_target(walk, prefs.walk.target, prefs.walk.maximum)
 
 
-def _size(row: dict, prefs: Preferences) -> float | None:
-    """Bigger is better up to DEPAS_TARGET_AREA, where listings tie at the top.
+def _area(row: dict, prefs: Preferences) -> float | None:
+    """Bigger is better up to DEPAS_AREA_TARGET, where listings tie at the top.
 
     An undeclared area scores as badly as the smallest allowed size rather than skipping
     the component: a listing that omits its size must not outrank one that states it.
     """
-    target = prefs.value("DEPAS_TARGET_AREA")
+    target = prefs.area.target
     area = row.get("area")
     if target is None:
         return area or None
     if area is None:
         return -1.0
-    minimum = prefs.value("DEPAS_ALERT_MIN_AREA")
+    minimum = prefs.area.minimum
     span = target - minimum if minimum and minimum < target else target
     return -min(max(target - area, 0.0) / span, 1.0)
 
@@ -95,7 +93,7 @@ def _security(row: dict, prefs: Preferences) -> float | None:
     An undeclared type counts as unmet rather than unknown — otherwise listings that
     simply omit the field would skip the component and outrank ones that state it.
     """
-    wanted = prefs.value("DEPAS_ALERT_SECURITY")
+    wanted = prefs.security_wanted()
     if wanted is None:
         return None
     return float(row.get("security_type") == wanted)
@@ -111,7 +109,7 @@ def _floor(row: dict, prefs: Preferences) -> float | None:
     floor = row.get("floor")
     if floor is None:
         return None
-    target = prefs.value("DEPAS_TARGET_FLOOR")
+    target = prefs.floor.target
     shortfall = 0.0 if target is None or floor >= target else (target - floor) / target
     top = TOP_FLOOR_PENALTY if floor == row.get("building_floors") else 0.0
     return -min(shortfall + top, 1.0)
@@ -121,18 +119,18 @@ def _age(row: dict, prefs: Preferences) -> float | None:
     """Newer is better up to the age target; past it the score falls without excluding.
 
     An undeclared antigüedad is left unscored rather than assumed old: most portals
-    simply omit it. No ceiling is passed because age never blocks an alert — the target
-    alone sets how fast an older building loses the component.
+    simply omit it. Age declares no MAX slot because it never blocks an alert — the
+    target alone sets how fast an older building loses the component.
     """
     age = row.get("age")
     if age is None:
         return None
-    return _against_target(float(age), prefs.value("DEPAS_TARGET_AGE"), None)
+    return _against_target(float(age), prefs.age.target, prefs.age.maximum)
 
 
 def _metro(row: dict, prefs: Preferences) -> float | None:
     """Rank the station by the best-tiered line calling at it; an interchange takes its best."""
-    tiers = prefs.line_preference()
+    tiers = prefs.metro_tiers()
     station = row.get("nearest_station")
     if not tiers or station is None:
         return None
@@ -150,13 +148,12 @@ def _commute(row: dict, prefs: Preferences) -> float | None:
     if not travel:
         return None
     return _against_target(max(json.loads(travel).values()),
-                           prefs.value("DEPAS_TARGET_COMMUTE"),
-                           prefs.value("DEPAS_ALERT_MAX_COMMUTE"))
+                           prefs.commute.target, prefs.commute.maximum)
 
 
 # One shape for all of them, preferences included, so the dispatch below needs no
 # special case for the two that happen not to consult any.
-RAW = {"value": _value, "cost": _cost, "location": _location, "size": _size,
+RAW = {"value": _value, "cost": _cost, "walk": _walk, "area": _area,
        "amenities": _amenities, "security": _security, "floor": _floor, "metro": _metro,
        "commute": _commute, "age": _age}
 

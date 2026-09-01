@@ -107,20 +107,20 @@ def _cons(row: dict[str, Any], prefs: Preferences) -> list[str]:
     """The preferences this listing misses, so a docked score is legible in the card."""
     cons = []
     floor, top = row.get("floor"), row.get("building_floors")
-    target = prefs.value("DEPAS_TARGET_FLOOR")
+    target = prefs.floor.target
     if floor is not None and target is not None and floor < target:
         cons.append(f"piso {floor}, bajo el {target}º")
     if floor is not None and floor == top:
         cons.append(f"último piso ({floor} de {top})")
-    area, target_area = row.get("area"), prefs.value("DEPAS_TARGET_AREA")
+    area, target_area = row.get("area"), prefs.area.target
     if area is None:
         cons.append("metraje no publicado")
     elif target_area is not None and area < target_area:
         cons.append(f"{area:.0f} m², bajo los {target_area}")
-    age, oldest = row.get("age"), prefs.value("DEPAS_TARGET_AGE")
+    age, oldest = row.get("age"), prefs.age.target
     if age is not None and age > oldest:
         cons.append(f"{age:.0f} años, sobre los {oldest}")
-    wanted = prefs.value("DEPAS_ALERT_SECURITY")
+    wanted = prefs.security_wanted()
     if wanted and row.get("security_type") != wanted:
         cons.append(f"sin conserjería {wanted}")
     return cons

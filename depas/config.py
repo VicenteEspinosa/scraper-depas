@@ -16,7 +16,7 @@ ENV_FILE = Path(".env")
 DEFAULT_COMMON_EXPENSES = 120_000
 
 # Under 25 years is the standing rule, so age is the one target that applies whether
-# or not anything is configured: clearing DEPAS_TARGET_AGE must not quietly turn the
+# or not anything is configured: clearing DEPAS_AGE_TARGET must not quietly turn the
 # preference off. Set it to move the line; zero the weight to ignore it.
 DEFAULT_TARGET_AGE = 25
 
