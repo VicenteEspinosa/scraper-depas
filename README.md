@@ -246,6 +246,13 @@ the only place a new setting has to be added.
 Two things stay in the environment, because they are needed before a database can be
 opened or must not be stored beside the data: `TELEGRAM_BOT_TOKEN` and `DEPAS_DB_PATH`.
 
+The deploy passes only those, plus the three settings `seed.env` deliberately leaves
+out — `TELEGRAM_CHAT_ID`, `DEPAS_LOCATIONS` and `DEPAS_CURRENT_HOME`, a chat id and two
+sets of real coordinates that do not belong in a public repo. Everything else it used
+to carry is versioned in `seed.env` and stored in the table, so passing it again would
+be a second source that nothing reads: the seed runs once, and the table has long since
+won.
+
 | Setting | Meaning |
 | --- | --- |
 | `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME` | Monthly CLP you would collect subletting. Default 0 — net then equals total, rather than inventing a market rate. |
