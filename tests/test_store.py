@@ -4,7 +4,8 @@ import pytest
 
 from depas.config import DEFAULT_COMMON_EXPENSES
 from depas.models import Listing
-from depas.store import (MIGRATIONS_DIR, POOL_QUERY, connect, migrate, save,
+from tests.support import prefs
+from depas.store import (MIGRATIONS_DIR, connect, migrate, pool_query, save,
                          save_detail)
 
 
@@ -200,6 +201,6 @@ def test_a_furnished_listing_is_left_out_of_the_pool(tmp_path):
         save_detail(connection, "houm", external_id,
                     {"furnished": 1 if external_id == "43" else None})
 
-    pooled = [row["external_id"] for row in connection.execute(POOL_QUERY)]
+    pooled = [row["external_id"] for row in connection.execute(pool_query(prefs()))]
 
     assert pooled == ["42"]  # 43 says so in its spec table, 44 only in its title

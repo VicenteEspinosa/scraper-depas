@@ -236,6 +236,7 @@ opened or must not be stored beside the data: `TELEGRAM_BOT_TOKEN` and `DEPAS_DB
 | --- | --- |
 | `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME` | Monthly CLP you would collect subletting. Default 0 — net then equals total, rather than inventing a market rate. |
 | `DEPAS_*_WEIGHT` | Relative weight per grading component. Default 1 each. |
+| `DEPAS_FURNISHED`, `DEPAS_TOP_FLOOR` | What a yes/no property does to a listing: `exclude` drops it (and keeps it out of the pool the others are ranked against), `penalise` only costs it score, `ignore` stops reading it. Defaults reproduce the old hardcoded behaviour — amoblado excluded, top floor docked. |
 | `DEPAS_COMMUNES`, `DEPAS_COST_MAX`, `DEPAS_BEDROOMS_MIN` | What the scheduled `watch` pass scrapes. The rent ceiling used while crawling is derived from the cost budget, so there is no separate asking-rent setting. |
 | `DEPAS_AVAILABLE_BY` | Latest move-in date you would accept, `YYYY-MM-DD`. A listing that only frees up after it is not alerted on; one that never stated a date still is, because most portals simply do not publish the field. |
 | `DEPAS_AGE_TARGET` | Ideal antigüedad in years. Defaults to **25 even when unset** — unlike the other targets, leaving it blank does not switch the component off. Full marks at or under it, then the score falls away; never a cutoff, and an undeclared antigüedad is left unscored rather than assumed old. |

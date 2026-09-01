@@ -99,11 +99,6 @@ def _security(row: dict, prefs: Preferences) -> float | None:
     return float(row.get("security_type") == wanted)
 
 
-# The top floor takes the roof's heat and its leaks, so it is docked on top of any
-# shortfall — a penthouse is still worse than the identical unit one floor down.
-TOP_FLOOR_PENALTY = 0.5
-
-
 def _floor(row: dict, prefs: Preferences) -> float | None:
     """Height is a preference, not a cutoff: below the target costs score, and so does the top."""
     floor = row.get("floor")
@@ -111,8 +106,7 @@ def _floor(row: dict, prefs: Preferences) -> float | None:
         return None
     target = prefs.floor.target
     shortfall = 0.0 if target is None or floor >= target else (target - floor) / target
-    top = TOP_FLOOR_PENALTY if floor == row.get("building_floors") else 0.0
-    return -min(shortfall + top, 1.0)
+    return -min(shortfall + _levied(row, prefs, "floor"), 1.0)
 
 
 def _age(row: dict, prefs: Preferences) -> float | None:
@@ -151,11 +145,31 @@ def _commute(row: dict, prefs: Preferences) -> float | None:
                            prefs.commute.target, prefs.commute.maximum)
 
 
+def _levied(row: dict, prefs: Preferences, component: str) -> float:
+    """What the penalised traits assigned to one component cost this listing."""
+    return sum(trait.penalty for trait in prefs.penalised_traits()
+               if trait.component == component and trait.holds(row))
+
+
+def _traits(row: dict, prefs: Preferences) -> float | None:
+    """The share of the penalised traits this listing carries; having more of them is worse.
+
+    None when nothing is penalised here, which keeps the component out of the scale
+    rather than tying every listing at the midpoint, and None for a listing whose detail
+    page was never read -- traits come off that page, so it has answered nothing.
+    """
+    penalised = [trait for trait in prefs.penalised_traits() if trait.component == "traits"]
+    if not penalised or not row.get("detail_fetched_at"):
+        return None
+    return -(sum(trait.penalty for trait in penalised if trait.holds(row))
+             / sum(trait.penalty for trait in penalised))
+
+
 # One shape for all of them, preferences included, so the dispatch below needs no
 # special case for the two that happen not to consult any.
 RAW = {"value": _value, "cost": _cost, "walk": _walk, "area": _area,
        "amenities": _amenities, "security": _security, "floor": _floor, "metro": _metro,
-       "commute": _commute, "age": _age}
+       "commute": _commute, "age": _age, "traits": _traits}
 
 
 def _percentile(sorted_values: list[float], value: float) -> float:
