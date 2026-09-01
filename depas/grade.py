@@ -1,19 +1,18 @@
 import json
-import os
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 
-from depas.config import (_load_env_file, line_preference, optional_int, optional_text,
-                          target_age, target_cost)
 from depas.metro import STATION_LINES
+# The components are exactly the things that carry a DEPAS_WEIGHT_*, so the registry
+# owns the list and this reads it rather than keeping a second copy in step.
+from depas.preferences import WEIGHTED as COMPONENTS
+from depas.preferences import Preferences
 
 # Amenities a listing is credited for having; the raw score is the fraction present.
 AMENITIES = (
     "has_elevator", "has_concierge", "has_heating", "has_air_conditioning",
     "has_pool", "has_gym", "has_terrace", "gated_community", "pets_allowed",
 )
-COMPONENTS = ("value", "cost", "location", "size", "amenities", "security", "floor",
-              "metro", "commute", "age")
 LETTERS = ((90, "A"), (75, "B"), (50, "C"), (25, "D"))
 # A percentile scale centres here, so it is what an unmeasured component says.
 MIDPOINT = 50.0
@@ -29,7 +28,7 @@ class Grade:
     missing: tuple[str, ...]
 
 
-def _value(row: dict) -> float | None:
+def _value(row: dict, prefs: Preferences) -> float | None:
     """Cheaper than its zone scores better, so the ratio is negated."""
     asking = row.get("price_per_m2_uf_effective")
     zone = row.get("zone_price_per_m2_uf_effective")
@@ -50,52 +49,53 @@ def _against_target(value: float, target: int | None, ceiling: int | None) -> fl
     return -min((value - target) / span, 1.0)
 
 
-def _cost(row: dict) -> float | None:
+def _cost(row: dict, prefs: Preferences) -> float | None:
     net = row.get("net_monthly_clp")
     if not net:
         return None
-    return _against_target(net, target_cost(), optional_int("DEPAS_ALERT_MAX_COST"))
+    return _against_target(net, prefs.value("DEPAS_TARGET_COST"),
+                           prefs.value("DEPAS_ALERT_MAX_COST"))
 
 
-def _location(row: dict) -> float | None:
+def _location(row: dict, prefs: Preferences) -> float | None:
     walk = row.get("walk_minutes")
     if walk is None:
         return None
-    return _against_target(walk, optional_int("DEPAS_TARGET_WALK"),
-                           optional_int("DEPAS_ALERT_MAX_WALK"))
+    return _against_target(walk, prefs.value("DEPAS_TARGET_WALK"),
+                           prefs.value("DEPAS_ALERT_MAX_WALK"))
 
 
-def _size(row: dict) -> float | None:
+def _size(row: dict, prefs: Preferences) -> float | None:
     """Bigger is better up to DEPAS_TARGET_AREA, where listings tie at the top.
 
     An undeclared area scores as badly as the smallest allowed size rather than skipping
     the component: a listing that omits its size must not outrank one that states it.
     """
-    target = optional_int("DEPAS_TARGET_AREA")
+    target = prefs.value("DEPAS_TARGET_AREA")
     area = row.get("area")
     if target is None:
         return area or None
     if area is None:
         return -1.0
-    minimum = optional_int("DEPAS_ALERT_MIN_AREA")
+    minimum = prefs.value("DEPAS_ALERT_MIN_AREA")
     span = target - minimum if minimum and minimum < target else target
     return -min(max(target - area, 0.0) / span, 1.0)
 
 
-def _amenities(row: dict) -> float | None:
+def _amenities(row: dict, prefs: Preferences) -> float | None:
     present = [row.get(name) for name in AMENITIES]
     if all(value is None for value in present):
         return None
     return sum(bool(value) for value in present) / len(AMENITIES)
 
 
-def _security(row: dict) -> float | None:
+def _security(row: dict, prefs: Preferences) -> float | None:
     """Wanted security is a preference, not a cutoff: missing it costs score, not the alert.
 
     An undeclared type counts as unmet rather than unknown — otherwise listings that
     simply omit the field would skip the component and outrank ones that state it.
     """
-    wanted = optional_text("DEPAS_ALERT_SECURITY")
+    wanted = prefs.value("DEPAS_ALERT_SECURITY")
     if wanted is None:
         return None
     return float(row.get("security_type") == wanted)
@@ -106,18 +106,18 @@ def _security(row: dict) -> float | None:
 TOP_FLOOR_PENALTY = 0.5
 
 
-def _floor(row: dict) -> float | None:
+def _floor(row: dict, prefs: Preferences) -> float | None:
     """Height is a preference, not a cutoff: below the target costs score, and so does the top."""
     floor = row.get("floor")
     if floor is None:
         return None
-    target = optional_int("DEPAS_TARGET_FLOOR")
+    target = prefs.value("DEPAS_TARGET_FLOOR")
     shortfall = 0.0 if target is None or floor >= target else (target - floor) / target
     top = TOP_FLOOR_PENALTY if floor == row.get("building_floors") else 0.0
     return -min(shortfall + top, 1.0)
 
 
-def _age(row: dict) -> float | None:
+def _age(row: dict, prefs: Preferences) -> float | None:
     """Newer is better up to the age target; past it the score falls without excluding.
 
     An undeclared antigüedad is left unscored rather than assumed old: most portals
@@ -127,12 +127,12 @@ def _age(row: dict) -> float | None:
     age = row.get("age")
     if age is None:
         return None
-    return _against_target(float(age), target_age(), None)
+    return _against_target(float(age), prefs.value("DEPAS_TARGET_AGE"), None)
 
 
-def _metro(row: dict) -> float | None:
+def _metro(row: dict, prefs: Preferences) -> float | None:
     """Rank the station by the best-tiered line calling at it; an interchange takes its best."""
-    tiers = line_preference()
+    tiers = prefs.line_preference()
     station = row.get("nearest_station")
     if not tiers or station is None:
         return None
@@ -144,33 +144,21 @@ def _metro(row: dict) -> float | None:
     return -(min(ranks) if ranks else len(tiers)) / len(tiers)
 
 
-def _commute(row: dict) -> float | None:
+def _commute(row: dict, prefs: Preferences) -> float | None:
     """Judged on the location it reaches worst — you have to make every one of those trips."""
     travel = row.get("commute")
     if not travel:
         return None
     return _against_target(max(json.loads(travel).values()),
-                           optional_int("DEPAS_TARGET_COMMUTE"),
-                           optional_int("DEPAS_ALERT_MAX_COMMUTE"))
+                           prefs.value("DEPAS_TARGET_COMMUTE"),
+                           prefs.value("DEPAS_ALERT_MAX_COMMUTE"))
 
 
+# One shape for all of them, preferences included, so the dispatch below needs no
+# special case for the two that happen not to consult any.
 RAW = {"value": _value, "cost": _cost, "location": _location, "size": _size,
        "amenities": _amenities, "security": _security, "floor": _floor, "metro": _metro,
        "commute": _commute, "age": _age}
-
-
-def _weights() -> dict[str, float]:
-    _load_env_file()
-    weights = {}
-    for name in COMPONENTS:
-        raw = os.environ.get(f"DEPAS_WEIGHT_{name.upper()}", "1")
-        try:
-            weights[name] = float(raw)
-        except ValueError:
-            raise ValueError(f"DEPAS_WEIGHT_{name.upper()} must be a number, got {raw!r}") from None
-    if sum(weights.values()) <= 0:
-        raise ValueError("at least one DEPAS_WEIGHT_* must be positive")
-    return weights
 
 
 def _percentile(sorted_values: list[float], value: float) -> float:
@@ -185,10 +173,13 @@ def _percentile(sorted_values: list[float], value: float) -> float:
 class Scale:
     """Percentile breakpoints built from the listings currently in the database."""
 
-    def __init__(self, rows: list[dict]) -> None:
-        self.weights = _weights()
+    def __init__(self, rows: list[dict], prefs: Preferences) -> None:
+        # The scale belongs to whoever is reading it: the same pool graded against two
+        # sets of targets is two different scales, so the preferences come in with it.
+        self.prefs = prefs
+        self.weights = prefs.weights()
         self.components = {
-            name: sorted(value for row in rows if (value := RAW[name](row)) is not None)
+            name: sorted(value for row in rows if (value := RAW[name](row, prefs)) is not None)
             for name in COMPONENTS
         }
         # `security` scores nothing unless the preference is set; treating that as
@@ -213,7 +204,7 @@ class Scale:
     def _parts(self, row: dict) -> dict[str, float]:
         parts = {}
         for name in COMPONENTS:
-            value = RAW[name](row)
+            value = RAW[name](row, self.prefs)
             if value is not None:
                 parts[name] = _percentile(self.components[name], value)
         return parts

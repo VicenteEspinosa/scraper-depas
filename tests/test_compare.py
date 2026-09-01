@@ -3,9 +3,9 @@ import json
 import pytest
 
 from depas.bot import NO_HOME, _handle
-from depas.config import current_cost
 from depas.models import Listing
 from depas.store import connect, remember_card, save, save_detail
+from tests.support import prefs
 
 HOME = {
     "commune": "nunoa", "price_clp": 800_000, "common_expenses": 130_000,
@@ -60,7 +60,7 @@ def at_home(monkeypatch):
 
 def test_a_compare_with_no_home_configured_says_so(connection, answered):
     """Without DEPAS_CURRENT_HOME there is nothing to compare against."""
-    _handle(connection, None, _comment())
+    _handle(connection, None, _comment(), prefs())
 
     assert answered == [NO_HOME]
 
@@ -81,14 +81,14 @@ def test_a_compare_with_no_home_configured_says_so(connection, answered):
 def test_every_axis_is_compared_against_your_own_place(connection, answered, at_home,
                                                        expected, reason):
     """/compare answers with the listing set against your apartment, figure by figure."""
-    _handle(connection, None, _comment())
+    _handle(connection, None, _comment(), prefs())
 
     assert expected in answered[0], reason
 
 
 def test_the_answer_grades_both_places(connection, answered, at_home):
     """The point of comparing is the verdict, so both grades open the card."""
-    _handle(connection, None, _comment())
+    _handle(connection, None, _comment(), prefs())
 
     assert "⚖️ <b>Tu depto → este aviso</b>" in answered[0]
     assert answered[0].splitlines()[1].count("→") == 1
@@ -96,21 +96,21 @@ def test_the_answer_grades_both_places(connection, answered, at_home):
 
 def test_the_command_is_recognised_when_addressed_to_the_bot(connection, answered, at_home):
     """Telegram appends @thebot whenever more than one bot shares the chat."""
-    _handle(connection, None, _comment("/compare@depas_bot"))
+    _handle(connection, None, _comment("/compare@depas_bot"), prefs())
 
     assert "📐 superficie" in answered[0]
 
 
 def test_the_home_json_replaces_the_separate_current_cost(at_home):
     """One secret describes the place, so its net cost need not be configured twice."""
-    assert current_cost() == 800_000 + 130_000 - 0
+    assert prefs().current_cost() == 800_000 + 130_000 - 0
 
 
 def test_an_explicit_current_cost_still_wins(at_home, monkeypatch):
     """DEPAS_CURRENT_COST stays the override for anyone who set it before."""
     monkeypatch.setenv("DEPAS_CURRENT_COST", "999000")
 
-    assert current_cost() == 999_000
+    assert prefs().current_cost() == 999_000
 
 
 def test_a_home_missing_a_required_figure_is_refused(monkeypatch):
@@ -118,4 +118,4 @@ def test_a_home_missing_a_required_figure_is_refused(monkeypatch):
     monkeypatch.setenv("DEPAS_CURRENT_HOME", json.dumps({"price_clp": 800_000}))
 
     with pytest.raises(ValueError, match="common_expenses"):
-        current_cost()
+        prefs().current_cost()

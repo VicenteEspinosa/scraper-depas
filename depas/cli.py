@@ -7,16 +7,18 @@ from depas.bot import refresh_card, run as run_bot
 from depas.communes import SANTIAGO_PROVINCE, Commune
 from depas.commute import as_text as commute_text
 from depas.detail import infer_from_description
-from depas.config import (DEFAULT_COMMON_EXPENSES, alert_communes, chat_id, locations,
-                          max_rent, optional_int, optional_text)
+from depas.config import DEFAULT_COMMON_EXPENSES
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.models import Listing, Query
 from depas.portals import PORTALS
 from depas.metro import nearest_station
+from depas.preferences import (DEFAULTED, SET, Preferences, described, seed_from_env,
+                               setting)
 from depas.store import (NOT_FURNISHED, NOT_REJECTED, POOL_QUERY, clear_notified, connect,
-                        mark_notified, refresh_commutes, refresh_zone_benchmarks,
-                        remember_card, save, save_detail)
+                        forget_preference, mark_notified, refresh_commutes,
+                        refresh_zone_benchmarks, remember_card, save, save_detail,
+                        store_preference, sync_lease_income)
 from depas.telegram import chat_type, chats, format_listing, send_listing, verdict_buttons
 from depas.uf import normalize, stored_uf
 
@@ -97,6 +99,7 @@ def _enrich_one(connection: sqlite3.Connection, fetcher: Fetcher, row: sqlite3.R
 
 def enrich(args: argparse.Namespace) -> None:
     connection = connect()
+    prefs = Preferences.load(connection)
     pending = connection.execute(
         "SELECT portal, external_id, url FROM listings "
         "WHERE detail_fetched_at IS NULL LIMIT ?",
@@ -109,7 +112,7 @@ def enrich(args: argparse.Namespace) -> None:
         for index, row in enumerate(pending, start=1):
             _enrich_one(connection, fetcher, row)
             print(f"\r{index}/{len(pending)} enriched", end="", flush=True)
-        refresh_commutes(connection, fetcher, args.limit)
+        refresh_commutes(connection, fetcher, prefs, args.limit)
     finally:
         fetcher.close()
         connection.close()
@@ -160,37 +163,37 @@ ALERT_DELAY_SECONDS = 3
 # Floor is deliberately absent: it grades rather than excludes, because the
 # portals that publish the most listings never publish a floor number at all.
 ALERT_REQUIREMENTS = (
-    ("DEPAS_ALERT_MAX_COST", "net_monthly_clp <= ?", optional_int),
-    ("DEPAS_ALERT_MIN_BEDROOMS", "bedrooms >= ?", optional_int),
-    ("DEPAS_ALERT_MAX_WALK", "walk_minutes <= ?", optional_int),
-    ("DEPAS_ALERT_MIN_AREA", "(area IS NULL OR area >= ?)", optional_int),
-    ("DEPAS_AVAILABLE_BY", AVAILABLE_BY, optional_text),
+    ("DEPAS_ALERT_MAX_COST", "net_monthly_clp <= ?"),
+    ("DEPAS_ALERT_MIN_BEDROOMS", "bedrooms >= ?"),
+    ("DEPAS_ALERT_MAX_WALK", "walk_minutes <= ?"),
+    ("DEPAS_ALERT_MIN_AREA", "(area IS NULL OR area >= ?)"),
+    ("DEPAS_AVAILABLE_BY", AVAILABLE_BY),
 )
 
 
-def _requirement_clauses() -> tuple[list[str], list[object]]:
+def _requirement_clauses(prefs: Preferences) -> tuple[list[str], list[object]]:
     """Only the requirements actually configured become WHERE conditions."""
     conditions, parameters = [], []
-    for name, condition, read in ALERT_REQUIREMENTS:
-        value = read(name)
+    for name, condition in ALERT_REQUIREMENTS:
+        value = prefs.value(name)
         if value is not None:
             conditions.append(condition)
             parameters.append(value)
-    reach = optional_int("DEPAS_ALERT_MAX_COMMUTE")
+    reach = prefs.value("DEPAS_ALERT_MAX_COMMUTE")
     if reach is not None:
-        for place in locations():
+        for place in prefs.locations():
             conditions.append(f"json_extract(commute, '$.{place.name}') <= ?")
             parameters.append(reach)
-    communes = alert_communes()
+    communes = prefs.alert_communes()
     if communes:
         conditions.append(f"commune IN ({', '.join('?' * len(communes))})")
         parameters.extend(communes)
     return conditions, parameters
 
 
-def _announce(connection: sqlite3.Connection, limit: int) -> int:
+def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) -> int:
     """Post enriched, un-announced listings that clear DEPAS_ALERT_MIN_GRADE."""
-    conditions, parameters = _requirement_clauses()
+    conditions, parameters = _requirement_clauses(prefs)
     candidates = connection.execute(
         f"{POOL_QUERY} AND notified_at IS NULL"
         + "".join(f" AND {condition}" for condition in conditions),
@@ -200,12 +203,12 @@ def _announce(connection: sqlite3.Connection, limit: int) -> int:
         return 0
 
     pool = connection.execute(POOL_QUERY).fetchall()
-    scale = Scale([dict(row) for row in pool])
-    minimum = optional_int("DEPAS_ALERT_MIN_GRADE") or 0
+    scale = Scale([dict(row) for row in pool], prefs)
+    minimum = prefs.value("DEPAS_ALERT_MIN_GRADE") or 0
 
     graded = sorted(((row, scale.grade(dict(row))) for row in candidates),
                     key=lambda pair: pair[1].score, reverse=True)
-    destination = chat_id()
+    destination = prefs.chat_id()
     # Cards only get comment threads in a channel, and the id alone cannot say which
     # this is: channels and discussion groups share the -100 prefix.
     print(f"alerts: posting to a {chat_type(destination)}")
@@ -215,7 +218,8 @@ def _announce(connection: sqlite3.Connection, limit: int) -> int:
             break
         # Below the bar still gets stamped, so it is never reconsidered later.
         if grade.score >= minimum:
-            sent = send_listing(destination, format_listing(dict(row), grade), row["image_url"],
+            sent = send_listing(destination, format_listing(dict(row), grade, prefs),
+                                row["image_url"],
                                 buttons=verdict_buttons(row["id"], row["interest"]))
             # Recorded so a /like or /dislike commented under the card knows which
             # listing it is about, and so the card can be redrawn with the verdict.
@@ -229,19 +233,22 @@ def _announce(connection: sqlite3.Connection, limit: int) -> int:
 
 def watch(args: argparse.Namespace) -> None:
     """One scheduled pass: scrape the configured communes, then enrich what is new."""
-    communes = [Commune(slug) for slug in alert_communes()]
-    if not communes:
-        raise ValueError("set DEPAS_ALERT_COMMUNES to the commune slugs you want watched")
-
-    query = Query(
-        operation="rent",
-        communes=communes,
-        max_price=max_rent(),  # derived from the budget, not configured
-        min_bedrooms=optional_int("DEPAS_ALERT_MIN_BEDROOMS"),
-    )
     fetcher = Fetcher()
     connection = connect()
     try:
+        # Inside the try: the settings are read from the database now, so everything
+        # that decides what this pass even scrapes happens after both are open.
+        prefs = Preferences.load(connection)
+        communes = [Commune(slug) for slug in prefs.alert_communes()]
+        if not communes:
+            raise ValueError("set DEPAS_ALERT_COMMUNES to the commune slugs you want watched")
+
+        query = Query(
+            operation="rent",
+            communes=communes,
+            max_price=prefs.max_rent(),  # derived from the budget, not configured
+            min_bedrooms=prefs.value("DEPAS_ALERT_MIN_BEDROOMS"),
+        )
         # The ranked view prices listings per m2 straight from this, so cache it before
         # anything reads the view.
         stored_uf(connection, fetcher)
@@ -260,9 +267,10 @@ def watch(args: argparse.Namespace) -> None:
             _enrich_one(connection, fetcher, row)
         print(f"enrich: {len(pending)} listings")
         print(f"from descriptions: {_infer_stored_descriptions(connection)} listings filled")
-        print(f"commutes: {refresh_commutes(connection, fetcher, args.commute_limit)} routed")
+        routed = refresh_commutes(connection, fetcher, prefs, args.commute_limit)
+        print(f"commutes: {routed} routed")
         print(f"zone benchmarks: {refresh_zone_benchmarks(connection)} communes")
-        print(f"alerts: {_announce(connection, args.max_alerts)} posted")
+        print(f"alerts: {_announce(connection, prefs, args.max_alerts)} posted")
     finally:
         fetcher.close()
         connection.close()
@@ -283,13 +291,15 @@ def telegram_chats(args: argparse.Namespace) -> None:
 def test_alert(args: argparse.Namespace) -> None:
     """Post the best-graded listing to Telegram, marked as a test rather than a find."""
     connection = connect()
+    prefs = Preferences.load(connection)
     try:
         pool = [dict(row) for row in connection.execute(POOL_QUERY)]
         if not pool:
             raise ValueError("nothing enriched to post; run `depas enrich` first")
-        scale = Scale(pool)
+        scale = Scale(pool, prefs)
         row, grade = max(((row, scale.grade(row)) for row in pool), key=lambda pair: pair[1].score)
-        sent = send_listing(chat_id(), format_listing(row, grade, is_test=True), row["image_url"],
+        sent = send_listing(prefs.chat_id(), format_listing(row, grade, prefs, is_test=True),
+                            row["image_url"],
                             buttons=verdict_buttons(row["id"], row["interest"]))
         # Recorded like any other card, so /like and /dislike can be tried on it.
         remember_card(connection, sent["chat"]["id"], sent["message_id"],
@@ -317,13 +327,14 @@ def redraw(args: argparse.Namespace) -> None:
     the comments, and an edit that omits reply_markup drops what is there.
     """
     connection = connect()
+    prefs = Preferences.load(connection)
     try:
         cards = connection.execute(
             "SELECT * FROM card_messages ORDER BY posted_at DESC LIMIT ?", (args.limit,)
         ).fetchall()
         redrawn = 0
         for card in cards:
-            if refresh_card(connection, dict(card)):
+            if refresh_card(connection, dict(card), prefs):
                 redrawn += 1
             time.sleep(ALERT_DELAY_SECONDS)  # Telegram rate-limits edits like anything else
         print(f"redraw: {redrawn} of {len(cards)} cards re-rendered")
@@ -333,13 +344,14 @@ def redraw(args: argparse.Namespace) -> None:
 
 def show(args: argparse.Namespace) -> None:
     connection = connect()
+    prefs = Preferences.load(connection)
     query, parameters = (args.sql, ()) if args.sql else _build_query(args)
     rows = connection.execute(query, parameters).fetchall()
     if args.sql:
         _print_table(rows)
         return
     pool = connection.execute(POOL_QUERY).fetchall()
-    scale = Scale([dict(row) for row in pool])
+    scale = Scale([dict(row) for row in pool], prefs)
     # grading ranks against the whole pool, so the limit can only be applied afterwards
     graded = sorted((_summarise(row, scale) for row in rows),
                     key=lambda row: row["score"], reverse=True)
@@ -384,6 +396,85 @@ def _print_table(rows: list[sqlite3.Row] | list[dict[str, object]]) -> None:
     print("  ".join(c.ljust(w) for c, w in zip(columns, widths)))
     for row in rows:
         print("  ".join(str(row[c]).ljust(w) for c, w in zip(columns, widths)))
+
+
+# The settings live in the database, so these are how they are read and written from a
+# shell -- and the same calls the chat commands will make. Every write goes through
+# `store_preference`, which refuses a value that would otherwise only fail later.
+VALUE_WIDTH = 46
+SOURCE_LABEL = {SET: "configured", DEFAULTED: "default"}
+
+
+def _shorten(value: str | None) -> str:
+    if value is None:
+        return "—"
+    return value if len(value) <= VALUE_WIDTH else f"{value[:VALUE_WIDTH - 1]}…"
+
+
+def config_list(args: argparse.Namespace) -> None:
+    """Every setting, what it is set to, and whether anybody actually set it."""
+    connection = connect()
+    try:
+        rows = described(Preferences.load(connection))
+    finally:
+        connection.close()
+    width = max(len(declared.name) for declared, _, _ in rows)
+    for declared, value, source in rows:
+        label = SOURCE_LABEL.get(source, "unset")
+        print(f"{declared.name.ljust(width)}  {_shorten(value).ljust(VALUE_WIDTH)}  {label}")
+    print(f"\n{len(rows)} settings · `depas config get NAME` explains one")
+
+
+def config_get(args: argparse.Namespace) -> None:
+    """One setting in full: what it means, what it holds, and what that parses to."""
+    declared = setting(args.name)
+    connection = connect()
+    try:
+        prefs = Preferences.load(connection)
+        raw, value = prefs.raw(declared.name), prefs.value(declared.name)
+    finally:
+        connection.close()
+    print(f"{declared.name}\n{declared.help}")
+    if declared.example:
+        print(f"example: {declared.example}")
+    print(f"\nvalue:   {raw if raw is not None else '(unset)'}")
+    if raw is None and declared.default is not None:
+        print(f"default: {declared.default}")
+    print(f"parses to: {value!r}")
+
+
+def config_set(args: argparse.Namespace) -> None:
+    """Write one setting, refusing anything that does not parse."""
+    connection = connect()
+    try:
+        value = store_preference(connection, args.name, " ".join(args.value))
+    finally:
+        connection.close()
+    print(f"{args.name} = {value!r}")
+
+
+def config_unset(args: argparse.Namespace) -> None:
+    """Forget one setting, so it falls back to its default or simply stops applying."""
+    connection = connect()
+    try:
+        value = forget_preference(connection, args.name)
+    finally:
+        connection.close()
+    print(f"{args.name} unset; it now means {value!r}")
+
+
+def config_import_env(args: argparse.Namespace) -> None:
+    """Pull .env back into the table, which is otherwise only ever done once."""
+    connection = connect()
+    try:
+        seeded = seed_from_env(connection, force=args.force)
+        sync_lease_income(connection, Preferences.load(connection))
+    finally:
+        connection.close()
+    if not seeded:
+        print("nothing imported: the table was already seeded (pass --force to redo it)")
+        return
+    print(f"imported {len(seeded)} settings from the environment: {', '.join(seeded)}")
 
 
 def main() -> None:
@@ -434,6 +525,36 @@ def main() -> None:
                           help="how many cards back to re-render")
     redrawer.set_defaults(func=redraw)
 
+    configurer = subparsers.add_parser(
+        "config", help="read and edit the settings, which live in the database")
+    # Set on the parser, so every action under it inherits both defaults.
+    configurer.set_defaults(func=config_list,  # bare `depas config` lists everything
+                            refuses_politely=True)
+    actions = configurer.add_subparsers()
+
+    lister = actions.add_parser("list", help="every setting and what it is set to")
+    lister.set_defaults(func=config_list)
+
+    getter = actions.add_parser("get", help="one setting, with what it means")
+    getter.add_argument("name")
+    getter.set_defaults(func=config_get)
+
+    setter = actions.add_parser("set", help="write one setting, checked before it is stored")
+    setter.add_argument("name")
+    # nargs="+": DEPAS_ALERT_SECURITY is "24 horas" and the home JSON has spaces in it.
+    setter.add_argument("value", nargs="+")
+    setter.set_defaults(func=config_set)
+
+    unsetter = actions.add_parser("unset", help="forget one setting, back to its default")
+    unsetter.add_argument("name")
+    unsetter.set_defaults(func=config_unset)
+
+    importer = actions.add_parser(
+        "import-env", help="pull .env into the database again, after the initial seed")
+    importer.add_argument("--force", action="store_true",
+                          help="overwrite settings already stored with what .env says")
+    importer.set_defaults(func=config_import_env)
+
     viewer = subparsers.add_parser("show", help="best price per m2, or your own SQL")
     viewer.add_argument("sql", nargs="?")
     viewer.add_argument("--limit", type=int, default=20)
@@ -451,4 +572,12 @@ def main() -> None:
     viewer.set_defaults(func=show)
 
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except ValueError as error:
+        # Under `config` a ValueError is always somebody's typo, and a traceback is the
+        # wrong way to say a commune does not exist. Everywhere else it is a bug, and
+        # the traceback is the point.
+        if not getattr(args, "refuses_politely", False):
+            raise
+        raise SystemExit(f"depas: {error}") from None

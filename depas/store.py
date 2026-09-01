@@ -1,5 +1,4 @@
 import json
-import os
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable
@@ -8,16 +7,13 @@ from pathlib import Path
 from statistics import median
 
 from depas.commute import from_listing
-from depas.config import DEFAULT_COMMON_EXPENSES, lease_income, locations
+from depas.config import DEFAULT_COMMON_EXPENSES, db_path
 from depas.fetch import Fetcher
 from depas.detail import DETAIL_COLUMNS
 from depas.models import Listing
+from depas.preferences import Preferences, clear_preference, seed_from_env, set_preference
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
-
-
-def db_path() -> Path:
-    return Path(os.environ.get("DEPAS_DB_PATH", "depas.db"))
 
 
 # Only what a search card actually carries. Detail-page columns (gastos comunes,
@@ -36,9 +32,12 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA busy_timeout=5000")
     migrate(connection)
+    # The configuration lives in the database now, so a box upgrading into this keeps
+    # whatever its .env said: the table is filled from the environment exactly once.
+    seed_from_env(connection)
     # The view is derived, not state: rebuilt every connect so it tracks the code.
     connection.executescript(RANKED_VIEW)
-    _sync_lease_income(connection)
+    sync_lease_income(connection, Preferences.load(connection))
     return connection
 
 
@@ -138,15 +137,17 @@ def refresh_zone_benchmarks(connection: sqlite3.Connection) -> int:
     return len(by_commune)
 
 
-def refresh_commutes(connection: sqlite3.Connection, fetcher: Fetcher, limit: int) -> int:
+def refresh_commutes(connection: sqlite3.Connection, fetcher: Fetcher,
+                     prefs: Preferences, limit: int) -> int:
     """Route the located listings still missing travel times, newest first, up to `limit`.
 
     Coordinates never move, so an answer is kept for the life of the listing; only a
-    change to DEPAS_LOCATIONS makes a stored one stale. Routing is a call to somebody
-    else's server per listing per location, which is why this is capped rather than a
-    full recompute.
+    change to the configured locations makes a stored one stale. Routing is a call to
+    somebody else's server per listing per location, which is why this is capped rather
+    than a full recompute.
     """
-    wanted = {place.name for place in locations()}
+    places = prefs.locations()
+    wanted = {place.name for place in places}
     if not wanted:
         return 0
     rows = connection.execute(
@@ -158,21 +159,46 @@ def refresh_commutes(connection: sqlite3.Connection, fetcher: Fetcher, limit: in
     for row in stale:
         connection.execute(
             "UPDATE listings SET commute = ? WHERE rowid = ?",
-            (json.dumps(from_listing(fetcher, row["lat"], row["lon"])), row["rowid"]),
+            (json.dumps(from_listing(fetcher, row["lat"], row["lon"], places)),
+             row["rowid"]),
         )
     connection.commit()
     return len(stale)
 
 
-def _sync_lease_income(connection: sqlite3.Connection) -> None:
-    """Mirror the environment into `settings` so the ranked view can read it from SQL."""
+def sync_lease_income(connection: sqlite3.Connection, prefs: Preferences) -> None:
+    """Mirror the sublet income into `settings` so the ranked view can read it from SQL.
+
+    `net_monthly_clp` is a column of a view, so the figures it subtracts have to be
+    reachable from SQL. Called on connect and again whenever either one is edited,
+    because a long-running bot would otherwise keep grading on the startup value.
+    """
     for kind in ("parking", "storage"):
         connection.execute(
-            "UPDATE settings SET value = ? WHERE key = ?", (lease_income(kind), f"{kind}_income")
+            "UPDATE settings SET value = ? WHERE key = ?",
+            (prefs.lease_income(kind), f"{kind}_income"),
         )
     connection.commit()
 
 
+def store_preference(connection: sqlite3.Connection, name: str, raw: str) -> object | None:
+    """Write one setting and push whatever the ranked view reads from SQL back into it.
+
+    The one write path every surface should use -- the CLI today, the chat commands
+    next -- because `net_monthly_clp` is a view column: editing the sublet income and
+    not re-mirroring it leaves the grading running on the value from startup.
+    """
+    value = set_preference(connection, name, raw)
+    sync_lease_income(connection, Preferences.load(connection))
+    return value
+
+
+def forget_preference(connection: sqlite3.Connection, name: str) -> object | None:
+    """Clear one setting back to its default, re-mirroring for the same reason."""
+    clear_preference(connection, name)
+    prefs = Preferences.load(connection)
+    sync_lease_income(connection, prefs)
+    return prefs.value(name)
 
 
 def save_detail(

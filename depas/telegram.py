@@ -1,5 +1,4 @@
 import json
-import os
 from collections.abc import Callable
 from datetime import date
 from typing import Any
@@ -7,18 +6,18 @@ from typing import Any
 from curl_cffi import requests
 
 from depas.commute import as_text as commute_text
-from depas.config import (DEFAULT_COMMON_EXPENSES, _load_env_file, current_cost,
-                          optional_int, optional_text, target_age)
+from depas.config import DEFAULT_COMMON_EXPENSES, secret
 from depas.detail import MONTH_NAMES
 from depas.metro import STATION_LINES
+from depas.preferences import Preferences
 
 API = "https://api.telegram.org"
 TIMEOUT = 40
 
 
 def bot_token() -> str:
-    _load_env_file()
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    """The bot's credential, which stays in the environment rather than the database."""
+    token = secret("TELEGRAM_BOT_TOKEN")
     if not token:
         raise ValueError("set TELEGRAM_BOT_TOKEN in .env (get one from @BotFather)")
     return token
@@ -104,24 +103,24 @@ AMENITY_LABELS = (
 )
 
 
-def _cons(row: dict[str, Any]) -> list[str]:
+def _cons(row: dict[str, Any], prefs: Preferences) -> list[str]:
     """The preferences this listing misses, so a docked score is legible in the card."""
     cons = []
     floor, top = row.get("floor"), row.get("building_floors")
-    target = optional_int("DEPAS_TARGET_FLOOR")
+    target = prefs.value("DEPAS_TARGET_FLOOR")
     if floor is not None and target is not None and floor < target:
         cons.append(f"piso {floor}, bajo el {target}º")
     if floor is not None and floor == top:
         cons.append(f"último piso ({floor} de {top})")
-    area, target_area = row.get("area"), optional_int("DEPAS_TARGET_AREA")
+    area, target_area = row.get("area"), prefs.value("DEPAS_TARGET_AREA")
     if area is None:
         cons.append("metraje no publicado")
     elif target_area is not None and area < target_area:
         cons.append(f"{area:.0f} m², bajo los {target_area}")
-    age, oldest = row.get("age"), target_age()
+    age, oldest = row.get("age"), prefs.value("DEPAS_TARGET_AGE")
     if age is not None and age > oldest:
         cons.append(f"{age:.0f} años, sobre los {oldest}")
-    wanted = optional_text("DEPAS_ALERT_SECURITY")
+    wanted = prefs.value("DEPAS_ALERT_SECURITY")
     if wanted and row.get("security_type") != wanted:
         cons.append(f"sin conserjería {wanted}")
     return cons
@@ -149,7 +148,8 @@ def _station(name: str) -> str:
     return f"{_escape(name)} (L{'/L'.join(calling)})" if calling else _escape(name)
 
 
-def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> str:
+def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
+                   is_test: bool = False) -> str:
     """Render one listing as the Telegram HTML card posted to the chat."""
     emoji = GRADE_EMOJI.get(grade.letter, "⚪")
     data_mark = PARTIAL_MARK if grade.missing else COMPLETE_MARK
@@ -188,7 +188,7 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
         saved = (row.get("total_monthly_clp") or 0) - (row.get("net_monthly_clp") or 0)
         lines.append(f"    ↳ −{_clp(saved)} arrendando {sublet[0]}🚗 {sublet[1]}📦")
 
-    baseline = current_cost()
+    baseline = prefs.current_cost()
     net = row.get("net_monthly_clp")
     if baseline and net is not None:
         difference = net - baseline
@@ -217,7 +217,7 @@ def format_listing(row: dict[str, Any], grade: Any, is_test: bool = False) -> st
     if amenities:
         lines.append("✨ " + " · ".join(amenities[:5]))
 
-    cons = _cons(row)
+    cons = _cons(row, prefs)
     if cons:
         lines.append("👎 " + " · ".join(cons))
 
