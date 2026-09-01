@@ -1,0 +1,58 @@
+depas/telegram.py
+  s_f2ff6001677c53::t_079e82aefb4543 110,115,120,123
+tests/test_preferences.py
+  s_f2ff6001677c53::t_f613dfacc09964 35-36,40,46,48,52-53,58,60,62,67,69,72-73,81,84,86,92,103,109,111,113,123,130-131,133,138,142-144,152-153,174,236-237,244
+  s_f2ff6001677c53::t_3f0791fa18022f 41,104
+  s_f2ff6001677c53::t_39d9c6df20c558 269-300
+  s_f2ff6001677c53::t_3da78660f5729c 2,301-310
+depas/grade.py
+  s_f2ff6001677c53::t_079e82aefb4543 6,122-123
+  s_f2ff6001677c53::t_8cad9cac80bc18 56,59,63,66-67,72,78,96,112,128,133,151,156
+.github/workflows/deploy.yml
+  s_f2ff6001677c53::t_f613dfacc09964 53-59,62-68,70,84-90,92-98,100
+depas/config.py
+  s_f2ff6001677c53::t_914fe613052613 19
+tests/test_target_cost.py
+  s_f2ff6001677c53::t_f613dfacc09964 13-14,38,56,63-64,74-75
+  s_f2ff6001677c53::t_3f0791fa18022f 67,79
+migrations/011_rename_preferences.sql
+  s_f2ff6001677c53::t_69dcdf86ec3646 1-39
+depas/preferences.py
+  s_f2ff6001677c53::t_187620eeae2912 138-141,152-158,165-166,169,172-182,186,191-193,196,200-202,206,210-212,215,223-225,230,235,239,249
+  s_f2ff6001677c53::t_e360559c7eda04 197
+  s_f2ff6001677c53::t_ce55b0aa092f11 145-149,190,199,209,218,229,234,238,243-247
+  s_f2ff6001677c53::t_96b5e899454e2f 322-335,344,353-366,414,416,423-427,429-430,463,549-550
+tests/test_grade.py
+  s_f2ff6001677c53::t_f613dfacc09964 62-65,81,95,103,115,126,136-137,148-149,162-164,180,191,203,215,224,232,244,256,266,276
+  s_f2ff6001677c53::t_3f0791fa18022f 46,73
+  s_f2ff6001677c53::t_de8af26f27ca6d 47
+tests/test_commute.py
+  s_f2ff6001677c53::t_f613dfacc09964 94-95,103-104,114-115
+tests/test_alerts.py
+  s_f2ff6001677c53::t_f613dfacc09964 58,217,227,230,263,276-277,293,471
+README.md
+  s_f2ff6001677c53::t_e360559c7eda04 238
+  s_f2ff6001677c53::t_f613dfacc09964 214-216,239,241,243
+.env.example
+  s_f2ff6001677c53::t_e360559c7eda04 40,45-46
+  s_f2ff6001677c53::t_f613dfacc09964 17-26,33-34,41,44,47-48,56-57,62,66,69-70,76-77,85-86
+depas/cli.py
+  s_f2ff6001677c53::t_914fe613052613 559
+  s_f2ff6001677c53::t_079e82aefb4543 166-169,182,187,195,207,242,244,250
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d32837a841aa6a4b80339e054b7a46f448a0a000",
+  "prompts": {},
+  "sessions": {
+    "s_f2ff6001677c53": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d9a507a2-e1f9-4e8b-9f1f-72902af9d98b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
