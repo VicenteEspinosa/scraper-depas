@@ -6,6 +6,9 @@ The image is built **natively on the arm64 deploy host** by
 that script renders `.env`, fast-forwards the checkout to the deploy commit, and
 runs `docker compose up -d --build`.
 
+Standing up your own copy from a clone — bot, chat, settings — is
+[SELF-HOSTING.md](SELF-HOSTING.md); this file is how this one is wired.
+
 ## No inbound port, no Cloudflare route
 
 The Telegram bot **long-polls** `getUpdates`, which is an outbound connection.
@@ -35,49 +38,43 @@ Repository **secrets**:
 | `SSH_PRIVATE_KEY` | Key authorised on the deploy host |
 | `SSH_HOST`, `SSH_USER`, `DEPLOY_PATH` | Where to deploy |
 | `TELEGRAM_BOT_TOKEN` | From @BotFather |
-| `TELEGRAM_CHAT_ID` | The channel or group the bot posts to |
 
-Repository **variables**: `TZ`, `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME`,
-`DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MIN_BEDROOMS`, `DEPAS_ALERT_MIN_GRADE`,
-`DEPAS_TARGET_COST`, `DEPAS_ALERT_MAX_COST`, `DEPAS_TARGET_WALK`,
-`DEPAS_ALERT_MAX_WALK`,
-`DEPAS_ALERT_MIN_FLOOR`, `DEPAS_ALERT_MIN_AREA`, `DEPAS_TARGET_AGE`,
-`DEPAS_ALERT_SECURITY`, `DEPAS_CURRENT_COST`.
+Repository **variables**: `TZ`.
+
+That is the whole list. Every preference lives in the `preferences` table, so the
+deploy carries only what a database cannot hold — see the README's
+[Configuration](../README.md#configuration). Editing one is `depas config set` on
+the box and needs no deploy; only the bot token and `TZ` are re-rendered into
+`.env` by `scripts/deploy-remote.sh`.
 
 Every cost figure is the **net** monthly cost — rent plus gastos comunes minus
-sublet income, where an unpublished gasto comun counts as the assumed
-$120.000 default rather than as zero. There is no asking-rent setting: the rent ceiling the crawl uses
-is derived as `MAX_COST + 2 × parking income + storage income`, because gastos
-only add to the net and sublet is the only thing that subtracts, so rent above
-that can never come in under budget.
+sublet income, where an unpublished gasto comun counts as the assumed $120.000
+default rather than as zero. There is no asking-rent setting: the rent ceiling the
+crawl uses is derived as `DEPAS_COST_MAX + 2 × parking income + storage income`,
+because gastos only add to the net and sublet is the only thing that subtracts, so
+rent above that can never come in under budget.
 
 Requirements apply at two different points. The derived rent ceiling and
-`MIN_BEDROOMS` bound the scrape, so listings far outside budget never enter the
-database at all — but every requirement is re-checked when announcing, because
+`DEPAS_BEDROOMS_MIN` bound the scrape, so listings far outside budget never enter
+the database at all — but every requirement is re-checked when announcing, because
 enrichment can overwrite a card value (bedrooms included) with the detail page's.
-`MAX_COST`, `MAX_WALK`, `MIN_FLOOR`, `MIN_AREA` and `SECURITY` depend on the
-detail page, so they gate *alerts* instead — the listings are still stored and
-queryable. Note `MAX_PRICE` is the asking rent and `MAX_COST` is what you
-actually pay (rent + gastos comunes − sublet income); a listing can clear the
-first and fail the second.
+`DEPAS_COST_MAX`, `DEPAS_WALK_MAX`, `DEPAS_AREA_MIN`, `DEPAS_AVAILABLE_BY` and
+`DEPAS_COMMUTE_MAX` depend on the detail page, so they gate *alerts* instead — the
+listings are still stored and queryable.
 
-`TARGET_COST` and `TARGET_WALK` are not filters: at or under them a listing gets
-full marks on that component, and beyond them the score degrades to zero at the
-matching `MAX_`. Nothing is excluded for being over target, it just ranks lower.
+The targets are not filters: at `DEPAS_COST_TARGET` or `DEPAS_WALK_TARGET` a listing
+scores 80 on that component, beating it earns the rest, and past the target the score
+degrades to 40 at the matching maximum. Nothing is excluded for being over target, it just
+ranks lower. `DEPAS_SECURITY_WANTED` and `DEPAS_FLOOR_TARGET` are preferences all
+the way — neither ever excludes. Many publishers declare no security type and most
+declare no floor, so filtering on either dropped listings for missing data rather
+than for being a bad fit; both cost score instead.
 
-`ALERT_SECURITY` is a preference too, not a cutoff. Many publishers never declare
-a security type, so filtering on it dropped roughly three quarters of Houm's
-listings for missing data rather than for being a bad fit; it now costs score
-instead.
-
-A listing that misses a requirement is left unstamped rather than marked
-notified, so a later price drop can still bring it into range. A listing that
-clears the requirements but misses `MIN_GRADE` *is* stamped: the grade is
-measured against your preferences alone, so nothing but a re-scrape or a changed
-preference could ever lift it, and neither should arrive as a surprise card.
-
-**Changing a variable needs a deploy** — `.env` is only re-rendered by
-`scripts/deploy-remote.sh`, so re-run the workflow after editing one.
+A listing that misses a requirement is left unstamped rather than marked notified,
+so a later price drop can still bring it into range. A listing that clears the
+requirements but misses `DEPAS_GRADE_MIN` *is* stamped: the grade is measured
+against your preferences alone, so nothing but a re-scrape or a changed preference
+could ever lift it, and neither should arrive as a surprise card.
 
 **This repository is public, so its Actions logs are public too.** Actions masks
 secrets but not variables, so anything that would identify the host — hostname,
@@ -93,7 +90,8 @@ token containing one.
 ## Where the cards land
 
 `TELEGRAM_CHAT_ID` is one id and it accepts either kind of chat, so moving the
-alerts is a secret change plus a deploy — nothing in the code pins one.
+alerts is `depas config set TELEGRAM_CHAT_ID` and nothing else — no deploy, and
+nothing in the code pins one.
 
 Post to a **channel with a linked discussion group** and Telegram forwards every
 card into that group as its own thread, which is what puts a Comments button on
@@ -101,7 +99,7 @@ each listing and keeps one apartment's conversation off the next one's. Replies
 already come back with `message_thread_id`, and the bot hands it straight back,
 so a link pasted under a card is graded inside that card's thread.
 
-Point the same variable at the group instead and everything still works, minus
+Point the same setting at the group instead and everything still works, minus
 the comments: the cards pile into one flat conversation.
 
 The id cannot be checked by eye — channels and discussion groups are both
@@ -137,7 +135,7 @@ bot share one file.
 ```
 
 Hourly at `:07` rather than `:00`, so the portal is not hit on a clock-aligned
-schedule. `depas watch` scrapes `DEPAS_ALERT_COMMUNES`, then enriches only
+schedule. `depas watch` scrapes `DEPAS_COMMUNES`, then enriches only
 listings where `detail_fetched_at IS NULL`.
 
 **The first run on a fresh box is slow** — enrichment fetches one detail page per

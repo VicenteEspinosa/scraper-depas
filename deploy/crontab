@@ -1,6 +1,6 @@
 # supercronic crontab for the depas-cron sidecar (TZ=America/Santiago).
 #
-# Hourly pass: scrape the communes in DEPAS_ALERT_COMMUNES, then enrich whatever
+# Hourly pass: scrape the communes in DEPAS_COMMUNES, then enrich whatever
 # is new. Runs at :07 rather than :00 so the portal isn't hit by a clock-aligned
 # request every hour.
 7 * * * * depas watch
