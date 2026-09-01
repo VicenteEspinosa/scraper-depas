@@ -1,0 +1,25 @@
+deploy/crontab
+  s_5f2ba7dc999c33::t_4afc7f28ae8b78 3
+docs/DEPLOY.md
+  s_5f2ba7dc999c33::t_750bd82306836b 65-67
+  s_5f2ba7dc999c33::t_4afc7f28ae8b78 9-11,93-94,102,138
+  s_5f2ba7dc999c33::t_dafb0b8a511a6c 42-48,51-55,58-59,61-63,68-77
+seed.env
+  s_5f2ba7dc999c33::t_750bd82306836b 22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "de190612fcdabf65a5684ae26fdf0ee4e749c35d",
+  "prompts": {},
+  "sessions": {
+    "s_5f2ba7dc999c33": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f065a233-f585-437e-a092-6cf57f7db883",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
