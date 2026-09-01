@@ -1,0 +1,32 @@
+tests/test_bot.py
+  s_d7bdcb390999d9::t_be046e9fb5ba32 360,446
+  s_d7bdcb390999d9::t_f9b1315e8e0796 363-374
+depas/bot.py
+  s_d7bdcb390999d9::t_3c64b823ddf325 18-20,261-263,292,295
+depas/telegram.py
+  s_d7bdcb390999d9::t_da8fb803f12453 238,339-340,344,347-350,352-353
+  s_d7bdcb390999d9::t_37fd2701e58de8 177-184
+tests/test_alerts.py
+  s_d7bdcb390999d9::t_c75d7d6ac867e0 124-125
+  s_d7bdcb390999d9::t_f9b1315e8e0796 110-123,126-133
+README.md
+  s_d7bdcb390999d9::t_4ff99006f041c2 67-76,93-94,96-97,136
+depas/store.py
+  s_d7bdcb390999d9::t_3c64b823ddf325 271-272
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "5ec177f4ee289e62cffc19d15dfbc3c71d0aa469",
+  "prompts": {},
+  "sessions": {
+    "s_d7bdcb390999d9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9102f11b-4384-46c1-8b3f-098bb9c0c96d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
