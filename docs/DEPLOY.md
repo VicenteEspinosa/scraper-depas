@@ -72,8 +72,9 @@ instead.
 
 A listing that misses a requirement is left unstamped rather than marked
 notified, so a later price drop can still bring it into range. A listing that
-clears the requirements but misses `MIN_GRADE` *is* stamped, because the grade
-is a percentile and would otherwise resurface as the pool shifts.
+clears the requirements but misses `MIN_GRADE` *is* stamped: the grade is
+measured against your preferences alone, so nothing but a re-scrape or a changed
+preference could ever lift it, and neither should arrive as a surprise card.
 
 **Changing a variable needs a deploy** — `.env` is only re-rendered by
 `scripts/deploy-remote.sh`, so re-run the workflow after editing one.
