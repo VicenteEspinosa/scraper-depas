@@ -1,0 +1,22 @@
+README.md
+  s_5f2ba7dc999c33::t_f0c93a948dc356 56-58,308-310
+docs/SELF-HOSTING.md
+  s_5f2ba7dc999c33::t_22a0a9f0c55356 1-155,157-206
+  s_5f2ba7dc999c33::t_81a9ff3286edd4 156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3a3b66925a8f141d77db0229e1ab65bf62dd1963",
+  "prompts": {},
+  "sessions": {
+    "s_5f2ba7dc999c33": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f065a233-f585-437e-a092-6cf57f7db883",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
