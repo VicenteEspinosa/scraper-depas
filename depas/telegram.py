@@ -356,7 +356,11 @@ def send_buttons(chat_id: str, text: str, thread_id: int,
     where it goes: one level down, in the discussion group, which is a plain group
     as far as reply markup is concerned.
     """
-    return call("sendMessage", chat_id=chat_id, text=text, message_thread_id=thread_id,
+    # A discussion group is not a forum, so message_thread_id alone leaves the message
+    # loose in the group: what puts it under the card is replying to Telegram's copy of
+    # it, whose id is the thread's.
+    return call("sendMessage", chat_id=chat_id, text=text,
+                reply_parameters={"message_id": thread_id},
                 reply_markup=buttons, link_preview_options={"is_disabled": True})
 
 
