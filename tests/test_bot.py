@@ -35,14 +35,29 @@ def sent(monkeypatch):
 
 @pytest.fixture
 def answers(monkeypatch):
-    """Every plain reply the bot posts, and every card it redraws."""
-    said, edited = [], []
+    """Every plain reply the bot posts, every card it redraws, every keyboard it ticks."""
+    said, edited, ticked = [], [], []
     monkeypatch.setattr("depas.bot.reply",
                         lambda chat, text, thread=None, reply_to=None: said.append(text))
     monkeypatch.setattr("depas.bot.edit_listing",
                         lambda chat, message, text, is_photo=False, buttons=None:
                         edited.append((chat, message, text, buttons)))
-    return SimpleNamespace(said=said, edited=edited)
+    monkeypatch.setattr("depas.bot.edit_buttons",
+                        lambda chat, message, buttons: ticked.append((chat, message, buttons)))
+    return SimpleNamespace(said=said, edited=edited, ticked=ticked)
+
+
+@pytest.fixture
+def offered(monkeypatch):
+    """Every verdict keyboard the bot posts into a card's comment thread."""
+    posted = []
+
+    def send(chat, text, thread, buttons):
+        posted.append((chat, thread, buttons))
+        return {"chat": {"id": int(chat)}, "message_id": KEYBOARD}
+
+    monkeypatch.setattr("depas.bot.send_buttons", send)
+    return posted
 
 
 @pytest.fixture
@@ -197,11 +212,11 @@ def test_a_houm_page_that_is_not_a_listing_is_ignored():
 
 
 
-CHANNEL, CARD, GROUP, THREAD = -1001, 77, -1002, 88
+CHANNEL, CARD, GROUP, THREAD, KEYBOARD = -1001, 77, -1002, 88, 950
 
 
 @pytest.fixture
-def announced(connection):
+def announced(connection, offered):
     """A card posted to the channel and copied by Telegram into its discussion group."""
     remember_card(connection, CHANNEL, CARD, "portalinmobiliario", "MLC-1")
     _handle(connection, None, {
@@ -351,6 +366,76 @@ def test_pressing_the_copy_in_the_group_edits_the_channel_post(announced, answer
 
     chat, message, _, _ = answers.edited[0]
     assert (chat, message) == (str(CHANNEL), CARD)
+
+
+def test_the_thread_opens_with_the_verdict_keyboard(announced, offered):
+    """A channel card cannot carry the buttons without hiding its own comments button,
+    so they are posted as the first comment in the thread instead."""
+    chat, thread, buttons = offered[0]
+
+    assert (chat, thread) == (str(GROUP), THREAD)
+    assert [button["text"] for button in buttons["inline_keyboard"][0]] \
+        == ["⭐ Me interesa", "🚫 Descartar"]
+
+
+def test_a_forward_of_something_we_never_posted_gets_no_keyboard(connection, offered):
+    """Every channel post is copied into the group; only our cards have a verdict."""
+    _handle(connection, None, {
+        "chat": {"id": GROUP}, "message_id": 91, "is_automatic_forward": True,
+        "forward_origin": {"type": "channel", "chat": {"id": CHANNEL}, "message_id": 12},
+        "text": "aviso a mano",
+    })
+
+    assert offered == []
+
+
+def test_a_keyboard_that_fails_to_post_still_leaves_the_thread_linked(connection, monkeypatch,
+                                                                     answers):
+    """The link is what the typed commands need; the keyboard is only the shortcut."""
+    def refuses(*args, **kwargs):
+        raise RuntimeError("telegram sendMessage failed: not enough rights")
+
+    monkeypatch.setattr("depas.bot.send_buttons", refuses)
+    remember_card(connection, CHANNEL, CARD, "portalinmobiliario", "MLC-1")
+    _handle(connection, None, {
+        "chat": {"id": GROUP}, "message_id": THREAD, "is_automatic_forward": True,
+        "forward_origin": {"type": "channel", "chat": {"id": CHANNEL}, "message_id": CARD},
+    })
+
+    _handle(connection, None, _comment("/like"))
+
+    assert _verdict(connection)["interest"] == 1
+
+
+def test_the_keyboard_in_the_thread_rates_the_card_above_it(announced, answers, pressed):
+    """The press lands on a comment, not on the card: the thread says which card it is."""
+    _handle_callback(announced, {
+        "id": "cb-1", "data": f"like:{_listing_id(announced)}", "from": {"username": "vicente"},
+        "message": {"chat": {"id": GROUP}, "message_id": KEYBOARD, "message_thread_id": THREAD},
+    })
+
+    assert _verdict(announced)["interest"] == 1
+    chat, message, _, _ = answers.edited[0]
+    assert (chat, message) == (str(CHANNEL), CARD)
+
+
+def test_the_pressed_keyboard_is_ticked_where_it_sits(announced, answers, pressed):
+    """The buttons live on their own message, so the tick has to be sent there."""
+    _handle_callback(announced, {
+        "id": "cb-1", "data": f"dislike:{_listing_id(announced)}", "from": {"username": "v"},
+        "message": {"chat": {"id": GROUP}, "message_id": KEYBOARD, "message_thread_id": THREAD},
+    })
+
+    chat, message, buttons = answers.ticked[0]
+    assert (chat, message) == (str(GROUP), KEYBOARD)
+    assert buttons["inline_keyboard"][0][1]["text"] == "🚫 Descartado ✓"
+
+
+def test_a_press_on_the_card_itself_is_not_ticked_twice(announced, answers, pressed):
+    """The redraw of a card already carries its keyboard; a second edit would be noise."""
+    _handle_callback(announced, _press(announced, f"like:{_listing_id(announced)}"))
+
+    assert answers.ticked == []
 
 
 def test_a_button_for_a_listing_that_is_gone_is_answered_anyway(announced, answers, pressed):

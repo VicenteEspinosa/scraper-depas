@@ -121,6 +121,80 @@ def test_a_listing_with_a_photo_is_sent_as_one(monkeypatch):
     assert [method for method, _ in calls] == ["sendPhoto", "sendMessage"]
 
 
+@pytest.fixture
+def telegram(monkeypatch):
+    """Record what reaches the Bot API, answering getChat with a scripted chat."""
+    calls = []
+
+    def scripted(chat):
+        monkeypatch.setattr("depas.telegram._CHATS", {})  # asked once per process, not per test
+
+        def call(method, **params):
+            calls.append((method, params))
+            return chat if method == "getChat" else {}
+
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+        monkeypatch.setattr("depas.telegram.call", call)
+        return calls
+    return scripted
+
+
+CHANNEL_WITH_COMMENTS = {"type": "channel", "linked_chat_id": -1002}
+
+
+def test_a_card_in_a_channel_carries_no_keyboard(telegram):
+    """A keyboard takes the slot the «Comentarios» button lives in, and the keyboard
+    wins: attaching one to a channel card leaves no way into the card's thread."""
+    from depas.telegram import send_listing, verdict_buttons
+
+    calls = telegram(CHANNEL_WITH_COMMENTS)
+    send_listing("-1001", "card", None, buttons=verdict_buttons(3))
+
+    assert "reply_markup" not in dict(calls)["sendMessage"]
+
+
+def test_redrawing_a_channel_card_takes_a_stray_keyboard_off_it(telegram):
+    """An edit that omits reply_markup drops it, which is how a card posted with
+    buttons before this was understood gets its comments button back."""
+    from depas.telegram import edit_listing, verdict_buttons
+
+    calls = telegram(CHANNEL_WITH_COMMENTS)
+    edit_listing("-1001", 77, "card", buttons=verdict_buttons(3))
+
+    assert "reply_markup" not in dict(calls)["editMessageText"]
+
+
+def test_a_card_in_a_group_keeps_its_keyboard(telegram):
+    """A group has no comments button to lose, so the buttons belong on the card."""
+    from depas.telegram import send_listing, verdict_buttons
+
+    calls = telegram({"type": "supergroup"})
+    send_listing("-1002", "card", None, buttons=verdict_buttons(3))
+
+    assert dict(calls)["sendMessage"]["reply_markup"] == verdict_buttons(3)
+
+
+def test_a_channel_with_no_discussion_group_keeps_its_keyboard(telegram):
+    """With no linked group there is no comments button and no thread: the buttons
+    on the card are the only way to rate a listing, and cost nothing."""
+    from depas.telegram import send_listing, verdict_buttons
+
+    calls = telegram({"type": "channel"})
+    send_listing("-1001", "card", None, buttons=verdict_buttons(3))
+
+    assert dict(calls)["sendMessage"]["reply_markup"] == verdict_buttons(3)
+
+
+def test_a_card_with_no_buttons_never_asks_which_chat_it_is(telegram):
+    """The lookup sits behind the keyboard, so posting a plain card stays one call."""
+    from depas.telegram import send_listing
+
+    calls = telegram(CHANNEL_WITH_COMMENTS)
+    send_listing("-1001", "card", None)
+
+    assert [method for method, _ in calls] == ["sendMessage"]
+
+
 def test_a_reply_inside_a_comment_thread_stays_in_it(monkeypatch):
     """A thread id reaches Telegram; without one the parameter is left out entirely."""
     calls = []

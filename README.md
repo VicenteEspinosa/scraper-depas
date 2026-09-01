@@ -52,19 +52,31 @@ Scraping is two-stage, because detail pages are expensive:
 - **`show`** — filter and rank. Pass raw SQL instead for anything ad hoc.
 - **`resend`** — drop the notified stamp from recent alerts so the next `watch`
   posts them again, which is how listings announced to the wrong chat are moved.
+- **`redraw`** — re-render cards already posted, newest first, with today's grades
+  and today's rules. Also the repair for cards posted with a keyboard the channel
+  could not afford (see below): the redraw takes it off and the «Comentarios»
+  button comes back.
 - **`bot`** — long-polls Telegram: grades any portal link pasted in the chat, and
   takes the verdict commands below.
 
 ### Judging a listing from the chat
 
-Every card carries two buttons — **⭐ Me interesa** and **🚫 Descartar**. Pressing
-one records the verdict, ticks the button that won, and redraws the card. Nothing
-is typed and nothing is posted to the chat: the answer comes back as a toast, so
-a thread of judged listings stays a thread of listings.
+Every card comes with two buttons — **⭐ Me interesa** and **🚫 Descartar**.
+Pressing one records the verdict, ticks the button that won, and redraws the card.
+Nothing is typed and nothing is posted to the chat: the answer comes back as a
+toast, so a thread of judged listings stays a thread of listings.
 
-The same two verdicts are also commands, for cards posted before the buttons
-existed. Comment on the card — in its Comments thread if alerts go to a channel,
-or as a reply to it in a plain group:
+Where the buttons sit depends on the chat, and not by choice. In a group they are
+on the card. In a channel with a discussion group they are the first comment in
+the card's thread, because a channel post's «Comentarios» button and a bot's
+inline keyboard share the one slot below the message and the keyboard wins: a card
+that carries its own buttons there cannot be commented on at all
+([bugs.telegram.org/c/41803](https://bugs.telegram.org/c/41803)). Cards posted
+before that was understood are repaired by `depas redraw`.
+
+The same two verdicts are also commands, for cards whose keyboard is out of reach
+or was never posted. Comment on the card — in its Comments thread if alerts go to
+a channel, or as a reply to it in a plain group:
 
 | Button | Command | Effect |
 | --- | --- | --- |
@@ -104,15 +116,20 @@ place. A card posted before any of this existed still answers commands: the
 `[id]` printed in its header is read back instead, though there is then no
 message to redraw.
 
-The buttons are copied into the discussion group along with the card, and pressing
-one there redraws the channel post behind it rather than the copy, which belongs
-to the channel and is not the bot's to edit.
+Whether a card can hold the keyboard is read off `getChat`, once per chat per
+process: a channel with a `linked_chat_id` is the case that cannot, so the card
+goes out bare and the keyboard is posted into the thread as soon as Telegram's copy
+of the card shows up — the same update the thread id is learned from. A channel
+with no discussion group keeps its buttons on the card, since there are no comments
+there to lose. A press in the thread rates the card the thread hangs off, redraws
+that card in the channel, and ticks the keyboard where it sits, which is a separate
+message from the card.
 
-The buttons need nothing set up. The typed commands do: the bot must be a member
-of the discussion group (that is where comments actually land, not the channel),
-and its privacy mode must be off in @BotFather, which it already needs to be to
-see pasted links at all. Registering the two commands with `/setcommands` is
-optional and only buys autocomplete.
+Both the buttons and the typed commands need the bot to be a member of the
+discussion group — that is where comments land, and now where the keyboards live,
+not the channel — and its privacy mode must be off in @BotFather, which it already
+needs to be to see pasted links at all. Registering the two commands with
+`/setcommands` is optional and only buys autocomplete.
 
 Anyone who can see the chat can press a button — there is no per-user check, which
 suits a private channel and would not suit a public one.

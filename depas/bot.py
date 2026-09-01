@@ -14,9 +14,9 @@ from depas.store import (DISLIKE, LIKE, POOL_QUERY, card_for_message, card_for_t
                          connect, link_thread, remember_card, save, save_detail,
                          set_interest)
 from depas.uf import normalize, stored_uf
-from depas.telegram import (DISLIKE_BUTTON, LIKE_BUTTON, answer_callback, call, edit_listing,
-                            format_comparison, format_listing, reply, send_listing,
-                            verdict_buttons)
+from depas.telegram import (DISLIKE_BUTTON, LIKE_BUTTON, answer_callback, call, edit_buttons,
+                            edit_listing, format_comparison, format_listing, reply, send_buttons,
+                            send_listing, verdict_buttons)
 
 POLL_TIMEOUT = 30
 # Telegram and the portals both blip. A blip should cost one poll, not the process:
@@ -124,6 +124,36 @@ def _remember_forward(connection: sqlite3.Connection, message: dict) -> None:
     origin = _forwarded_from(message)
     if origin is not None:
         link_thread(connection, *origin, message["chat"]["id"], message["message_id"])
+        _offer_buttons(connection, *origin, message)
+
+
+PRESS_PROMPT = "¿Qué te parece? (o comenta /compare para verlo contra tu depto)"
+
+
+def _offer_buttons(connection: sqlite3.Connection, card_chat: object, card_message: int,
+                   forward: dict) -> None:
+    """Open the card's thread with the verdict keyboard, since the card cannot hold it.
+
+    A keyboard on a channel post takes the slot the «Comentarios» button lives in,
+    which would leave no way to reach this very thread — so the buttons ride the
+    first comment in it instead. See `hides_comments` in depas.telegram.
+    """
+    card = card_for_message(connection, card_chat, card_message)
+    if card is None:
+        return  # not a card we posted: there is nothing to rate
+    listing = connection.execute(
+        "SELECT rowid AS id, interest FROM listings WHERE portal = ? AND external_id = ?",
+        (card["portal"], card["external_id"]),
+    ).fetchone()
+    if listing is None:
+        return
+    try:
+        send_buttons(str(forward["chat"]["id"]), PRESS_PROMPT, forward["message_id"],
+                     verdict_buttons(listing["id"], listing["interest"]))
+    except RuntimeError as error:
+        # The thread is linked either way, and that is what the typed commands need;
+        # the keyboard is the shortcut, not the feature.
+        print(f"could not post the buttons in thread {forward['message_id']}: {error}")
 
 
 def _from_card_text(connection: sqlite3.Connection, text: str) -> dict | None:
@@ -157,25 +187,29 @@ def _card(connection: sqlite3.Connection, message: dict) -> dict | None:
     return _from_card_text(connection, replied.get("text") or replied.get("caption") or "")
 
 
-def _refresh_card(connection: sqlite3.Connection, card: dict) -> None:
+def refresh_card(connection: sqlite3.Connection, card: dict) -> bool:
     """Re-render a card we posted, so the verdict shows on the card itself."""
     if not card.get("message_id"):
-        return  # traced back by its printed id alone; there is no message to edit
+        return False  # traced back by its printed id alone; there is no message to edit
     key = (card["portal"], card["external_id"])
     row = connection.execute(
         "SELECT * FROM listings_ranked WHERE portal = ? AND external_id = ?", key
     ).fetchone()
     if row is None:
-        return  # a card outliving its listing must not take the bot down with it
+        return False  # a card outliving its listing must not take the bot down with it
     pool = connection.execute(POOL_QUERY).fetchall()
     grade = Scale([dict(item) for item in pool]).grade(dict(row))
     try:
+        # The keyboard is offered on every redraw and withheld where it would hide
+        # the card's comments, which is decided per chat in depas.telegram.
         edit_listing(card["chat_id"], card["message_id"], format_listing(dict(row), grade),
                      bool(card["is_photo"]), verdict_buttons(row["id"], row["interest"]))
     except RuntimeError as error:
         # Redrawing the card is a nicety: a card too old to edit must not cost the
         # verdict, which is already stored and already filtering the alerts.
         print(f"could not redraw card {card['message_id']}: {error}")
+        return False
+    return True
 
 
 def _rate(connection: sqlite3.Connection, message: dict, interest: int) -> None:
@@ -189,7 +223,7 @@ def _rate(connection: sqlite3.Connection, message: dict, interest: int) -> None:
     author = message.get("from") or {}
     set_interest(connection, card["portal"], card["external_id"], interest,
                  author.get("username") or author.get("first_name"))
-    _refresh_card(connection, card)
+    refresh_card(connection, card)
     reply(chat, VERDICT[interest], thread, message["message_id"])
 
 
@@ -223,15 +257,19 @@ TOAST = {LIKE: "⭐ anotado como interesante", DISLIKE: "🚫 descartado, no vue
 
 
 def _pressed_card(connection: sqlite3.Connection, message: dict, listing: dict) -> dict:
-    """The card to redraw after a press: the one pressed, or the original it copies.
+    """The card to redraw after a press: the one pressed, or the card it hangs under.
 
-    A channel card is copied into the discussion group with its buttons intact, and
-    that copy belongs to the channel rather than to us — the post it came from is
-    the one we can edit, so an unrecognised message falls back to the newest card
-    posted for the listing.
+    A press usually lands on the keyboard posted inside a card's thread rather than
+    on the card itself, and the thread names which card that is. Failing both — a
+    press on the discussion group's copy of a channel post, which belongs to the
+    channel rather than to us — the newest card recorded for the listing is the one
+    we can edit.
     """
     card = card_for_message(connection, message["chat"]["id"], message["message_id"]) \
         if message else None
+    if card is None and message.get("message_thread_id"):
+        card = card_for_thread(connection, message["chat"]["id"],
+                               message["message_thread_id"])
     if card is None:
         card = connection.execute(
             "SELECT * FROM card_messages WHERE portal = ? AND external_id = ? "
@@ -260,8 +298,30 @@ def _handle_callback(connection: sqlite3.Connection, callback: dict) -> None:
     # Acknowledged before the redraw: Telegram gives the answer about ten seconds
     # before the press times out in the client, and an edit can be slower than that.
     answer_callback(callback["id"], TOAST[interest])
-    _refresh_card(connection, _pressed_card(connection, callback.get("message") or {},
-                                            dict(listing)))
+    pressed = callback.get("message") or {}
+    card = _pressed_card(connection, pressed, dict(listing))
+    refresh_card(connection, card)
+    _tick(pressed, card, int(listing_id), interest)
+
+
+def _tick(pressed: dict, card: dict, listing_id: int, interest: int) -> None:
+    """Show the verdict on the keyboard that was pressed, when it is not the card itself.
+
+    The buttons under a channel card live on a comment in its thread, so the message
+    holding them is usually not the message the redraw above re-rendered.
+    """
+    if not pressed:
+        return  # a press old enough that Telegram no longer sends the message
+    if (str(pressed["chat"]["id"]), pressed["message_id"]) \
+            == (str(card.get("chat_id")), card.get("message_id")):
+        return  # the redraw already carried the ticked keyboard, or withheld it
+    try:
+        edit_buttons(str(pressed["chat"]["id"]), pressed["message_id"],
+                     verdict_buttons(listing_id, interest))
+    except RuntimeError as error:
+        # The discussion group's copy of a channel card carries the channel's own
+        # keyboard, which is not the bot's to re-render. The verdict is already in.
+        print(f"could not tick the keyboard on {pressed['message_id']}: {error}")
 
 
 def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) -> None:
