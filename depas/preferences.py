@@ -26,7 +26,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 from depas.communes import Commune
-from depas.config import DEFAULT_TARGET_AGE, HOME_REQUIRED, Location, environment
+from depas.config import (DEFAULT_TARGET_AGE, HOME_REQUIRED, Location, defaults,
+                          environment)
 from depas.traits import DISPOSITIONS, PENALISE, TRAITS
 
 # ── how a setting's text becomes a value ────────────────────────────────────────
@@ -530,7 +531,7 @@ def clear_preference(connection: sqlite3.Connection, name: str) -> None:
 
 
 def seed_from_env(connection: sqlite3.Connection, force: bool = False) -> list[str]:
-    """Copy the environment into the table, once, so an existing box keeps its settings.
+    """Copy seed.env and the environment into the table once, so a box keeps its settings.
 
     Only ever the first time: after that the database is the configuration and .env is
     history, or a preference cleared from the chat would come back on the next restart.
@@ -540,7 +541,8 @@ def seed_from_env(connection: sqlite3.Connection, force: bool = False) -> list[s
         "SELECT value FROM settings WHERE key = ?", (SEEDED_KEY,)).fetchone()
     if already and not force:
         return []
-    found = environment()
+    # The checked-in defaults underneath, whatever this box says on top.
+    found = defaults() | environment()
     seeded = []
     for declared in SETTINGS:
         text = found.get(declared.name, "").strip()

@@ -33,7 +33,7 @@ C 64   5/5  providencia  52.0  22     690000  80000         0    0    770000  Pe
 
 ```bash
 uv sync
-cp .env.example .env          # seeds the settings on the first run
+cp .env.example .env          # just the bot token; the settings come from seed.env
 
 uv run depas scrape --commune nunoa --commune providencia --max-price 900000
 uv run depas enrich --limit 100
@@ -100,7 +100,7 @@ figure neither side states simply leaves its line out.
 
 Your apartment is one secret, `DEPAS_CURRENT_HOME`, holding a single JSON object
 whose keys are the listing column names — `depas config get DEPAS_CURRENT_HOME`
-prints the format, and `.env.example` has a filled-in one.
+prints the format, and `seed.env` has a commented-out one.
 `price_clp`, `common_expenses`, `area_m2`, `lat` and `lon` are required; the rest
 is optional. Travel times are routed from the coordinates on each `/compare`, so
 they are measured exactly the way a listing's are. Setting this also makes
@@ -203,11 +203,25 @@ Found the hard way, and handled in code:
 
 ## Configuration
 
-**Settings live in the database, not in the environment.** `.env` (gitignored) is
-the seed: the first `connect()` on a fresh database copies whatever it declares into
-the `preferences` table, and from then on the table is the configuration. Editing
-`.env` afterwards changes nothing until you ask for it — which is what makes a
-setting editable from a chat rather than from a shell on the box.
+**Settings live in the database, not in the environment.** The first `connect()` on a
+fresh database seeds the `preferences` table from `seed.env` — a checked-in starting
+set, so a clone that was never configured still scrapes something sensible — with
+anything `.env` (gitignored) or the environment says layered on top. From then on the
+table is the configuration: editing either file changes nothing until you ask for it,
+which is what makes a setting editable from a chat rather than from a shell on the box.
+
+Only two things stay in the environment for good, because they are read before a
+database can be opened or must not sit beside the data: `TELEGRAM_BOT_TOKEN` and
+`DEPAS_DB_PATH`.
+
+`DEPAS_LOCATIONS` is the one setting you can give in words — pass an address and the
+coordinates are looked up once, on the way in:
+
+```bash
+uv run depas config set DEPAS_LOCATIONS "pega,Avenida Providencia 1234; gimnasio,Los Leones 500"
+#   pega → Avenida Providencia 1234, Providencia
+#   gimnasio → Avenida Los Leones, Providencia
+```
 
 ```bash
 uv run depas config                       # every setting, its value, and where it came from
