@@ -202,8 +202,7 @@ def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) ->
     if not candidates:
         return 0
 
-    pool = connection.execute(pool_query(prefs)).fetchall()
-    scale = Scale([dict(row) for row in pool], prefs)
+    scale = Scale(prefs)
     minimum = prefs.value("DEPAS_GRADE_MIN") or 0
 
     graded = sorted(((row, scale.grade(dict(row))) for row in candidates),
@@ -296,7 +295,7 @@ def test_alert(args: argparse.Namespace) -> None:
         pool = [dict(row) for row in connection.execute(pool_query(prefs))]
         if not pool:
             raise ValueError("nothing enriched to post; run `depas enrich` first")
-        scale = Scale(pool, prefs)
+        scale = Scale(prefs)
         row, grade = max(((row, scale.grade(row)) for row in pool), key=lambda pair: pair[1].score)
         sent = send_listing(prefs.chat_id(), format_listing(row, grade, prefs, is_test=True),
                             row["image_url"],
@@ -350,9 +349,7 @@ def show(args: argparse.Namespace) -> None:
     if args.sql:
         _print_table(rows)
         return
-    pool = connection.execute(pool_query(prefs)).fetchall()
-    scale = Scale([dict(row) for row in pool], prefs)
-    # grading ranks against the whole pool, so the limit can only be applied afterwards
+    scale = Scale(prefs)
     graded = sorted((_summarise(row, scale) for row in rows),
                     key=lambda row: row["score"], reverse=True)
     _print_table([{k: v for k, v in row.items() if k != "score"} for row in graded[:args.limit]])

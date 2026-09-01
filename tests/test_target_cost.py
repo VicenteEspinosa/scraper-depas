@@ -1,11 +1,12 @@
+"""What a target and a hard bound do to a number: the target is the anchor, the bound the span."""
 import pytest
 
-from depas.grade import Scale
+from depas.grade import BEST, BREACHED, MET, Scale
 from tests.support import prefs
 
 
-def _pool(*nets: int) -> list[dict]:
-    return [{"net_monthly_clp": net, "area": 50.0, "walk_minutes": 5} for net in nets]
+def _listing(**overrides) -> dict:
+    return {"net_monthly_clp": 850_000, "area": 50.0, "walk_minutes": 5} | overrides
 
 
 @pytest.fixture(autouse=True)
@@ -14,33 +15,44 @@ def budget(monkeypatch):
     monkeypatch.setenv("DEPAS_COST_MAX", "950000")
 
 
-def test_everything_within_budget_ties_on_cost():
-    """Being cheaper than the target is not a competition — only the other axes decide."""
-    pool = _pool(500_000, 700_000, 850_000)
-    scale = Scale(pool, prefs())
+def test_coming_in_under_the_target_keeps_paying():
+    """Being cheaper than you asked for is worth score, not a tie at the target."""
+    scale = Scale(prefs())
 
-    scores = {scale.grade(row).parts["cost"] for row in pool}
-    assert len(scores) == 1
+    at_target, under, well_under = (scale.grade(_listing(net_monthly_clp=net)).parts["cost"]
+                                    for net in (850_000, 800_000, 500_000))
+
+    assert at_target == MET < under < well_under == BEST
 
 
 def test_the_score_falls_as_a_listing_goes_over_target():
-    """Past the target the cost score degrades toward zero at the ceiling."""
-    pool = _pool(850_000, 875_000, 900_000, 950_000)
-    scale = Scale(pool, prefs())
+    """Past the target the cost score degrades, reaching half at the ceiling."""
+    scale = Scale(prefs())
 
-    scores = [scale.grade(row).parts["cost"] for row in pool]
+    scores = [scale.grade(_listing(net_monthly_clp=net)).parts["cost"]
+              for net in (850_000, 875_000, 900_000, 950_000)]
+
     assert scores == sorted(scores, reverse=True)
-    assert scores[0] > scores[-1]
+    assert (scores[0], scores[-1]) == (MET, BREACHED)
 
 
-def test_without_a_target_cost_stays_a_plain_percentile(monkeypatch):
-    """Unset the target and cheaper keeps winning outright, as before."""
+def test_without_a_target_there_is_nothing_to_score_cost_against(monkeypatch):
+    """A ceiling alone says what you refuse, not what you want, so the component is off."""
     monkeypatch.delenv("DEPAS_COST_TARGET")
-    pool = _pool(500_000, 700_000, 850_000)
-    scale = Scale(pool, prefs())
 
-    scores = [scale.grade(row).parts["cost"] for row in pool]
-    assert scores[0] > scores[1] > scores[2]
+    graded = Scale(prefs()).grade(_listing())
+
+    assert "cost" not in graded.parts
+
+
+def test_the_ceiling_sets_how_fast_the_score_falls(monkeypatch):
+    """A tighter ceiling makes the same overspend cost more, because the span is shorter."""
+    over_budget = _listing(net_monthly_clp=900_000)
+    tight = Scale(prefs()).grade(over_budget).parts["cost"]
+
+    monkeypatch.setenv("DEPAS_COST_MAX", "1050000")
+
+    assert Scale(prefs()).grade(over_budget).parts["cost"] > tight
 
 
 def test_the_rent_ceiling_is_derived_from_the_budget(monkeypatch):
@@ -58,25 +70,24 @@ def test_no_budget_means_no_derived_rent_ceiling(monkeypatch):
     assert prefs().max_rent() is None
 
 
-def test_walking_within_the_ideal_ties_at_the_top(monkeypatch):
-    """Two minutes and ten minutes are both fine, so neither should outrank the other."""
+def test_walking_less_than_the_ideal_earns_score(monkeypatch):
+    """Two minutes from the metro beats the ten you said you would accept."""
     monkeypatch.setenv("DEPAS_WALK_TARGET", "10")
     monkeypatch.setenv("DEPAS_WALK_MAX", "15")
-    pool = [{"walk_minutes": w, "net_monthly_clp": 700_000, "area": 50.0} for w in (2, 6, 10)]
+    scale = Scale(prefs())
 
-    scores = {Scale(pool, prefs()).grade(row).parts["walk"] for row in pool}
+    close, ideal = (scale.grade(_listing(walk_minutes=walk)).parts["walk"] for walk in (5, 10))
 
-    assert len(scores) == 1
+    assert close == BEST > ideal == MET
 
 
 def test_walking_past_the_ideal_costs_score_without_excluding(monkeypatch):
-    """Between the ideal and the ceiling the score falls, but the listing still ranks."""
+    """Between the ideal and the ceiling the score falls, but the listing still grades."""
     monkeypatch.setenv("DEPAS_WALK_TARGET", "10")
     monkeypatch.setenv("DEPAS_WALK_MAX", "15")
-    pool = [{"walk_minutes": w, "net_monthly_clp": 700_000, "area": 50.0} for w in (10, 12, 14, 15)]
-    scale = Scale(pool, prefs())
+    scale = Scale(prefs())
 
-    scores = [scale.grade(row).parts["walk"] for row in pool]
+    scores = [scale.grade(_listing(walk_minutes=walk)).parts["walk"] for walk in (10, 12, 14, 15)]
 
     assert scores == sorted(scores, reverse=True)
-    assert scores[0] > scores[-1] > 0
+    assert scores[-1] == BREACHED

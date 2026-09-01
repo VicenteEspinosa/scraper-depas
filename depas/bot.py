@@ -11,7 +11,7 @@ from depas.metro import nearest_station
 from depas.portals import PORTALS
 from depas.portals.portalinmobiliario import clean_url
 from depas.preferences import Preferences
-from depas.store import (DISLIKE, LIKE, card_for_message, card_for_thread, pool_query,
+from depas.store import (DISLIKE, LIKE, card_for_message, card_for_thread,
                          connect, link_thread, remember_card, save, save_detail,
                          set_interest)
 from depas.uf import normalize, stored_uf
@@ -80,8 +80,7 @@ def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher, portal_name: s
     ranked = connection.execute(
         "SELECT * FROM listings_ranked WHERE portal = ? AND external_id = ?", key
     ).fetchone()
-    pool = connection.execute(pool_query(prefs)).fetchall()
-    return dict(ranked), Scale([dict(item) for item in pool], prefs).grade(dict(ranked))
+    return dict(ranked), Scale(prefs).grade(dict(ranked))
 
 
 COMMANDS = {"/like": LIKE, "/dislike": DISLIKE}
@@ -199,8 +198,7 @@ def refresh_card(connection: sqlite3.Connection, card: dict, prefs: Preferences)
     ).fetchone()
     if row is None:
         return False  # a card outliving its listing must not take the bot down with it
-    pool = connection.execute(pool_query(prefs)).fetchall()
-    grade = Scale([dict(item) for item in pool], prefs).grade(dict(row))
+    grade = Scale(prefs).grade(dict(row))
     try:
         # The keyboard is offered on every redraw and withheld where it would hide
         # the card's comments, which is decided per chat in depas.telegram.
@@ -251,8 +249,7 @@ def _compare(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
     if listing is None:
         reply(chat, GONE, thread, message["message_id"])
         return
-    scale = Scale([dict(item) for item in
-                   connection.execute(pool_query(prefs)).fetchall()], prefs)
+    scale = Scale(prefs)
     reply(chat, format_comparison(dict(listing), scale.grade(dict(listing)),
                                   home, scale.grade(home)),
           thread, message["message_id"])
