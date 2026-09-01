@@ -1,0 +1,39 @@
+depas/commute.py
+  s_f2ff6001677c53::t_d7de4fcdd17152 17-19,53-63,67-68
+  s_f2ff6001677c53::t_7f3c847ecd4fbb 64-66
+  s_f2ff6001677c53::t_ff5b4c925ef0d9 71-104
+depas/cli.py
+  s_f2ff6001677c53::t_ff5b4c925ef0d9 8,448-458,461
+seed.env
+  s_f2ff6001677c53::t_68a61a40d79839 1-85
+depas/config.py
+  s_f2ff6001677c53::t_5538c6636e17c4 12-15,31-34,41-57
+tests/test_preferences.py
+  s_f2ff6001677c53::t_4cb06c3c2de93a 208,210-219,224,226,228-237
+  s_f2ff6001677c53::t_b24e9e68f1ea0d 10
+  s_f2ff6001677c53::t_feb9e1131ed76d 9,220-223,225,227
+tests/conftest.py
+  s_f2ff6001677c53::t_4cb06c3c2de93a 11-13
+README.md
+  s_f2ff6001677c53::t_efbc8e8d3cf56e 36,103,206-224
+.env.example
+  s_f2ff6001677c53::t_feb9e1131ed76d 1-3,5-7,9-10,15-17
+depas/preferences.py
+  s_f2ff6001677c53::t_5538c6636e17c4 29-30,534,544-545
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "51523df3b1aa7456aea5c2ba5571d7dd4f823603",
+  "prompts": {},
+  "sessions": {
+    "s_f2ff6001677c53": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d9a507a2-e1f9-4e8b-9f1f-72902af9d98b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
