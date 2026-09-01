@@ -33,7 +33,7 @@ C 64   5/5  providencia  52.0  22     690000  80000         0    0    770000  Pe
 
 ```bash
 uv sync
-cp .env.example .env          # set your lease income and search
+cp .env.example .env          # seeds the settings on the first run
 
 uv run depas scrape --commune nunoa --commune providencia --max-price 900000
 uv run depas enrich --limit 100
@@ -48,7 +48,7 @@ Scraping is two-stage, because detail pages are expensive:
 - **`enrich`** — one detail page per listing, for the 46-field spec table,
   coordinates, the portal's routed walk times, the broker, and its own price
   benchmark. Only touches rows where `detail_fetched_at IS NULL`.
-- **`watch`** — both of the above in one scheduled pass, driven by `.env`.
+- **`watch`** — both of the above in one scheduled pass, driven by the stored settings.
 - **`show`** — filter and rank. Pass raw SQL instead for anything ad hoc.
 - **`resend`** — drop the notified stamp from recent alerts so the next `watch`
   posts them again, which is how listings announced to the wrong chat are moved.
@@ -57,7 +57,9 @@ Scraping is two-stage, because detail pages are expensive:
   could not afford (see below): the redraw takes it off and the «Comentarios»
   button comes back.
 - **`bot`** — long-polls Telegram: grades any portal link pasted in the chat, and
-  takes the verdict commands below.
+  takes the verdict commands below. Re-reads the settings on every poll, so a
+  preference edited while it runs takes effect without a restart.
+- **`config`** — read and edit those settings; see [Configuration](#configuration).
 
 ### Judging a listing from the chat
 
@@ -97,7 +99,8 @@ reads `tuyo → este aviso` with the difference marked **mejor** or **peor**, an
 figure neither side states simply leaves its line out.
 
 Your apartment is one secret, `DEPAS_CURRENT_HOME`, holding a single JSON object
-whose keys are the listing column names — see `.env.example` for a filled-in one.
+whose keys are the listing column names — `depas config get DEPAS_CURRENT_HOME`
+prints the format, and `.env.example` has a filled-in one.
 `price_clp`, `common_expenses`, `area_m2`, `lat` and `lon` are required; the rest
 is optional. Travel times are routed from the coordinates on each `/compare`, so
 they are measured exactly the way a listing's are. Setting this also makes
@@ -200,20 +203,47 @@ Found the hard way, and handled in code:
 
 ## Configuration
 
-Everything personal lives in `.env` (gitignored) — see `.env.example`.
+**Settings live in the database, not in the environment.** `.env` (gitignored) is
+the seed: the first `connect()` on a fresh database copies whatever it declares into
+the `preferences` table, and from then on the table is the configuration. Editing
+`.env` afterwards changes nothing until you ask for it — which is what makes a
+setting editable from a chat rather than from a shell on the box.
 
-| Variable | Meaning |
+```bash
+uv run depas config                       # every setting, its value, and where it came from
+uv run depas config get DEPAS_TARGET_COST # one setting, with what it means
+uv run depas config set DEPAS_TARGET_COST 850000
+uv run depas config unset DEPAS_TARGET_COST   # back to its default, or off
+uv run depas config import-env --force        # pull .env in again, on purpose
+uv run depas config check                     # validate .env, touching nothing
+```
+
+`config check` is what the deploy runs after building the image and before restarting
+anything: a value the parsers refuse would otherwise stop `connect()`, and with
+`restart: unless-stopped` that is a crash loop rather than an error somebody reads. It
+also names any `DEPAS_*` key that is not a setting, which the seed would silently skip.
+
+Every value is checked before it is stored, against the same declaration that
+`config get` prints — a commune that does not exist, a date that is not a date or a
+half-filled `DEPAS_CURRENT_HOME` is refused at the moment somebody types it rather
+than on the next watch pass. `depas/preferences.py` holds that declaration, and it is
+the only place a new setting has to be added.
+
+Two things stay in the environment, because they are needed before a database can be
+opened or must not be stored beside the data: `TELEGRAM_BOT_TOKEN` and `DEPAS_DB_PATH`.
+
+| Setting | Meaning |
 | --- | --- |
 | `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME` | Monthly CLP you would collect subletting. Default 0 — net then equals total, rather than inventing a market rate. |
 | `DEPAS_WEIGHT_*` | Relative weight per grading component. Default 1 each. |
-| `DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MAX_PRICE`, `DEPAS_ALERT_MIN_BEDROOMS` | What the scheduled `watch` pass scrapes. |
+| `DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MAX_COST`, `DEPAS_ALERT_MIN_BEDROOMS` | What the scheduled `watch` pass scrapes. The rent ceiling used while crawling is derived from the cost budget, so there is no separate asking-rent setting. |
 | `DEPAS_AVAILABLE_BY` | Latest move-in date you would accept, `YYYY-MM-DD`. A listing that only frees up after it is not alerted on; one that never stated a date still is, because most portals simply do not publish the field. |
 | `DEPAS_TARGET_AGE` | Ideal antigüedad in years. Defaults to **25 even when unset** — unlike the other targets, leaving it blank does not switch the component off. Full marks at or under it, then the score falls away; never a cutoff, and an undeclared antigüedad is left unscored rather than assumed old. |
 | `DEPAS_LOCATIONS` | `name,lat,lon` per place you need to reach, `;`-separated, any number of them. |
 | `DEPAS_TARGET_COMMUTE`, `DEPAS_ALERT_MAX_COMMUTE` | Minutes to the location a listing reaches worst, by whichever of walking, bus and Metro is fastest. Full marks at or under the target, no alert over the ceiling. |
 | `DEPAS_CURRENT_HOME` | Your own apartment as one JSON object, which `/compare` sets a listing against and which `DEPAS_CURRENT_COST` falls back to. Requires `price_clp`, `common_expenses`, `area_m2`, `lat`, `lon`. |
-| `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. |
-| `TELEGRAM_BOT_TOKEN` | From @BotFather. |
+| `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. Environment only — it says where the settings live, so it cannot be one of them. |
+| `TELEGRAM_BOT_TOKEN` | From @BotFather. Environment only: a credential does not belong in the table beside the data. |
 | `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread, which is also where `/like` and `/dislike` are read from; a group takes the cards but leaves them undiscussable, so verdicts have to be replies. Switching between the two is only this value. |
 
 ## Schema

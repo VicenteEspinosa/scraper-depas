@@ -1,0 +1,489 @@
+"""Every tunable the bot has, declared once and read from the database.
+
+Settings used to be read straight out of `os.environ` wherever they happened to be
+needed, which meant the environment was the configuration: changing a preference was
+editing a file on the box and restarting. They live in the `preferences` table now,
+and this module is the single place that knows what a setting is called, how its text
+is parsed, what it means and what it falls back to when nobody has said.
+
+Three readers share that one declaration: the .env file the table is seeded from, the
+`depas config` commands that edit it, and the chat commands that will. Adding a knob is
+adding a `Setting` below.
+
+Nothing here reaches for a global: a `Preferences` is a snapshot somebody hands you,
+which is what lets one process eventually hold several of them at once.
+
+Two languages, on purpose and along one line: `help` is copy, shown to whoever is
+editing a setting from the chat, so it reads the way the bot's replies do. Everything
+raised is an error, which surfaces in a log or a traceback, so it reads the way the
+rest of the codebase does.
+"""
+import difflib
+import json
+import sqlite3
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+
+from depas.communes import Commune
+from depas.config import DEFAULT_TARGET_AGE, HOME_REQUIRED, Location, environment
+
+# ── how a setting's text becomes a value ────────────────────────────────────────
+# Every parser takes the raw string and either returns the value or raises ValueError
+# with a message worth showing to whoever typed it -- in .env, in the CLI or in the
+# chat. The message names the setting, because by the time it surfaces the reader has
+# no idea which one was being read.
+
+
+def _whole(name: str, raw: str) -> int:
+    if not raw.lstrip("-").isdigit():
+        raise ValueError(f"{name} must be a whole number, got {raw!r}")
+    return int(raw)
+
+
+def _clp(name: str, raw: str) -> int:
+    if not raw.isdigit():
+        raise ValueError(f"{name} must be a whole number of CLP, got {raw!r}")
+    return int(raw)
+
+
+def _number(name: str, raw: str) -> float:
+    try:
+        return float(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be a number, got {raw!r}") from None
+
+
+def _text(name: str, raw: str) -> str:
+    return raw
+
+
+def _day(name: str, raw: str) -> str:
+    """An ISO date, kept as text: the columns it is compared against are text too."""
+    try:
+        return date.fromisoformat(raw).isoformat()
+    except ValueError:
+        raise ValueError(f"{name} must be a date as YYYY-MM-DD, got {raw!r}") from None
+
+
+def _communes(name: str, raw: str) -> list[str]:
+    slugs = [slug.strip() for slug in raw.split(",") if slug.strip()]
+    known = {commune.value for commune in Commune}
+    unknown = [slug for slug in slugs if slug not in known]
+    if unknown:
+        raise ValueError(f"{name} does not know the commune {', '.join(unknown)}; "
+                         "slugs look like `nunoa` or `estacion-central`")
+    return slugs
+
+
+def _locations(name: str, raw: str) -> list[Location]:
+    found = []
+    for entry in raw.split(";"):
+        if not entry.strip():
+            continue
+        parts = [part.strip() for part in entry.split(",")]
+        if len(parts) != 3:
+            raise ValueError(f"{name} entry must be name,lat,lon: {entry!r}")
+        label, lat, lon = parts
+        try:
+            found.append(Location(label, float(lat), float(lon)))
+        except ValueError:
+            raise ValueError(f"{name} entry must be name,lat,lon: {entry!r}") from None
+    return found
+
+
+def _tiers(name: str, raw: str) -> list[list[str]]:
+    """Metro lines in tiers, best first; lines sharing a tier are worth the same."""
+    tiers = [[line.strip().upper() for line in tier.split(",") if line.strip()]
+             for tier in raw.split(">")]
+    return [tier for tier in tiers if tier]
+
+
+def _home(name: str, raw: str) -> dict:
+    try:
+        home = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{name} must be a single JSON object: {error}") from None
+    if not isinstance(home, dict):
+        raise ValueError(f"{name} must be a single JSON object, not a {type(home).__name__}")
+    missing = [field for field in HOME_REQUIRED if home.get(field) is None]
+    if missing:
+        raise ValueError(f"{name} is missing {', '.join(missing)}")
+    return home
+
+
+# ── the registry ────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class Setting:
+    """One tunable: what it is called, how its text is read, and what it means.
+
+    `default` is the raw text an unset setting behaves as, or None when unset means
+    the feature is simply off -- most of them, because a target nobody set must not
+    invent an opinion.
+    """
+
+    name: str
+    parse: Callable[[str, str], object]
+    help: str
+    example: str = ""
+    default: str | None = None
+
+    def value(self, raw: str | None) -> object | None:
+        text = raw if raw is not None else self.default
+        return None if text is None else self.parse(self.name, text)
+
+
+WEIGHTED = ("value", "cost", "location", "size", "amenities", "security", "floor",
+            "metro", "commute", "age")
+
+
+def _weight_settings() -> list[Setting]:
+    return [Setting(f"DEPAS_WEIGHT_{component.upper()}", _number,
+                    f"Peso relativo del componente «{component}» en la nota.",
+                    example="1", default="1")
+            for component in WEIGHTED]
+
+
+SETTINGS: tuple[Setting, ...] = (
+    Setting("TELEGRAM_CHAT_ID", _text,
+            "Dónde se publican las alertas: un canal (cada tarjeta con sus comentarios) "
+            "o un grupo. `depas chats` lista lo que el bot ve.",
+            example="-1001234567890"),
+
+    Setting("DEPAS_ALERT_COMMUNES", _communes,
+            "Comunas que revisa la pasada horaria, como slugs separados por coma.",
+            example="nunoa,santiago"),
+    Setting("DEPAS_ALERT_MIN_BEDROOMS", _whole,
+            "Mínimo de dormitorios. Se aplica al buscar y otra vez al alertar.",
+            example="2"),
+    Setting("DEPAS_ALERT_MAX_COST", _whole,
+            "Techo duro del costo neto mensual: por encima no hay alerta. De aquí sale "
+            "también el tope de arriendo que se usa al crawlear.",
+            example="950000"),
+    Setting("DEPAS_TARGET_COST", _whole,
+            "Lo que apuntamos a gastar al mes, neto. En o bajo esto la nota de costo es "
+            "máxima; sobre esto baja hasta cero en el techo, sin excluir nada.",
+            example="850000"),
+    Setting("DEPAS_ALERT_MAX_WALK", _whole,
+            "Máximos minutos caminando al metro: por encima no hay alerta.",
+            example="15"),
+    Setting("DEPAS_TARGET_WALK", _whole,
+            "Caminata ideal al metro. En o bajo esto la nota de ubicación es máxima.",
+            example="10"),
+    Setting("DEPAS_ALERT_MIN_AREA", _whole,
+            "Piso duro de metraje, pero un aviso que no publica superficie igual alerta: "
+            "solo puntúa al fondo del componente.",
+            example="42"),
+    Setting("DEPAS_TARGET_AREA", _whole,
+            "Metraje ideal. En o sobre esto la nota de tamaño es máxima.",
+            example="50"),
+    Setting("DEPAS_TARGET_FLOOR", _whole,
+            "Piso ideal. Más abajo puntúa peor sin excluirse, y el último piso se castiga "
+            "por el techo que tiene encima. Nunca es un corte.",
+            example="5"),
+    Setting("DEPAS_TARGET_AGE", _whole,
+            "Antigüedad ideal en años. Es el único objetivo que rige aun sin configurarse: "
+            "borrarlo no apaga la preferencia, vuelve al estándar de 25.",
+            example="25", default=str(DEFAULT_TARGET_AGE)),
+    Setting("DEPAS_ALERT_MAX_COMMUTE", _whole,
+            "Máximos minutos de viaje al lugar peor conectado: por encima no hay alerta.",
+            example="60"),
+    Setting("DEPAS_TARGET_COMMUTE", _whole,
+            "Viaje ideal en minutos al lugar peor conectado de DEPAS_LOCATIONS.",
+            example="25"),
+    Setting("DEPAS_ALERT_SECURITY", _text,
+            "Conserjería buscada. No es un corte: quien no la declara puntúa más bajo.",
+            example="24 horas"),
+    Setting("DEPAS_ALERT_MIN_GRADE", _whole,
+            "Nota mínima para publicar una tarjeta. Lo que queda debajo se marca igual, "
+            "así que no reaparece cuando el pool se mueve.",
+            example="70"),
+    Setting("DEPAS_AVAILABLE_BY", _day,
+            "Última fecha de entrega que aceptarías. Un aviso que no declara fecha nunca "
+            "pierde su alerta por esto.",
+            example="2026-11-01"),
+
+    Setting("DEPAS_LOCATIONS", _locations,
+            "Cada lugar al que tienes que poder llegar, como `nombre,lat,lon` separados "
+            "por `;`. El nombre es la etiqueta que imprimen las tarjetas.",
+            example="pega,-33.41720,-70.60600; gimnasio,-33.49830,-70.61140"),
+    Setting("DEPAS_LINE_PREFERENCE", _tiers,
+            "Líneas de metro por tramos, mejor primero: `>` separa tramos y `,` lista "
+            "líneas que valen lo mismo. Una línea que no aparece va bajo todas.",
+            example="1 > 3,6 > 2,4,4A,5"),
+
+    Setting("DEPAS_PARKING_INCOME", _clp,
+            "CLP al mes que esperas cobrar arrendando el estacionamiento.",
+            example="60000", default="0"),
+    Setting("DEPAS_STORAGE_INCOME", _clp,
+            "CLP al mes que esperas cobrar arrendando la bodega.",
+            example="30000", default="0"),
+
+    Setting("DEPAS_CURRENT_COST", _whole,
+            "Lo que pagas hoy, neto. Déjalo vacío si definiste DEPAS_CURRENT_HOME: de ahí "
+            "se calcula solo.",
+            example="930000"),
+    Setting("DEPAS_CURRENT_HOME", _home,
+            "Tu propio depto como un objeto JSON, para que /compare pueda medir cualquier "
+            f"aviso contra él. Obligatorios: {', '.join(HOME_REQUIRED)}.",
+            example='{"commune":"nunoa","price_clp":800000,"common_expenses":130000,'
+                    '"area_m2":62,"lat":-33.45590,"lon":-70.59780}'),
+
+    *_weight_settings(),
+)
+
+BY_NAME: Mapping[str, Setting] = {setting.name: setting for setting in SETTINGS}
+
+# Read before a database can be opened, or too sensitive to sit in it, so these stay
+# in the environment and are not settings. Named here so a check over .env can tell
+# them apart from a key somebody misspelled.
+BOOTSTRAP = frozenset({"DEPAS_DB_PATH", "TELEGRAM_BOT_TOKEN"})
+CONFIGURABLE_PREFIXES = ("DEPAS_", "TELEGRAM_")
+
+
+def check_environment() -> tuple[int, list[str]]:
+    """Parse every setting .env declares, reporting what a seed would refuse or ignore.
+
+    Worth its own pass because a value only reaches the table through a parser: a .env
+    that no longer validates stops the process at `connect`, which on a box that
+    restarts its containers is a crash loop rather than an error somebody reads. Run
+    this before restarting anything, and the deploy fails instead of the bot.
+    """
+    found = environment()
+    problems, checked = [], 0
+    for declared in SETTINGS:
+        raw = found.get(declared.name, "").strip()
+        if not raw:
+            continue
+        checked += 1
+        try:
+            declared.parse(declared.name, raw)
+        except ValueError as error:
+            problems.append(str(error))
+    # The quieter failure: a misspelled or renamed key is not refused, it is skipped,
+    # and the setting it was meant to be simply never turns on.
+    problems += [f"{name} is not a setting, so it would be ignored"
+                 for name in sorted(found)
+                 if name.startswith(CONFIGURABLE_PREFIXES)
+                 and name not in BY_NAME and name not in BOOTSTRAP]
+    return checked, problems
+
+
+def setting(name: str) -> Setting:
+    """The declaration for one setting, or a ValueError naming the likeliest typo."""
+    found = BY_NAME.get(name)
+    if found is not None:
+        return found
+    # A misremembered name is the common case, in the CLI and even more so in a chat,
+    # so the error is worth more than "unknown": it should say what was probably meant.
+    near = difflib.get_close_matches(name.upper(), BY_NAME, n=3, cutoff=0.6)
+    if not near:
+        near = sorted(known for known in BY_NAME if name.upper() in known)[:3]
+    hint = f"; did you mean {', '.join(near)}?" if near else ""
+    raise ValueError(f"{name} is not a setting{hint}")
+
+
+# ── a snapshot of what is configured ────────────────────────────────────────────
+
+
+class Preferences:
+    """What one reader wants, as raw text per setting, parsed on demand and cached.
+
+    Deliberately a value rather than a lookup into somewhere global: everything that
+    grades, filters or renders takes one of these, so the day there are several
+    readers the only thing that changes is which snapshot gets passed in.
+    """
+
+    __slots__ = ("_raw", "_parsed")
+
+    def __init__(self, raw: Mapping[str, str]) -> None:
+        # Validated here rather than at first read: a typo in a setting nothing happens
+        # to touch this pass is still a typo, and saying so at load is saying so early.
+        self._raw = {name: text for name, text in raw.items() if text != ""}
+        self._parsed: dict[str, object | None] = {}
+        for name in self._raw:
+            self.value(name)
+
+    def __repr__(self) -> str:
+        return f"Preferences({len(self._raw)} set)"
+
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, str]) -> "Preferences":
+        """A snapshot built straight from raw text, for tests and for one-off passes."""
+        return cls({name: text for name, text in raw.items() if name in BY_NAME})
+
+    @classmethod
+    def from_env(cls) -> "Preferences":
+        """What .env and the exported environment say, which is what seeds the table."""
+        found = environment()
+        return cls.from_mapping({declared.name: found[declared.name]
+                                 for declared in SETTINGS if declared.name in found})
+
+    @classmethod
+    def load(cls, connection: sqlite3.Connection) -> "Preferences":
+        """What the database says, which is what everything actually runs on."""
+        return cls.from_mapping(
+            {row["name"]: row["value"] for row in connection.execute(
+                "SELECT name, value FROM preferences")}
+        )
+
+    # -- reading -----------------------------------------------------------------
+
+    def raw(self, name: str) -> str | None:
+        """The text somebody configured, or None where the default is standing in."""
+        setting(name)
+        return self._raw.get(name)
+
+    def is_set(self, name: str) -> bool:
+        return setting(name).name in self._raw
+
+    def value(self, name: str) -> object | None:
+        """One setting, parsed: its configured text, else its default, else None."""
+        if name not in self._parsed:
+            self._parsed[name] = setting(name).value(self._raw.get(name))
+        return self._parsed[name]
+
+    # -- the handful of settings that mean something together --------------------
+
+    def lease_income(self, kind: str) -> int:
+        """Monthly CLP a parking space or storage unit is expected to earn."""
+        return self.value(f"DEPAS_{kind.upper()}_INCOME")
+
+    def weights(self) -> dict[str, float]:
+        weights = {name: self.value(f"DEPAS_WEIGHT_{name.upper()}") for name in WEIGHTED}
+        if sum(weights.values()) <= 0:
+            raise ValueError("at least one DEPAS_WEIGHT_* must be positive")
+        return weights
+
+    def locations(self) -> list[Location]:
+        """Every place you have to be able to reach from the apartment."""
+        return self.value("DEPAS_LOCATIONS") or []
+
+    def line_preference(self) -> list[list[str]]:
+        return self.value("DEPAS_LINE_PREFERENCE") or []
+
+    def alert_communes(self) -> list[str]:
+        return self.value("DEPAS_ALERT_COMMUNES") or []
+
+    def chat_id(self) -> str:
+        """The Telegram chat alerts are posted to."""
+        found = self.value("TELEGRAM_CHAT_ID")
+        if not found:
+            raise ValueError("set TELEGRAM_CHAT_ID (run `depas chats` to find it)")
+        return found
+
+    def current_home(self) -> dict | None:
+        """Your own apartment, or None when you have not described it."""
+        return self.value("DEPAS_CURRENT_HOME")
+
+    def home_net_monthly_clp(self, home: dict) -> int:
+        """What your place costs a month, priced on the same terms as a listing."""
+        return round(home["price_clp"] + home["common_expenses"]
+                     - (home.get("parking_spaces") or 0) * self.lease_income("parking")
+                     - (home.get("storage_units") or 0) * self.lease_income("storage"))
+
+    def current_cost(self) -> int | None:
+        """What you pay now, net, so every listing can be shown as a difference."""
+        configured = self.value("DEPAS_CURRENT_COST")
+        if configured is not None:
+            return configured
+        home = self.current_home()
+        return None if home is None else self.home_net_monthly_clp(home)
+
+    def max_rent(self) -> int | None:
+        """Rent ceiling for the crawl, derived from the budget rather than configured.
+
+        Gastos comunes only add to the net cost and sublet income is the only thing that
+        subtracts, so rent above budget-plus-maximum-sublet can never come in under budget.
+        """
+        budget = self.value("DEPAS_ALERT_MAX_COST")
+        if budget is None:
+            return None
+        return budget + 2 * self.lease_income("parking") + self.lease_income("storage")
+
+
+# ── writing ─────────────────────────────────────────────────────────────────────
+
+# Recorded in `settings`, which is the internal key/value scratch the code writes to
+# itself -- the Telegram offset, the mirrored sublet income -- as opposed to
+# `preferences`, which is what a person configures.
+SEEDED_KEY = "preferences_seeded"
+
+
+def set_preference(connection: sqlite3.Connection, name: str, raw: str) -> object | None:
+    """Store one setting after checking it parses, and return what it now means.
+
+    Validating before writing is the whole point of a registry: a value that would only
+    blow up on the next watch pass is refused here, while somebody is still looking.
+    """
+    declared = setting(name)
+    text = raw.strip()
+    if text == "":
+        clear_preference(connection, name)
+        return declared.value(None)
+    value = declared.parse(name, text)
+    connection.execute(
+        "INSERT INTO preferences (name, value, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        (name, text, datetime.now(UTC).isoformat()),
+    )
+    connection.commit()
+    return value
+
+
+def clear_preference(connection: sqlite3.Connection, name: str) -> None:
+    """Forget one setting, so it falls back to its default -- or to being off."""
+    setting(name)
+    connection.execute("DELETE FROM preferences WHERE name = ?", (name,))
+    connection.commit()
+
+
+def seed_from_env(connection: sqlite3.Connection, force: bool = False) -> list[str]:
+    """Copy the environment into the table, once, so an existing box keeps its settings.
+
+    Only ever the first time: after that the database is the configuration and .env is
+    history, or a preference cleared from the chat would come back on the next restart.
+    `force` is the deliberate re-import behind `depas config import-env`.
+    """
+    already = connection.execute(
+        "SELECT value FROM settings WHERE key = ?", (SEEDED_KEY,)).fetchone()
+    if already and not force:
+        return []
+    found = environment()
+    seeded = []
+    for declared in SETTINGS:
+        text = found.get(declared.name, "").strip()
+        if not text:
+            continue
+        # Parsed before it is stored, so a typo in .env is still loud -- it just says so
+        # on the first connect rather than on the first read.
+        declared.parse(declared.name, text)
+        set_preference(connection, declared.name, text)
+        seeded.append(declared.name)
+    connection.execute(
+        "INSERT INTO settings (key, value) VALUES (?, 1) "
+        "ON CONFLICT(key) DO UPDATE SET value = 1", (SEEDED_KEY,))
+    connection.commit()
+    return seeded
+
+
+# Where a value came from, as a token rather than a phrase: the CLI and the chat
+# print it in their own words, and neither has to guess by comparing against defaults.
+SET, DEFAULTED, UNSET = "set", "default", "unset"
+
+
+def described(preferences: Preferences) -> list[tuple[Setting, str | None, str]]:
+    """Every setting with what it is set to and where that value came from."""
+    rows = []
+    for declared in SETTINGS:
+        raw = preferences.raw(declared.name)
+        source = SET if raw is not None else (DEFAULTED if declared.default is not None else UNSET)
+        rows.append((declared, raw if raw is not None else declared.default, source))
+    return rows
+
+
+__all__ = ["BOOTSTRAP", "BY_NAME", "DEFAULTED", "Preferences", "SET", "SETTINGS", "Setting",
+           "UNSET", "WEIGHTED", "check_environment", "clear_preference", "described",
+           "seed_from_env", "set_preference", "setting"]

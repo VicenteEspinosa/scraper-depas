@@ -7,6 +7,7 @@ from depas.cli import _announce
 from depas.models import Listing
 from depas.store import DISLIKE, clear_notified, connect, save, save_detail, set_interest
 from depas.telegram import format_listing
+from tests.support import prefs
 
 
 @pytest.fixture
@@ -38,8 +39,8 @@ def sent(monkeypatch):
 
 def test_each_listing_is_announced_only_once(connection, sent):
     """A second pass posts nothing new, however often the watch runs."""
-    first = _announce(connection, limit=10)
-    second = _announce(connection, limit=10)
+    first = _announce(connection, prefs(), limit=10)
+    second = _announce(connection, prefs(), limit=10)
 
     assert (first, second) == (4, 0)
     assert len(sent) == 4
@@ -47,16 +48,16 @@ def test_each_listing_is_announced_only_once(connection, sent):
 
 def test_the_limit_caps_one_pass_without_losing_the_rest(connection, sent):
     """Capping a run leaves the remainder for the next pass rather than dropping it."""
-    assert _announce(connection, limit=2) == 2
+    assert _announce(connection, prefs(), limit=2) == 2
 
-    assert _announce(connection, limit=10) == 2
+    assert _announce(connection, prefs(), limit=10) == 2
 
 
 def test_listings_below_the_minimum_grade_are_never_reconsidered(connection, sent, monkeypatch):
     """Sub-threshold listings are stamped, so they cannot resurface as the pool shifts."""
     monkeypatch.setenv("DEPAS_ALERT_MIN_GRADE", "90")
 
-    posted = _announce(connection, limit=10)
+    posted = _announce(connection, prefs(), limit=10)
 
     assert posted < 4
     assert connection.execute(
@@ -72,7 +73,7 @@ def test_the_card_escapes_html_and_keeps_the_link(connection):
            "price_clp": 500_000, "common_expenses": 100_000, "url": "https://x/1?a=1&b=2",
            "nearest_station": "Ñuble <test>", "walk_minutes": 5}
 
-    card = format_listing(row, Scale([row]).grade(row))
+    card = format_listing(row, Scale([row], prefs()).grade(row), prefs())
 
     assert "&lt;test&gt;" in card and "<test>" not in card
     assert 'href="https://x/1?a=1&amp;b=2"' in card
@@ -85,7 +86,7 @@ def test_the_card_shows_the_publication_title():
     row = {"commune": "nunoa", "title": "Depto 2D & luminoso", "area": 50.0,
            "net_monthly_clp": 600_000, "price_clp": 500_000, "url": "https://x/1"}
 
-    card = format_listing(row, Scale([row]).grade(row))
+    card = format_listing(row, Scale([row], prefs()).grade(row), prefs())
 
     assert "<i>Depto 2D &amp; luminoso</i>" in card
     # No amount published: the assumed default is shown, labelled, and never a dash.
@@ -100,7 +101,7 @@ def test_the_card_labels_a_published_gasto_comun_as_published():
     row = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000,
            "price_clp": 500_000, "common_expenses": 80_000, "url": "https://x/1"}
 
-    card = format_listing(row, Scale([row]).grade(row))
+    card = format_listing(row, Scale([row], prefs()).grade(row), prefs())
 
     assert "arriendo + $80.000 gastos comunes" in card
     assert "por defecto" not in card
@@ -215,7 +216,7 @@ def test_requirements_gate_which_listings_are_announced(connection, sent, monkey
     """A listing that misses a configured requirement is never posted."""
     monkeypatch.setenv("DEPAS_ALERT_MAX_WALK", "2")
 
-    posted = _announce(connection, limit=10)
+    posted = _announce(connection, prefs(), limit=10)
 
     assert posted == 2  # walk_minutes 1 and 2 qualify; 3 and 4 do not
     assert len(sent) == 2
@@ -224,33 +225,33 @@ def test_requirements_gate_which_listings_are_announced(connection, sent, monkey
 def test_a_listing_that_misses_a_requirement_stays_eligible(connection, sent, monkeypatch):
     """Unqualified listings are left unstamped, so a later price drop can still alert."""
     monkeypatch.setenv("DEPAS_ALERT_MAX_WALK", "2")
-    _announce(connection, limit=10)
+    _announce(connection, prefs(), limit=10)
 
     monkeypatch.delenv("DEPAS_ALERT_MAX_WALK")
 
-    assert _announce(connection, limit=10) == 2
+    assert _announce(connection, prefs(), limit=10) == 2
 
 
 def test_unset_requirements_impose_no_filter(connection, sent):
     """With nothing configured, every enriched listing is a candidate."""
-    assert _announce(connection, limit=10) == 4
+    assert _announce(connection, prefs(), limit=10) == 4
 
 
 def test_a_rejected_listing_is_never_announced(connection, sent):
     """A /dislike in the chat is final: the card stays away, and `resend` cannot bring it back."""
     set_interest(connection, "pi", "0", DISLIKE, "vicente")
 
-    assert _announce(connection, limit=10) == 3
+    assert _announce(connection, prefs(), limit=10) == 3
 
     clear_notified(connection, hours=6)  # what `depas resend` un-stamps
-    _announce(connection, limit=10)
+    _announce(connection, prefs(), limit=10)
 
     assert [text for text, _ in sent if "https://x/0" in text] == []
 
 
 def test_announced_cards_are_recorded_so_a_command_can_find_them(connection, sent):
     """Without the message ids, a /like commented under a card has nothing to match on."""
-    _announce(connection, limit=1)
+    _announce(connection, prefs(), limit=1)
 
     card = connection.execute("SELECT * FROM card_messages").fetchone()
     assert (card["chat_id"], card["message_id"]) == ("-100", 501)
@@ -265,7 +266,7 @@ def test_enrichment_downgrading_bedrooms_blocks_the_alert(connection, sent, monk
                               bedrooms=2, area_m2=50.0)])
     save_detail(connection, "pi", "drift", {"bedrooms": 1, "walk_minutes": 1})
 
-    _announce(connection, limit=10)
+    _announce(connection, prefs(), limit=10)
 
     posted_urls = [text for text, _ in sent if "drift" in text]
     assert posted_urls == []
@@ -279,7 +280,7 @@ def test_alerts_are_confined_to_the_configured_communes(connection, sent, monkey
                               commune="las-condes", area_m2=50.0)])
     save_detail(connection, "pi", "far", {"walk_minutes": 1})
 
-    _announce(connection, limit=10)
+    _announce(connection, prefs(), limit=10)
 
     assert [text for text, _ in sent if "far" in text] == []
 
@@ -293,10 +294,10 @@ def test_the_card_marks_how_complete_the_grade_is(monkeypatch):
     complete = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000,
                 "price_clp": 600_000, "url": "https://x/1", "walk_minutes": 5, "floor": 6}
     thin = complete | {"floor": None, "url": "https://x/2"}
-    scale = Scale([complete, thin])
+    scale = Scale([complete, thin], prefs())
 
-    full_card = format_listing(complete, scale.grade(complete))
-    thin_card = format_listing(thin, scale.grade(thin))
+    full_card = format_listing(complete, scale.grade(complete), prefs())
+    thin_card = format_listing(thin, scale.grade(thin), prefs())
 
     assert COMPLETE_MARK in full_card and PARTIAL_MARK not in full_card
     assert PARTIAL_MARK in thin_card and COMPLETE_MARK not in thin_card
@@ -309,10 +310,10 @@ def test_a_test_card_is_marked_as_one():
 
     row = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000,
            "price_clp": 600_000, "url": "https://x/1"}
-    scale = Scale([row])
+    scale = Scale([row], prefs())
 
-    assert format_listing(row, scale.grade(row), is_test=True).startswith(TEST_MARK)
-    assert TEST_MARK not in format_listing(row, scale.grade(row))
+    assert format_listing(row, scale.grade(row), prefs(), is_test=True).startswith(TEST_MARK)
+    assert TEST_MARK not in format_listing(row, scale.grade(row), prefs())
 
 
 def test_prose_fills_only_what_the_spec_table_left_empty():
@@ -349,7 +350,7 @@ def test_the_card_carries_the_listing_number(connection):
                               bedrooms=2, area_m2=50.0, price_clp=600_000)])
     row = dict(connection.execute("SELECT * FROM listings_ranked").fetchone())
 
-    card = format_listing(row, Scale([row]).grade(row))
+    card = format_listing(row, Scale([row], prefs()).grade(row), prefs())
 
     assert f"[{row['id']}]" in card
     assert row["id"] == 1
@@ -362,7 +363,7 @@ def test_a_listing_without_a_commune_leaves_no_dangling_separator():
     row = {"id": 7, "commune": None, "area": 50.0, "net_monthly_clp": 600_000,
            "price_clp": 600_000, "url": "https://x/1"}
 
-    header = format_listing(row, Scale([row]).grade(row)).splitlines()[0]
+    header = format_listing(row, Scale([row], prefs()).grade(row), prefs()).splitlines()[0]
 
     assert "·  ·" not in header
     assert header.endswith("<code>[7]</code>")
@@ -384,16 +385,16 @@ def test_a_telegram_failure_reports_the_parameters_it_came_with(monkeypatch):
 
 def test_un_stamping_announces_the_listings_again(connection, sent):
     """Moving already-posted cards to another chat is exactly this: clear, then re-announce."""
-    _announce(connection, limit=10)
+    _announce(connection, prefs(), limit=10)
 
     clear_notified(connection, hours=6)
 
-    assert _announce(connection, limit=10) == 4
+    assert _announce(connection, prefs(), limit=10) == 4
 
 
 def test_un_stamping_leaves_older_alerts_where_they_are(connection, sent):
     """The window is the whole point: a re-point moves the last batch, not the archive."""
-    _announce(connection, limit=10)
+    _announce(connection, prefs(), limit=10)
     connection.execute("UPDATE listings SET notified_at = ? WHERE external_id = '0'",
                        ((datetime.now(UTC) - timedelta(days=2)).isoformat(),))
 
@@ -404,11 +405,11 @@ def test_un_stamping_leaves_older_alerts_where_they_are(connection, sent):
 
 def test_a_pass_with_nothing_to_post_asks_telegram_nothing(connection, sent, monkeypatch):
     """The destination lookup sits behind the candidate check, so a quiet hour stays quiet."""
-    _announce(connection, limit=10)
+    _announce(connection, prefs(), limit=10)
     monkeypatch.setattr("depas.cli.chat_type",
                         lambda chat: pytest.fail("nothing to post, so nothing to look up"))
 
-    assert _announce(connection, limit=10) == 0
+    assert _announce(connection, prefs(), limit=10) == 0
 
 
 def test_a_furnished_apartment_is_never_announced(connection, sent):
@@ -417,7 +418,7 @@ def test_a_furnished_apartment_is_never_announced(connection, sent):
                               price=400_000, currency="CLP", price_clp=400_000, area_m2=60.0)])
     save_detail(connection, "pi", "amoblado", {"walk_minutes": 1, "furnished": 1})
 
-    _announce(connection, limit=10)
+    _announce(connection, prefs(), limit=10)
 
     assert [text for text, _ in sent if "amoblado" in text] == []
 
@@ -429,7 +430,7 @@ def test_a_title_that_says_amoblado_is_enough_to_drop_it(connection, sent):
                               currency="CLP", price_clp=400_000, area_m2=60.0)])
     save_detail(connection, "pi", "titled", {"walk_minutes": 1})
 
-    _announce(connection, limit=10)
+    _announce(connection, prefs(), limit=10)
 
     assert [text for text, _ in sent if "titled" in text] == []
 
@@ -440,7 +441,7 @@ def test_a_listing_that_states_it_is_unfurnished_still_alerts(connection, sent):
                               price=400_000, currency="CLP", price_clp=400_000, area_m2=60.0)])
     save_detail(connection, "pi", "vacio", {"walk_minutes": 1, "furnished": 0})
 
-    _announce(connection, limit=10)
+    _announce(connection, prefs(), limit=10)
 
     assert [text for text, _ in sent if "vacio" in text] != []
 
@@ -471,10 +472,10 @@ def test_the_card_shows_the_age_and_flags_it_when_over_target(monkeypatch):
     young = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000, "age": 8,
              "price_clp": 600_000, "url": "https://x/1"}
     old = young | {"age": 44, "url": "https://x/2"}
-    scale = Scale([young, old])
+    scale = Scale([young, old], prefs())
 
-    assert "8 años" in format_listing(young, scale.grade(young))
-    assert "44 años, sobre los 25" in format_listing(old, scale.grade(old))
+    assert "8 años" in format_listing(young, scale.grade(young), prefs())
+    assert "44 años, sobre los 25" in format_listing(old, scale.grade(old), prefs())
 
 
 @pytest.fixture
@@ -529,7 +530,7 @@ def test_a_listing_free_only_after_the_move_in_date_is_not_announced(connection,
     save_detail(connection, "pi", "0", {"available_from": "2026-12-01"})
     save_detail(connection, "pi", "1", {"available_from": "2026-10-01"})
 
-    _announce(connection, limit=10)
+    _announce(connection, prefs(), limit=10)
 
     announced = " ".join(text for text, _ in sent)
     assert "https://x/0" not in announced

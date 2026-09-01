@@ -1,10 +1,11 @@
 import json
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from curl_cffi.requests.exceptions import RequestException
 
-from depas.config import Location, locations
+from depas.config import Location
 from depas.fetch import Fetcher
 from depas.metro import (DETOUR_FACTOR, STATION_COORDS, STATION_LINES, WALK_SPEED_M_PER_MIN,
                          haversine_m, nearest_station)
@@ -67,10 +68,11 @@ def routed_minutes(fetcher: Fetcher, lat: float, lon: float, place: Location) ->
     return round(min(trip["duration"] for trip in trips) / 60) if trips else None
 
 
-def from_listing(fetcher: Fetcher, lat: float, lon: float) -> dict[str, int]:
-    """Minutes from one listing to every configured location."""
+def from_listing(fetcher: Fetcher, lat: float, lon: float,
+                 places: Sequence[Location]) -> dict[str, int]:
+    """Minutes from one listing to each of the places handed in."""
     travel = {}
-    for place in locations():
+    for place in places:
         try:
             routed = routed_minutes(fetcher, lat, lon, place)
         except RequestException:

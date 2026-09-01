@@ -7,6 +7,7 @@ from depas.bot import (GONE, NO_CARD, _handle, _handle_callback, _offset, _remem
                        find_links, run)
 from depas.models import Listing
 from depas.store import POOL_QUERY, connect, remember_card, save, save_detail
+from tests.support import prefs
 
 
 @pytest.fixture
@@ -92,7 +93,7 @@ def test_a_known_link_is_answered_without_refetching(connection, sent, monkeypat
                         lambda *a: pytest.fail("should not re-enrich"))
 
     _handle(connection, None, {"chat": {"id": -100},
-                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"})
+                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"}, prefs())
 
     assert len(sent) == 1
     assert sent[0][0] == "-100"
@@ -101,7 +102,7 @@ def test_a_known_link_is_answered_without_refetching(connection, sent, monkeypat
 def test_a_comment_is_answered_inside_its_own_thread(connection, sent):
     """A link pasted under a channel post is graded in that post's comments, not the group."""
     _handle(connection, None, {"chat": {"id": -100}, "message_thread_id": 12,
-                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"})
+                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"}, prefs())
 
     assert sent[0][2] == 12
 
@@ -110,14 +111,14 @@ def test_the_same_link_twice_in_one_message_answers_once(connection, sent, monke
     """Duplicate links in a single message must not produce duplicate replies."""
     url = "https://portalinmobiliario.com/MLC-1-x-_JM"
 
-    _handle(connection, None, {"chat": {"id": -100}, "text": f"{url} y otra vez {url}"})
+    _handle(connection, None, {"chat": {"id": -100}, "text": f"{url} y otra vez {url}"}, prefs())
 
     assert len(sent) == 1
 
 
 def test_a_message_with_no_link_is_ignored(connection, sent):
     """Ordinary group chatter produces no reply."""
-    _handle(connection, None, {"chat": {"id": -100}, "text": "hola, alguien vio el depto?"})
+    _handle(connection, None, {"chat": {"id": -100}, "text": "hola, alguien vio el depto?"}, prefs())
 
     assert sent == []
 
@@ -162,7 +163,7 @@ def test_the_same_listing_on_either_host_is_one_row(connection, sent, monkeypatc
                         lambda *a: pytest.fail("should not re-enrich"))
 
     _handle(connection, None, {"chat": {"id": -100},
-                               "text": "https://departamento.mercadolibre.cl/MLC-1?ua=x"})
+                               "text": "https://departamento.mercadolibre.cl/MLC-1?ua=x"}, prefs())
 
     assert len(sent) == 1
 
@@ -188,7 +189,7 @@ def test_a_link_never_scraped_still_gets_its_net_cost(connection, sent, monkeypa
                         lambda fetcher, url: {"common_expenses": 150_000, "area_useful_m2": 66.0})
 
     _handle(connection, None, {"chat": {"id": -100},
-                               "text": "https://departamento.mercadolibre.cl/MLC-7"})
+                               "text": "https://departamento.mercadolibre.cl/MLC-7"}, prefs())
 
     assert "💰 <b>$950.000</b> neto al mes" in sent[0][1]
     assert "⚖️ 🔺 $240.000 más caro que hoy" in sent[0][1]
@@ -223,7 +224,7 @@ def announced(connection, offered):
         "chat": {"id": GROUP}, "message_id": THREAD, "is_automatic_forward": True,
         "forward_origin": {"type": "channel", "chat": {"id": CHANNEL}, "message_id": CARD},
         "text": "🟢 B 80 ✔️",
-    })
+    }, prefs())
     return connection
 
 
@@ -240,7 +241,7 @@ def _verdict(connection):
 
 def test_a_like_in_the_thread_marks_that_apartment(announced, answers):
     """The thread a comment sits in is what says which listing the command is about."""
-    _handle(announced, None, _comment("/like"))
+    _handle(announced, None, _comment("/like"), prefs())
 
     assert tuple(_verdict(announced)) == (1, "vicente")
     assert answers.said == ["⭐ anotado como interesante"]
@@ -248,7 +249,7 @@ def test_a_like_in_the_thread_marks_that_apartment(announced, answers):
 
 def test_a_dislike_takes_the_listing_out_of_the_pool(announced, answers):
     """Turning a listing down has to stop it being announced and stop it skewing the ranking."""
-    _handle(announced, None, _comment("/dislike"))
+    _handle(announced, None, _comment("/dislike"), prefs())
 
     assert _verdict(announced)["interest"] == -1
     assert announced.execute(POOL_QUERY).fetchall() == []
@@ -256,7 +257,7 @@ def test_a_dislike_takes_the_listing_out_of_the_pool(announced, answers):
 
 def test_the_card_itself_is_redrawn_with_the_verdict(announced, answers):
     """The mark belongs on the card, so the channel is scannable without opening threads."""
-    _handle(announced, None, _comment("/like"))
+    _handle(announced, None, _comment("/like"), prefs())
 
     chat, message, text, _ = answers.edited[0]
     assert (chat, message) == (str(CHANNEL), CARD)
@@ -265,14 +266,14 @@ def test_the_card_itself_is_redrawn_with_the_verdict(announced, answers):
 
 def test_the_command_is_recognised_when_addressed_to_the_bot(announced, answers):
     """Telegram appends @thebot whenever more than one bot shares the chat."""
-    _handle(announced, None, _comment("/dislike@depas_bot"))
+    _handle(announced, None, _comment("/dislike@depas_bot"), prefs())
 
     assert _verdict(announced)["interest"] == -1
 
 
 def test_a_command_with_no_card_behind_it_says_so(connection, answers):
     """A command shouted into the group rates nothing rather than rating the wrong thing."""
-    _handle(connection, None, {"chat": {"id": GROUP}, "message_id": 900, "text": "/like"})
+    _handle(connection, None, {"chat": {"id": GROUP}, "message_id": 900, "text": "/like"}, prefs())
 
     assert _verdict(connection)["interest"] is None
     assert answers.said == [NO_CARD]
@@ -281,10 +282,10 @@ def test_a_command_with_no_card_behind_it_says_so(connection, answers):
 def test_a_reply_to_a_card_the_bot_posted_is_enough(connection, sent, answers):
     """In a plain group there are no threads: the card is whatever the command answers."""
     _handle(connection, None, {"chat": {"id": GROUP}, "message_id": 1,
-                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"})
+                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"}, prefs())
 
     _handle(connection, None, {"chat": {"id": GROUP}, "message_id": 900, "text": "/like",
-                               "reply_to_message": {"message_id": 501}})
+                               "reply_to_message": {"message_id": 501}}, prefs())
 
     assert _verdict(connection)["interest"] == 1
 
@@ -297,7 +298,7 @@ def test_an_older_card_is_traced_by_the_id_it_prints(connection, answers):
     _handle(connection, None, {
         "chat": {"id": GROUP}, "message_id": 900, "text": "/dislike",
         "reply_to_message": {"message_id": 4, "text": f"🟢 B 80 ✔️ · Ñuñoa · [{listing_id}]"},
-    })
+    }, prefs())
 
     assert _verdict(connection)["interest"] == -1
     # Nothing to edit: that card was posted before its ids were being kept.
@@ -310,7 +311,7 @@ def test_the_channels_own_copy_is_never_answered(connection, sent):
         "chat": {"id": GROUP}, "message_id": THREAD, "is_automatic_forward": True,
         "forward_origin": {"type": "channel", "chat": {"id": CHANNEL}, "message_id": CARD},
         "text": "🟢 B 80 https://portalinmobiliario.com/MLC-1-x-_JM",
-    })
+    }, prefs())
 
     assert sent == []
 
@@ -322,7 +323,7 @@ def test_a_card_too_old_to_edit_still_keeps_the_verdict(announced, answers, monk
 
     monkeypatch.setattr("depas.bot.edit_listing", refuses)
 
-    _handle(announced, None, _comment("/like"))
+    _handle(announced, None, _comment("/like"), prefs())
 
     assert _verdict(announced)["interest"] == 1
     assert answers.said == ["⭐ anotado como interesante"]
@@ -341,7 +342,7 @@ def _listing_id(connection):
 
 def test_a_pressed_button_records_the_verdict(announced, answers, pressed):
     """The whole point of the buttons: a verdict with nothing typed."""
-    _handle_callback(announced, _press(announced, f"like:{_listing_id(announced)}"))
+    _handle_callback(announced, _press(announced, f"like:{_listing_id(announced)}"), prefs())
 
     assert tuple(_verdict(announced)) == (1, "vicente")
     assert pressed == ["⭐ anotado como interesante"]
@@ -351,7 +352,7 @@ def test_a_pressed_button_records_the_verdict(announced, answers, pressed):
 
 def test_a_pressed_button_redraws_the_card_it_sat_on(announced, answers, pressed):
     """The card has to show the new verdict, and keep its buttons — an edit drops them."""
-    _handle_callback(announced, _press(announced, f"dislike:{_listing_id(announced)}"))
+    _handle_callback(announced, _press(announced, f"dislike:{_listing_id(announced)}"), prefs())
 
     chat, message, text, buttons = answers.edited[0]
     assert (chat, message) == (str(CHANNEL), CARD)
@@ -362,7 +363,7 @@ def test_a_pressed_button_redraws_the_card_it_sat_on(announced, answers, pressed
 def test_pressing_the_copy_in_the_group_edits_the_channel_post(announced, answers, pressed):
     """The discussion group's copy belongs to the channel; the post behind it is ours to edit."""
     _handle_callback(announced, _press(announced, f"like:{_listing_id(announced)}",
-                                       chat=GROUP, message_id=THREAD))
+                                       chat=GROUP, message_id=THREAD), prefs())
 
     chat, message, _, _ = answers.edited[0]
     assert (chat, message) == (str(CHANNEL), CARD)
@@ -384,7 +385,7 @@ def test_a_forward_of_something_we_never_posted_gets_no_keyboard(connection, off
         "chat": {"id": GROUP}, "message_id": 91, "is_automatic_forward": True,
         "forward_origin": {"type": "channel", "chat": {"id": CHANNEL}, "message_id": 12},
         "text": "aviso a mano",
-    })
+    }, prefs())
 
     assert offered == []
 
@@ -400,9 +401,9 @@ def test_a_keyboard_that_fails_to_post_still_leaves_the_thread_linked(connection
     _handle(connection, None, {
         "chat": {"id": GROUP}, "message_id": THREAD, "is_automatic_forward": True,
         "forward_origin": {"type": "channel", "chat": {"id": CHANNEL}, "message_id": CARD},
-    })
+    }, prefs())
 
-    _handle(connection, None, _comment("/like"))
+    _handle(connection, None, _comment("/like"), prefs())
 
     assert _verdict(connection)["interest"] == 1
 
@@ -412,7 +413,7 @@ def test_the_keyboard_in_the_thread_rates_the_card_above_it(announced, answers, 
     _handle_callback(announced, {
         "id": "cb-1", "data": f"like:{_listing_id(announced)}", "from": {"username": "vicente"},
         "message": {"chat": {"id": GROUP}, "message_id": KEYBOARD, "message_thread_id": THREAD},
-    })
+    }, prefs())
 
     assert _verdict(announced)["interest"] == 1
     chat, message, _, _ = answers.edited[0]
@@ -424,7 +425,7 @@ def test_the_pressed_keyboard_is_ticked_where_it_sits(announced, answers, presse
     _handle_callback(announced, {
         "id": "cb-1", "data": f"dislike:{_listing_id(announced)}", "from": {"username": "v"},
         "message": {"chat": {"id": GROUP}, "message_id": KEYBOARD, "message_thread_id": THREAD},
-    })
+    }, prefs())
 
     chat, message, buttons = answers.ticked[0]
     assert (chat, message) == (str(GROUP), KEYBOARD)
@@ -433,14 +434,14 @@ def test_the_pressed_keyboard_is_ticked_where_it_sits(announced, answers, presse
 
 def test_a_press_on_the_card_itself_is_not_ticked_twice(announced, answers, pressed):
     """The redraw of a card already carries its keyboard; a second edit would be noise."""
-    _handle_callback(announced, _press(announced, f"like:{_listing_id(announced)}"))
+    _handle_callback(announced, _press(announced, f"like:{_listing_id(announced)}"), prefs())
 
     assert answers.ticked == []
 
 
 def test_a_button_for_a_listing_that_is_gone_is_answered_anyway(announced, answers, pressed):
     """An unanswered press spins in the client until it times out, so every path answers."""
-    _handle_callback(announced, _press(announced, "like:9999"))
+    _handle_callback(announced, _press(announced, "like:9999"), prefs())
 
     assert pressed == [GONE]
     assert answers.edited == []
@@ -450,7 +451,7 @@ def test_a_button_press_is_dispatched_by_the_poll_loop(poll, monkeypatch):
     """Presses ride the same getUpdates poll as messages — there is no second listener."""
     handled = []
     monkeypatch.setattr("depas.bot._handle_callback",
-                        lambda connection, callback: handled.append(callback["data"]))
+                        lambda connection, callback, prefs: handled.append(callback["data"]))
 
     poll([{"update_id": 7, "callback_query": {"id": "cb-1", "data": "like:1"}}], StopLoop())
 
@@ -465,7 +466,7 @@ def test_a_new_card_carries_the_buttons(connection, monkeypatch):
                         posted.append(buttons) or {"chat": {"id": -100}, "message_id": 1})
 
     _handle(connection, None, {"chat": {"id": -100}, "message_id": 1,
-                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"})
+                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"}, prefs())
 
     labels = [button["text"] for button in posted[0]["inline_keyboard"][0]]
     assert labels == ["⭐ Me interesa", "🚫 Descartar"]

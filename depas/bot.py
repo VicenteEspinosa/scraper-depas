@@ -10,6 +10,7 @@ from depas.home import row as home_row
 from depas.metro import nearest_station
 from depas.portals import PORTALS
 from depas.portals.portalinmobiliario import clean_url
+from depas.preferences import Preferences
 from depas.store import (DISLIKE, LIKE, POOL_QUERY, card_for_message, card_for_thread,
                          connect, link_thread, remember_card, save, save_detail,
                          set_interest)
@@ -48,8 +49,8 @@ def find_links(text: str) -> list[tuple[str, str]]:
     return list(dict.fromkeys(found))
 
 
-def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher,
-                portal_name: str, url: str) -> tuple[dict, object] | None:
+def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher, portal_name: str,
+                url: str, prefs: Preferences) -> tuple[dict, object] | None:
     """Return the stored row for a pasted link, fetching and enriching it if unseen."""
     portal = PORTALS[portal_name]
     identifier = portal.listing_id(url)
@@ -80,7 +81,7 @@ def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher,
         "SELECT * FROM listings_ranked WHERE portal = ? AND external_id = ?", key
     ).fetchone()
     pool = connection.execute(POOL_QUERY).fetchall()
-    return dict(ranked), Scale([dict(item) for item in pool]).grade(dict(ranked))
+    return dict(ranked), Scale([dict(item) for item in pool], prefs).grade(dict(ranked))
 
 
 COMMANDS = {"/like": LIKE, "/dislike": DISLIKE}
@@ -89,8 +90,9 @@ VERDICT = {LIKE: "⭐ anotado como interesante",
            DISLIKE: "🚫 descartado: no volverá a aparecer en las alertas"}
 NO_CARD = ("no sé de qué depto hablas: comenta /like, /dislike o /compare en el hilo "
            "de una tarjeta, o respondiendo a una.")
-NO_HOME = ("no sé dónde vives: define DEPAS_CURRENT_HOME con el JSON de tu depto "
-           "actual (ver .env.example) y vuelve a intentarlo.")
+NO_HOME = ("no sé dónde vives: configura DEPAS_CURRENT_HOME con el JSON de tu depto "
+           "actual (`depas config get DEPAS_CURRENT_HOME` explica el formato) y "
+           "vuelve a intentarlo.")
 GONE = "ese aviso ya no está en la base"
 # The id every card prints in its header, which is how a card posted before the
 # bot started recording them can still be traced back to its listing.
@@ -187,7 +189,7 @@ def _card(connection: sqlite3.Connection, message: dict) -> dict | None:
     return _from_card_text(connection, replied.get("text") or replied.get("caption") or "")
 
 
-def refresh_card(connection: sqlite3.Connection, card: dict) -> bool:
+def refresh_card(connection: sqlite3.Connection, card: dict, prefs: Preferences) -> bool:
     """Re-render a card we posted, so the verdict shows on the card itself."""
     if not card.get("message_id"):
         return False  # traced back by its printed id alone; there is no message to edit
@@ -198,12 +200,13 @@ def refresh_card(connection: sqlite3.Connection, card: dict) -> bool:
     if row is None:
         return False  # a card outliving its listing must not take the bot down with it
     pool = connection.execute(POOL_QUERY).fetchall()
-    grade = Scale([dict(item) for item in pool]).grade(dict(row))
+    grade = Scale([dict(item) for item in pool], prefs).grade(dict(row))
     try:
         # The keyboard is offered on every redraw and withheld where it would hide
         # the card's comments, which is decided per chat in depas.telegram.
-        edit_listing(card["chat_id"], card["message_id"], format_listing(dict(row), grade),
-                     bool(card["is_photo"]), verdict_buttons(row["id"], row["interest"]))
+        edit_listing(card["chat_id"], card["message_id"],
+                     format_listing(dict(row), grade, prefs), bool(card["is_photo"]),
+                     verdict_buttons(row["id"], row["interest"]))
     except RuntimeError as error:
         # Redrawing the card is a nicety: a card too old to edit must not cost the
         # verdict, which is already stored and already filtering the alerts.
@@ -212,7 +215,8 @@ def refresh_card(connection: sqlite3.Connection, card: dict) -> bool:
     return True
 
 
-def _rate(connection: sqlite3.Connection, message: dict, interest: int) -> None:
+def _rate(connection: sqlite3.Connection, message: dict, interest: int,
+          prefs: Preferences) -> None:
     """Record a /like or /dislike against the listing whose thread it was left in."""
     chat = str(message["chat"]["id"])
     thread = message.get("message_thread_id")
@@ -223,11 +227,12 @@ def _rate(connection: sqlite3.Connection, message: dict, interest: int) -> None:
     author = message.get("from") or {}
     set_interest(connection, card["portal"], card["external_id"], interest,
                  author.get("username") or author.get("first_name"))
-    refresh_card(connection, card)
+    refresh_card(connection, card, prefs)
     reply(chat, VERDICT[interest], thread, message["message_id"])
 
 
-def _compare(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) -> None:
+def _compare(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
+             prefs: Preferences) -> None:
     """Answer /compare with this card's listing set against the place you live in now."""
     chat = str(message["chat"]["id"])
     thread = message.get("message_thread_id")
@@ -235,7 +240,7 @@ def _compare(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) ->
     if card is None:
         reply(chat, NO_CARD, thread, message["message_id"])
         return
-    home = home_row(connection, fetcher)
+    home = home_row(connection, fetcher, prefs)
     if home is None:
         reply(chat, NO_HOME, thread, message["message_id"])
         return
@@ -246,7 +251,7 @@ def _compare(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) ->
     if listing is None:
         reply(chat, GONE, thread, message["message_id"])
         return
-    scale = Scale([dict(item) for item in connection.execute(POOL_QUERY).fetchall()])
+    scale = Scale([dict(item) for item in connection.execute(POOL_QUERY).fetchall()], prefs)
     reply(chat, format_comparison(dict(listing), scale.grade(dict(listing)),
                                   home, scale.grade(home)),
           thread, message["message_id"])
@@ -278,7 +283,8 @@ def _pressed_card(connection: sqlite3.Connection, message: dict, listing: dict) 
     return dict(card) if card else {}
 
 
-def _handle_callback(connection: sqlite3.Connection, callback: dict) -> None:
+def _handle_callback(connection: sqlite3.Connection, callback: dict,
+                     prefs: Preferences) -> None:
     """A button pressed on a card: the same verdict, with nothing typed and no reply posted."""
     action, _, listing_id = (callback.get("data") or "").partition(":")
     interest = BUTTONS.get(action)
@@ -300,7 +306,7 @@ def _handle_callback(connection: sqlite3.Connection, callback: dict) -> None:
     answer_callback(callback["id"], TOAST[interest])
     pressed = callback.get("message") or {}
     card = _pressed_card(connection, pressed, dict(listing))
-    refresh_card(connection, card)
+    refresh_card(connection, card, prefs)
     _tick(pressed, card, int(listing_id), interest)
 
 
@@ -324,7 +330,8 @@ def _tick(pressed: dict, card: dict, listing_id: int, interest: int) -> None:
         print(f"could not tick the keyboard on {pressed['message_id']}: {error}")
 
 
-def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) -> None:
+def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
+            prefs: Preferences) -> None:
     # A channel card is copied into the discussion group by Telegram itself. That
     # copy is bookkeeping, never a request: answering it would post the card twice.
     if message.get("is_automatic_forward"):
@@ -334,18 +341,18 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict) -> 
     text = message.get("text") or message.get("caption") or ""
     command = _first_word(text)
     if command in COMMANDS:
-        _rate(connection, message, COMMANDS[command])
+        _rate(connection, message, COMMANDS[command], prefs)
         return
     if command == COMPARE:
-        _compare(connection, fetcher, message)
+        _compare(connection, fetcher, message, prefs)
         return
 
     for portal_name, url in find_links(text):
-        graded = _grade_link(connection, fetcher, portal_name, url)
+        graded = _grade_link(connection, fetcher, portal_name, url, prefs)
         if graded is None:
             continue
         row, grade = graded
-        sent = send_listing(str(message["chat"]["id"]), format_listing(row, grade),
+        sent = send_listing(str(message["chat"]["id"]), format_listing(row, grade, prefs),
                             row.get("image_url"), message.get("message_thread_id"),
                             verdict_buttons(row["id"], row.get("interest")))
         remember_card(connection, sent["chat"]["id"], sent["message_id"],
@@ -366,15 +373,18 @@ def run() -> None:
                 print(f"getUpdates failed, polling again: {error}")
                 time.sleep(ERROR_BACKOFF_SECONDS)
                 continue
+            # Read once per poll rather than once at startup: a setting edited while
+            # the bot is running has to take effect without a restart.
+            prefs = Preferences.load(connection)
             for update in updates:
                 message = update.get("message") or update.get("channel_post")
                 # A pressed button arrives on this same poll — no webhook, no open port.
                 callback = update.get("callback_query")
                 try:
                     if message:
-                        _handle(connection, fetcher, message)
+                        _handle(connection, fetcher, message, prefs)
                     elif callback:
-                        _handle_callback(connection, callback)
+                        _handle_callback(connection, callback, prefs)
                 except (RuntimeError, RequestException) as error:
                     print(f"could not answer update {update['update_id']}: {error}")
                 # Advances even when the reply failed: an update that cannot be
