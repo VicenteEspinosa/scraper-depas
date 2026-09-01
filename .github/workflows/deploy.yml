@@ -40,6 +40,10 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
+      # Only what the database cannot hold, or does not have yet. Every other setting
+      # lives in the `preferences` table and is versioned in seed.env, so passing it
+      # here would be a second source that nothing reads: the seed runs once, and the
+      # table has long since won.
       - name: Apply and restart
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
@@ -47,30 +51,12 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           TZ: ${{ vars.TZ }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          # These three are settings like any other, but seed.env deliberately omits
+          # them -- this repo is public and they are a chat id and two sets of real
+          # coordinates. Kept as secrets because that makes them the only copy that
+          # lives off the box, and the database has no backup.
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DEPAS_PARKING_INCOME: ${{ vars.DEPAS_PARKING_INCOME }}
-          DEPAS_STORAGE_INCOME: ${{ vars.DEPAS_STORAGE_INCOME }}
-          DEPAS_COMMUNES: ${{ vars.DEPAS_COMMUNES }}
-          DEPAS_BEDROOMS_MIN: ${{ vars.DEPAS_BEDROOMS_MIN }}
-          DEPAS_GRADE_MIN: ${{ vars.DEPAS_GRADE_MIN }}
-          DEPAS_COST_MAX: ${{ vars.DEPAS_COST_MAX }}
-          DEPAS_COST_TARGET: ${{ vars.DEPAS_COST_TARGET }}
-          DEPAS_WALK_TARGET: ${{ vars.DEPAS_WALK_TARGET }}
-          DEPAS_WALK_MAX: ${{ vars.DEPAS_WALK_MAX }}
-          # A secret, not a var: real coordinates, and this repo's logs are public.
           DEPAS_LOCATIONS: ${{ secrets.DEPAS_LOCATIONS }}
-          DEPAS_COMMUTE_TARGET: ${{ vars.DEPAS_COMMUTE_TARGET }}
-          DEPAS_COMMUTE_MAX: ${{ vars.DEPAS_COMMUTE_MAX }}
-          DEPAS_METRO_TIERS: ${{ vars.DEPAS_METRO_TIERS }}
-          DEPAS_FLOOR_TARGET: ${{ vars.DEPAS_FLOOR_TARGET }}
-          DEPAS_AREA_MIN: ${{ vars.DEPAS_AREA_MIN }}
-          DEPAS_AREA_TARGET: ${{ vars.DEPAS_AREA_TARGET }}
-          DEPAS_AGE_TARGET: ${{ vars.DEPAS_AGE_TARGET }}
-          DEPAS_AVAILABLE_BY: ${{ vars.DEPAS_AVAILABLE_BY }}
-          DEPAS_SECURITY_WANTED: ${{ vars.DEPAS_SECURITY_WANTED }}
-          DEPAS_CURRENT_COST: ${{ vars.DEPAS_CURRENT_COST }}
-          # A secret for the same reason as DEPAS_LOCATIONS: it describes where you
-          # actually live, down to the coordinates, and this repo's logs are public.
           DEPAS_CURRENT_HOME: ${{ secrets.DEPAS_CURRENT_HOME }}
         run: |
           # Values are expanded exactly once here, then base64'd, so a literal $
@@ -79,26 +65,7 @@ jobs:
             "TZ=$TZ" \
             "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN" \
             "TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID" \
-            "DEPAS_PARKING_INCOME=$DEPAS_PARKING_INCOME" \
-            "DEPAS_STORAGE_INCOME=$DEPAS_STORAGE_INCOME" \
-            "DEPAS_COMMUNES=$DEPAS_COMMUNES" \
-            "DEPAS_BEDROOMS_MIN=$DEPAS_BEDROOMS_MIN" \
-            "DEPAS_GRADE_MIN=$DEPAS_GRADE_MIN" \
-            "DEPAS_COST_MAX=$DEPAS_COST_MAX" \
-            "DEPAS_COST_TARGET=$DEPAS_COST_TARGET" \
-            "DEPAS_WALK_TARGET=$DEPAS_WALK_TARGET" \
-            "DEPAS_WALK_MAX=$DEPAS_WALK_MAX" \
             "DEPAS_LOCATIONS=$DEPAS_LOCATIONS" \
-            "DEPAS_COMMUTE_TARGET=$DEPAS_COMMUTE_TARGET" \
-            "DEPAS_COMMUTE_MAX=$DEPAS_COMMUTE_MAX" \
-            "DEPAS_METRO_TIERS=$DEPAS_METRO_TIERS" \
-            "DEPAS_FLOOR_TARGET=$DEPAS_FLOOR_TARGET" \
-            "DEPAS_AREA_MIN=$DEPAS_AREA_MIN" \
-            "DEPAS_AREA_TARGET=$DEPAS_AREA_TARGET" \
-            "DEPAS_AGE_TARGET=$DEPAS_AGE_TARGET" \
-            "DEPAS_AVAILABLE_BY=$DEPAS_AVAILABLE_BY" \
-            "DEPAS_SECURITY_WANTED=$DEPAS_SECURITY_WANTED" \
-            "DEPAS_CURRENT_COST=$DEPAS_CURRENT_COST" \
             "DEPAS_CURRENT_HOME=$DEPAS_CURRENT_HOME" \
             | base64 -w0)
 
