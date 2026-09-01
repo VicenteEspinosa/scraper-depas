@@ -98,7 +98,7 @@ antigüedad, UF/m², the Metro station and its lines, the minutes to every
 reads `tuyo → este aviso` with the difference marked **mejor** or **peor**, and a
 figure neither side states simply leaves its line out.
 
-Your apartment is one secret, `DEPAS_CURRENT_HOME`, holding a single JSON object
+Your apartment is one setting, `DEPAS_CURRENT_HOME`, holding a single JSON object
 whose keys are the listing column names — `depas config get DEPAS_CURRENT_HOME`
 prints the format, and `seed.env` has a commented-out one.
 `price_clp`, `common_expenses`, `area_m2`, `lat` and `lon` are required; the rest
@@ -246,12 +246,14 @@ the only place a new setting has to be added.
 Two things stay in the environment, because they are needed before a database can be
 opened or must not be stored beside the data: `TELEGRAM_BOT_TOKEN` and `DEPAS_DB_PATH`.
 
-The deploy passes only those, plus the three settings `seed.env` deliberately leaves
-out — `TELEGRAM_CHAT_ID`, `DEPAS_LOCATIONS` and `DEPAS_CURRENT_HOME`, a chat id and two
-sets of real coordinates that do not belong in a public repo. Everything else it used
-to carry is versioned in `seed.env` and stored in the table, so passing it again would
-be a second source that nothing reads: the seed runs once, and the table has long since
-won.
+Those two are all the deploy passes. Every setting it used to carry is stored in the
+table and versioned in `seed.env`, so sending one again would be a second source that
+nothing reads: the seed runs once, and the table has long since won.
+
+The three `seed.env` leaves out — `TELEGRAM_CHAT_ID`, `DEPAS_LOCATIONS` and
+`DEPAS_CURRENT_HOME`, a chat id and two sets of real coordinates that do not belong in
+a public repo — are set on the box with `depas config set`. A fresh install has no chat
+until you do, and says so: posting an alert without one raises rather than guessing.
 
 | Setting | Meaning |
 | --- | --- |
