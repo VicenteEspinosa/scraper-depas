@@ -91,6 +91,12 @@ GRADE_EMOJI = {"A": "🟢", "B": "🟢", "C": "🟡", "D": "🟠", "E": "🔴", 
 # How much of the grade is real: every component scored, or some of them absent.
 COMPLETE_MARK = "✔️"
 PARTIAL_MARK = "❓"
+# At or past every target it could be scored on: nothing was compromised.
+MEETS_TARGETS_MARK = "✅"
+# Past 100 the listing has not merely met the targets, it has beaten them across the
+# board — the flat this whole thing is looking for. It gets a banner, not a mark.
+FLAWLESS_SCORE = 100
+FLAWLESS_BANNER = "💎💎💎💎💎💎💎💎"
 TEST_MARK = "🧪"
 # The verdict given from the chat, so a scroll through the channel shows at a
 # glance what has already been judged.
@@ -152,16 +158,19 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
                    is_test: bool = False) -> str:
     """Render one listing as the Telegram HTML card posted to the chat."""
     emoji = GRADE_EMOJI.get(grade.letter, "⚪")
-    data_mark = PARTIAL_MARK if grade.missing else COMPLETE_MARK
+    marks = [PARTIAL_MARK if grade.missing else COMPLETE_MARK,
+             MEETS_TARGETS_MARK if grade.meets_targets else None]
     prefix = "".join(f"{mark} " for mark in (TEST_MARK if is_test else None,
                                              INTEREST_MARK.get(row.get("interest"))) if mark)
     commune = (row.get("commune") or "").replace("-", " ").title()
-    header = [f"{prefix}{emoji} <b>{grade.letter} {grade.score}</b> {data_mark}"]
+    header = [f"{prefix}{emoji} <b>{grade.letter} {grade.score}</b> "
+              + " ".join(mark for mark in marks if mark)]
     if commune:  # a listing whose portal never stated one would leave a dangling separator
         header.append(f"<b>{_escape(commune)}</b>")
     if row.get("id"):
         header.append(f"<code>[{row['id']}]</code>")
-    lines = [" · ".join(header)]
+    lines = [FLAWLESS_BANNER] if grade.score >= FLAWLESS_SCORE else []
+    lines.append(" · ".join(header))
     if row.get("title"):
         lines.append(f"<i>{_escape(row['title'])}</i>")
 

@@ -1,5 +1,21 @@
+"""What a listing is worth to you, measured against your preferences and nothing else.
+
+A grade used to be a percentile: a listing was ranked against every other listing in
+the pool, so `A 94` meant "beats 94% of what is listed right now" and moved whenever
+the market did. That is a good way to shop and a bad way to decide — the best of a bad
+week still graded A, and the same flat graded differently tomorrow.
+
+So the pool is gone. Every component scores against the numbers you configured, on one
+curve with three anchors: MET where the listing hits your target, BREACHED where it
+sits on the hard bound you set, and BEST a full span the other side of the target.
+Beating a target still earns score, which is the whole point — a 70 m2 flat where you
+asked for 50 should read better than one at exactly 50, not tie with it.
+
+Meeting a target is deliberately not full marks: it is worth 80 of a component's 100
+points, and the last fifth is only ever earned by beating it. So the score reads as
+"percent of what this could be worth to me", where 80 is everything you asked for.
+"""
 import json
-from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 
 from depas.metro import STATION_LINES
@@ -8,122 +24,129 @@ from depas.metro import STATION_LINES
 from depas.preferences import WEIGHTED as COMPONENTS
 from depas.preferences import Preferences
 
-# Amenities a listing is credited for having; the raw score is the fraction present.
+# Amenities a listing is credited for having; how many of them you expect is a setting.
 AMENITIES = (
     "has_elevator", "has_concierge", "has_heating", "has_air_conditioning",
     "has_pool", "has_gym", "has_terrace", "gated_community", "pets_allowed",
 )
-LETTERS = ((90, "A"), (75, "B"), (50, "C"), (25, "D"))
-# A percentile scale centres here, so it is what an unmeasured component says.
-MIDPOINT = 50.0
+LETTERS = ((80, "A"), (68, "B"), (56, "C"), (40, "D"))
+
+# The three anchors every component is scored between, in points.
+MET = 80.0         # exactly on your target: four fifths of what the component can give
+BREACHED = 40.0    # on the hard bound, one span the wrong side of the target
+BEST = 100.0       # one span the right side of it, and the most a component can score
+# Paying your zone's average UF/m2 is MET; this much off that average is a whole span.
+ZONE_SPAN = 0.20
+# What meeting every target on complete data is worth on top, since the components
+# alone cannot say "and nothing at all was compromised".
+PERFECT_BONUS = 5.0
 
 
 @dataclass(slots=True)
 class Grade:
-    """A listing's 0-100 percentile against the current pool, plus the parts behind it."""
+    """A listing's score against your preferences, plus the parts and the flags behind it."""
 
     score: int
     letter: str
     parts: dict[str, int]
     missing: tuple[str, ...]
+    meets_targets: bool
+
+
+def _points(overshoot: float) -> float:
+    """Score one component from how far past your target it sits, counted in spans.
+
+    Negative is better than asked for. The curve is steeper on the wrong side on
+    purpose: falling short of a target costs more than beating it pays.
+    """
+    if overshoot < 0:
+        return min(MET - (BEST - MET) * overshoot, BEST)
+    return max(MET - (MET - BREACHED) * overshoot, 0.0)
+
+
+def _from_target(value: float, target: int, limit: int | None) -> float:
+    """Score a lower-is-better number; the distance to the hard bound is one span.
+
+    Without a bound the target itself is the span, so twice the target scores nothing —
+    the only reading available when you have named an ideal and no ceiling.
+    """
+    span = abs(limit - target) if limit is not None and limit != target else target
+    return _points((value - target) / span)
 
 
 def _value(row: dict, prefs: Preferences) -> float | None:
-    """Cheaper than its zone scores better, so the ratio is negated."""
+    """Priced against its own commune: the zone average is MET, cheaper beats it."""
     asking = row.get("price_per_m2_uf_effective")
     zone = row.get("zone_price_per_m2_uf_effective")
-    return None if not asking or not zone else -(asking / zone)
-
-
-def _against_target(value: float, target: int | None, ceiling: int | None) -> float:
-    """Lower is better. Meeting the target ties at the top; past it, score falls to the ceiling.
-
-    Beating a target is not a competition — once a listing qualifies the other components
-    should decide it. Without a target this is just the negated value, i.e. a percentile.
-    """
-    if target is None:
-        return -value
-    if value <= target:
-        return 0.0
-    span = (ceiling - target) if ceiling and ceiling > target else target
-    return -min((value - target) / span, 1.0)
+    if not asking or not zone:
+        return None
+    return _points((asking / zone - 1) / ZONE_SPAN)
 
 
 def _cost(row: dict, prefs: Preferences) -> float | None:
     net = row.get("net_monthly_clp")
-    if not net:
+    if not net or prefs.cost.target is None:
         return None
-    return _against_target(net, prefs.cost.target, prefs.cost.maximum)
+    return _from_target(net, prefs.cost.target, prefs.cost.maximum)
 
 
 def _walk(row: dict, prefs: Preferences) -> float | None:
     walk = row.get("walk_minutes")
-    if walk is None:
+    if walk is None or prefs.walk.target is None:
         return None
-    return _against_target(walk, prefs.walk.target, prefs.walk.maximum)
+    return _from_target(walk, prefs.walk.target, prefs.walk.maximum)
 
 
 def _area(row: dict, prefs: Preferences) -> float | None:
-    """Bigger is better up to DEPAS_AREA_TARGET, where listings tie at the top.
-
-    An undeclared area scores as badly as the smallest allowed size rather than skipping
-    the component: a listing that omits its size must not outrank one that states it.
-    """
+    """Bigger is better, so what is scored is how far short of the target it falls."""
     target = prefs.area.target
-    area = row.get("area")
-    if target is None:
-        return area or None
-    if area is None:
-        return -1.0
+    if target is None or row.get("area") is None:
+        return None
     minimum = prefs.area.minimum
     span = target - minimum if minimum and minimum < target else target
-    return -min(max(target - area, 0.0) / span, 1.0)
+    return _points((target - row["area"]) / span)
 
 
 def _amenities(row: dict, prefs: Preferences) -> float | None:
+    """Scored against how many you expect, so having more than that still pays."""
+    target = prefs.value("DEPAS_AMENITIES_TARGET")
     present = [row.get(name) for name in AMENITIES]
-    if all(value is None for value in present):
+    if not target or all(value is None for value in present):
         return None
-    return sum(bool(value) for value in present) / len(AMENITIES)
+    return _points((target - sum(bool(value) for value in present)) / target)
 
 
 def _security(row: dict, prefs: Preferences) -> float | None:
     """Wanted security is a preference, not a cutoff: missing it costs score, not the alert.
 
-    An undeclared type counts as unmet rather than unknown — otherwise listings that
-    simply omit the field would skip the component and outrank ones that state it.
+    Having it is BEST rather than MET, as it is for every component that can only be
+    matched: there is nothing better than the conserjería you asked for, so capping it
+    at the target would tax each listing 20 points it has no way to earn back.
     """
     wanted = prefs.security_wanted()
-    if wanted is None:
+    if wanted is None or row.get("security_type") is None:
         return None
-    return float(row.get("security_type") == wanted)
+    return BEST if row.get("security_type") == wanted else BREACHED
 
 
 def _floor(row: dict, prefs: Preferences) -> float | None:
     """Height is a preference, not a cutoff: below the target costs score, and so does the top."""
-    floor = row.get("floor")
-    if floor is None:
+    floor, target = row.get("floor"), prefs.floor.target
+    if floor is None or target is None:
         return None
-    target = prefs.floor.target
-    shortfall = 0.0 if target is None or floor >= target else (target - floor) / target
-    return -min(shortfall + _levied(row, prefs, "floor"), 1.0)
+    return max(_points((target - floor) / target) - _levied(row, prefs, "floor"), 0.0)
 
 
 def _age(row: dict, prefs: Preferences) -> float | None:
-    """Newer is better up to the age target; past it the score falls without excluding.
-
-    An undeclared antigüedad is left unscored rather than assumed old: most portals
-    simply omit it. Age declares no MAX slot because it never blocks an alert — the
-    target alone sets how fast an older building loses the component.
-    """
+    """An undeclared antigüedad is left unscored rather than assumed old: most portals omit it."""
     age = row.get("age")
-    if age is None:
+    if age is None or prefs.age.target is None:
         return None
-    return _against_target(float(age), prefs.age.target, prefs.age.maximum)
+    return _from_target(float(age), prefs.age.target, prefs.age.maximum)
 
 
 def _metro(row: dict, prefs: Preferences) -> float | None:
-    """Rank the station by the best-tiered line calling at it; an interchange takes its best."""
+    """Your top tier is BEST, the next one MET, and the rest drop evenly to an unranked line."""
     tiers = prefs.metro_tiers()
     station = row.get("nearest_station")
     if not tiers or station is None:
@@ -133,99 +156,100 @@ def _metro(row: dict, prefs: Preferences) -> float | None:
         return None
     # A line nobody ranked sits one tier worse than the last one that was.
     ranks = [rank for rank, tier in enumerate(tiers) if any(line in tier for line in lines)]
-    return -(min(ranks) if ranks else len(tiers)) / len(tiers)
+    return _points(3 * (min(ranks) if ranks else len(tiers)) / len(tiers) - 1)
 
 
 def _commute(row: dict, prefs: Preferences) -> float | None:
     """Judged on the location it reaches worst — you have to make every one of those trips."""
     travel = row.get("commute")
-    if not travel:
+    if not travel or prefs.commute.target is None:
         return None
-    return _against_target(max(json.loads(travel).values()),
-                           prefs.commute.target, prefs.commute.maximum)
+    return _from_target(max(json.loads(travel).values()),
+                        prefs.commute.target, prefs.commute.maximum)
 
 
 def _levied(row: dict, prefs: Preferences, component: str) -> float:
-    """What the penalised traits assigned to one component cost this listing."""
+    """Points the penalised traits assigned to one component cost this listing."""
     return sum(trait.penalty for trait in prefs.penalised_traits()
                if trait.component == component and trait.holds(row))
 
 
 def _traits(row: dict, prefs: Preferences) -> float | None:
-    """The share of the penalised traits this listing carries; having more of them is worse.
+    """BEST less what the penalised traits this listing carries are each worth.
 
-    None when nothing is penalised here, which keeps the component out of the scale
-    rather than tying every listing at the midpoint, and None for a listing whose detail
-    page was never read -- traits come off that page, so it has answered nothing.
+    None for a listing whose detail page was never read -- traits come off that page,
+    so it has answered nothing and must not be credited with answering no.
     """
     penalised = [trait for trait in prefs.penalised_traits() if trait.component == "traits"]
     if not penalised or not row.get("detail_fetched_at"):
         return None
-    return -(sum(trait.penalty for trait in penalised if trait.holds(row))
-             / sum(trait.penalty for trait in penalised))
+    return max(BEST - _levied(row, prefs, "traits"), 0.0)
 
 
 # One shape for all of them, preferences included, so the dispatch below needs no
-# special case for the two that happen not to consult any.
-RAW = {"value": _value, "cost": _cost, "walk": _walk, "area": _area,
-       "amenities": _amenities, "security": _security, "floor": _floor, "metro": _metro,
-       "commute": _commute, "age": _age, "traits": _traits}
+# special case for the one that happens not to consult any.
+SCORERS = {"value": _value, "cost": _cost, "walk": _walk, "area": _area,
+           "amenities": _amenities, "security": _security, "floor": _floor, "metro": _metro,
+           "commute": _commute, "age": _age, "traits": _traits}
 
 
-def _percentile(sorted_values: list[float], value: float) -> float:
-    """Share of the pool this value beats, counting ties as half."""
-    if not sorted_values:
-        return 50.0
-    below = bisect_left(sorted_values, value)
-    ties = bisect_right(sorted_values, value) - below
-    return 100.0 * (below + ties / 2) / len(sorted_values)
+def _applicable(prefs: Preferences) -> set[str]:
+    """Components you have given something to score against; the rest are simply off.
+
+    The pool used to answer this — a component nobody could score produced no values —
+    and now nothing but the preferences can, which is also the more honest reading:
+    an unset target is not missing data, it is an opinion you never had.
+    """
+    configured = {
+        "value": True,
+        "cost": prefs.cost.target is not None,
+        "walk": prefs.walk.target is not None,
+        "area": prefs.area.target is not None,
+        "amenities": bool(prefs.value("DEPAS_AMENITIES_TARGET")),
+        "security": prefs.security_wanted() is not None,
+        "floor": prefs.floor.target is not None,
+        "metro": bool(prefs.metro_tiers()),
+        "commute": prefs.commute.target is not None,
+        "age": prefs.age.target is not None,
+        "traits": any(trait.component == "traits" for trait in prefs.penalised_traits()),
+    }
+    return {name for name in COMPONENTS if configured[name]}
 
 
 class Scale:
-    """Percentile breakpoints built from the listings currently in the database."""
+    """Your preferences, ready to grade rows against. Deterministic: no listing sees another.
 
-    def __init__(self, rows: list[dict], prefs: Preferences) -> None:
-        # The scale belongs to whoever is reading it: the same pool graded against two
-        # sets of targets is two different scales, so the preferences come in with it.
+    Still an object rather than a function because the weights and the set of live
+    components are worth reading once for a whole pass, not per listing.
+    """
+
+    def __init__(self, prefs: Preferences) -> None:
         self.prefs = prefs
         self.weights = prefs.weights()
-        self.components = {
-            name: sorted(value for row in rows if (value := RAW[name](row, prefs)) is not None)
-            for name in COMPONENTS
-        }
-        # `security` scores nothing unless the preference is set; treating that as
-        # missing data would put a partial-data mark on every listing.
-        self.applicable = {name for name, values in self.components.items() if values}
-        self.composites = sorted(self._composite(row) for row in rows) if rows else []
-
-    def _composite(self, row: dict) -> float:
-        """Weighted mean of the scored components, shrunk toward the middle by coverage."""
-        # Averaging only what is present renormalises missing data away, so a listing
-        # scored on four axes it happens to win ties with one scored on all seven.
-        parts = self._parts(row)
-        if not parts:
-            return MIDPOINT
-        weight = sum(self.weights[name] for name in parts)
-        if weight == 0:
-            return MIDPOINT
-        average = sum(parts[name] * self.weights[name] for name in parts) / weight
-        coverage = len(parts) / len(self.applicable) if self.applicable else 1.0
-        return MIDPOINT + (average - MIDPOINT) * coverage
+        self.applicable = _applicable(prefs)
 
     def _parts(self, row: dict) -> dict[str, float]:
-        parts = {}
-        for name in COMPONENTS:
-            value = RAW[name](row, self.prefs)
-            if value is not None:
-                parts[name] = _percentile(self.components[name], value)
-        return parts
+        return {name: scored for name in COMPONENTS
+                if (scored := SCORERS[name](row, self.prefs)) is not None}
 
     def grade(self, row: dict) -> Grade:
-        """Rank one listing against the pool; 80 means it beats 80% of what is listed."""
+        """Score one listing out of 100, where 80 is everything you asked for and no more."""
         parts = self._parts(row)
         if not parts:
-            return Grade(0, "?", {}, COMPONENTS)
-        score = round(_percentile(self.composites, self._composite(row)))
-        letter = next((letter for cutoff, letter in LETTERS if score >= cutoff), "E")
+            return Grade(0, "?", {}, COMPONENTS, False)
+        weight = sum(self.weights[name] for name in parts)
+        # The only thing that punishes silence: averaging just what is present would
+        # renormalise missing data away, letting a listing that answers four questions
+        # tie with one that answers all eleven.
+        average = (sum(parts[name] * self.weights[name] for name in parts) / weight
+                   if weight else BREACHED)
+        coverage = len(parts) / len(self.applicable) if self.applicable else 1.0
         missing = tuple(name for name in self.applicable if name not in parts)
-        return Grade(score, letter, {k: round(v) for k, v in parts.items()}, missing)
+        meets_targets = all(scored >= MET for scored in parts.values())
+        # Only the listing that also answered everything gets the bonus: meeting every
+        # target on half the axes is a promise, not a proof.
+        score = round(BREACHED + (average - BREACHED) * coverage
+                      + (PERFECT_BONUS if meets_targets and not missing else 0.0))
+        letter = next((letter for cutoff, letter in LETTERS if score >= cutoff), "E")
+        return Grade(score, letter, {name: round(scored) for name, scored in parts.items()},
+                     missing, meets_targets)

@@ -1,70 +1,124 @@
+"""A grade is measured against the preferences alone, so it never moves when the market does."""
 import pytest
 
-from depas.grade import COMPONENTS, Scale
+from depas.grade import BEST, BREACHED, COMPONENTS, MET, PERFECT_BONUS, Scale
 from tests.support import prefs
 
 
+@pytest.fixture(autouse=True)
+def targets(monkeypatch):
+    """The numbers the curve is anchored on; a component with no target has no opinion."""
+    for name, value in (("DEPAS_COST_TARGET", "800000"), ("DEPAS_COST_MAX", "1000000"),
+                        ("DEPAS_WALK_TARGET", "10"), ("DEPAS_WALK_MAX", "15"),
+                        ("DEPAS_AREA_TARGET", "50"), ("DEPAS_AREA_MIN", "42")):
+        monkeypatch.setenv(name, value)
+
+
 def _listing(**overrides) -> dict:
-    base = {"price_per_m2_uf_effective": 0.30, "zone_price_per_m2_uf_effective": 0.37,
-            "net_monthly_clp": 700_000,
-            "walk_minutes": 8, "area": 50.0, "has_elevator": 1}
+    """A listing sitting exactly on every target it is graded against."""
+    base = {"price_per_m2_uf_effective": 0.30, "zone_price_per_m2_uf_effective": 0.30,
+            "net_monthly_clp": 800_000, "walk_minutes": 10, "area": 50.0, "age": 25,
+            "has_elevator": 1, "has_concierge": 1, "has_heating": 1,
+            "has_air_conditioning": 1}
     return base | overrides
 
 
-def _pool(count: int = 21) -> list[dict]:
-    # step 0 is the best listing on every axis, step -1 the worst
-    return [_listing(net_monthly_clp=400_000 + step * 30_000, walk_minutes=step, area=80.0 - step)
-            for step in range(count)]
+def test_a_listing_on_every_target_scores_met():
+    """Hitting every target is what 100 means, which is the whole point of an absolute grade."""
+    graded = Scale(prefs()).grade(_listing())
+
+    assert set(graded.parts.values()) == {MET}
+    assert graded.missing == ()
 
 
-def test_score_is_a_percentile_against_the_pool():
-    """The cheapest, closest, largest listing outranks the pool; the worst sits at the bottom."""
-    pool = _pool()
-    scale = Scale(pool, prefs())
+def test_meeting_every_target_on_full_data_earns_the_bonus():
+    """The flat that compromises on nothing is worth saying so about, and worth more."""
+    graded = Scale(prefs()).grade(_listing())
 
-    best, middle, worst = (scale.grade(pool[i]).score for i in (0, len(pool) // 2, -1))
-
-    assert best > middle > worst
-    assert (best, middle, worst) == (98, 50, 2)
+    assert (graded.meets_targets, graded.missing) == (True, ())
+    assert graded.score > MET
 
 
-def test_grades_spread_across_letters():
-    """A pool graded against itself uses the whole range, not one clustered letter."""
-    pool = _pool(40)
-    scale = Scale(pool, prefs())
+def test_the_bonus_needs_the_data_to_back_it_up():
+    """Meeting every target on half the axes is a promise, not a proof: the mark, not the +5."""
+    scale = Scale(prefs())
 
-    letters = {scale.grade(row).letter for row in pool}
-    assert {"A", "B", "C", "D", "E"} <= letters
+    thin = scale.grade(_listing(age=None))
+
+    assert thin.meets_targets is True
+    assert thin.score < scale.grade(_listing()).score - PERFECT_BONUS
+
+
+@pytest.mark.parametrize("field, value, expected", [
+    ("net_monthly_clp", 600_000, BEST),
+    ("net_monthly_clp", 1_000_000, BREACHED),
+    ("net_monthly_clp", 1_200_000, 0),
+    ("walk_minutes", 5, BEST),
+    ("walk_minutes", 15, BREACHED),
+    ("area", 58.0, BEST),
+    ("area", 42.0, BREACHED),
+])
+def test_the_curve_runs_from_best_through_the_target_to_the_limit(field, value, expected):
+    """One span better than the target is the top; the hard bound is half; past it, nothing."""
+    component = {"net_monthly_clp": "cost", "walk_minutes": "walk", "area": "area"}[field]
+
+    graded = Scale(prefs()).grade(_listing(**{field: value}))
+
+    assert graded.parts[component] == expected
+
+
+def test_beating_a_target_lifts_the_whole_grade():
+    """Passing an expectation must still pay, or a 70 m2 flat ties with the 50 you asked for."""
+    scale = Scale(prefs())
+
+    assert scale.grade(_listing(area=58.0)).score > scale.grade(_listing()).score
+
+
+def test_a_breached_limit_costs_score_and_the_mark():
+    """A listing outside a hard bound can still be graded, and has to read as compromised."""
+    graded = Scale(prefs()).grade(_listing(net_monthly_clp=1_100_000))
+
+    assert graded.meets_targets is False
+    assert graded.parts["cost"] < BREACHED
+
+
+def test_the_same_listing_always_scores_the_same():
+    """Nothing else on the market is consulted, so two readings a month apart agree."""
+    assert Scale(prefs()).grade(_listing()).score == 85
 
 
 def test_missing_components_are_reported_not_guessed():
-    """A listing without coordinates or a benchmark is graded on what it has."""
-    scale = Scale(_pool(), prefs())
+    """A listing without a benchmark or a walk time is graded on what it has."""
+    graded = Scale(prefs()).grade({"net_monthly_clp": 500_000, "area": 60.0})
 
-    graded = scale.grade({"net_monthly_clp": 500_000, "area": 60.0})
-
-    assert set(graded.missing) == {"value", "walk", "amenities"}
+    assert set(graded.missing) == {"value", "walk", "amenities", "age"}
     assert set(graded.parts) == {"cost", "area"}
 
 
+def test_partial_data_is_pulled_toward_the_middle():
+    """Winning three axes must not beat winning the same three plus three more."""
+    scale = Scale(prefs())
+    complete = _listing(net_monthly_clp=600_000, walk_minutes=5, area=58.0)
+
+    thin = {key: complete[key] for key in ("net_monthly_clp", "walk_minutes", "area")}
+
+    assert scale.grade(complete).score > scale.grade(thin).score
+
+
 def test_a_listing_with_no_usable_data_scores_nothing():
-    """An empty row must not silently rank mid-table."""
-    graded = Scale(_pool(), prefs()).grade({})
+    """An empty row must not silently grade mid-table."""
+    graded = Scale(prefs()).grade({})
 
     assert (graded.score, graded.letter) == (0, "?")
 
 
-def test_weights_shift_the_ranking(monkeypatch):
-    """Zeroing every weight but location makes the closest listing win outright."""
-    pool = _pool()
-    far_but_cheap = _listing(net_monthly_clp=100_000, walk_minutes=30, area=99.0)
+def test_weights_shift_the_grade(monkeypatch):
+    """Zeroing every weight but cost makes an expensive flat read as badly as its price."""
+    for component in COMPONENTS:
+        monkeypatch.setenv(f"DEPAS_{component.upper()}_WEIGHT", "0")
+    monkeypatch.setenv("DEPAS_COST_WEIGHT", "1")
 
-    monkeypatch.setenv("DEPAS_VALUE_WEIGHT", "0")
-    monkeypatch.setenv("DEPAS_COST_WEIGHT", "0")
-    monkeypatch.setenv("DEPAS_AREA_WEIGHT", "0")
-    monkeypatch.setenv("DEPAS_AMENITIES_WEIGHT", "0")
-
-    assert Scale(pool, prefs()).grade(far_but_cheap).score == 0
+    assert Scale(prefs()).grade(_listing(net_monthly_clp=1_000_000)).score == BREACHED
 
 
 def test_all_weights_zero_fails_loudly(monkeypatch):
@@ -73,210 +127,154 @@ def test_all_weights_zero_fails_loudly(monkeypatch):
         monkeypatch.setenv(f"DEPAS_{component.upper()}_WEIGHT", "0")
 
     with pytest.raises(ValueError, match="at least one"):
-        Scale(_pool(), prefs())
+        Scale(prefs())
+
+
+def test_a_component_with_no_target_is_off_rather_than_missing(monkeypatch):
+    """An unset target is not absent data, it is an opinion you never had."""
+    monkeypatch.delenv("DEPAS_COST_TARGET")
+
+    graded = Scale(prefs()).grade(_listing())
+
+    assert "cost" not in graded.parts
+    assert "cost" not in graded.missing
 
 
 def test_security_is_scored_not_filtered(monkeypatch):
     """Wanting 24h security lowers the score of listings without it, never excludes them."""
     monkeypatch.setenv("DEPAS_SECURITY_WANTED", "24 horas")
-    pool = [{"security_type": s, "net_monthly_clp": 700_000, "area": 50.0, "walk_minutes": 5}
-            for s in ("24 horas", None, "conserje diurno")]
-    scale = Scale(pool, prefs())
+    scale = Scale(prefs())
 
-    wanted, absent, other = (scale.grade(row) for row in pool)
+    wanted, absent, other = (scale.grade(_listing(security_type=kind))
+                             for kind in ("24 horas", None, "conserje diurno"))
 
-    assert wanted.score > absent.score
-    assert absent.score == other.score
-    assert all(g.letter != "?" for g in (wanted, absent, other))
+    assert wanted.parts["security"] == BEST > other.parts["security"] == BREACHED
+    assert "security" in absent.missing
 
 
 def test_an_unset_security_preference_is_not_a_missing_component(monkeypatch):
     """Without the preference set, no listing should be marked as partially graded for it."""
     monkeypatch.delenv("DEPAS_SECURITY_WANTED", raising=False)
-    pool = [{"net_monthly_clp": 700_000, "area": 50.0, "walk_minutes": 5, "has_elevator": 1}]
 
-    assert "security" not in Scale(pool, prefs()).grade(pool[0]).missing
+    assert "security" not in Scale(prefs()).grade(_listing()).missing
 
 
-def test_floor_below_target_scores_lower_without_being_excluded(monkeypatch):
-    """A low floor costs score, so listings on it still alert rather than disappearing."""
+def test_a_higher_floor_scores_above_a_lower_one(monkeypatch):
+    """Height is a preference: below the target costs score, above it earns some."""
     monkeypatch.setenv("DEPAS_FLOOR_TARGET", "5")
-    pool = [_listing(floor=floor, building_floors=20) for floor in (8, 5, 3, 1)]
-    scale = Scale(pool, prefs())
+    scale = Scale(prefs())
 
-    high, target, low, ground = (scale.grade(row).score for row in pool)
+    high, target, low = (scale.grade(_listing(floor=floor)).parts["floor"]
+                         for floor in (10, 5, 1))
 
-    assert high == target > low > ground
-    assert all(scale.grade(row).letter != "?" for row in pool)
+    assert high > target == MET > low
 
 
 def test_the_top_floor_is_docked(monkeypatch):
     """Being the highest floor scores below the identical unit one floor down."""
     monkeypatch.setenv("DEPAS_FLOOR_TARGET", "5")
-    pool = [_listing(floor=20, building_floors=20), _listing(floor=19, building_floors=20)]
-    scale = Scale(pool, prefs())
+    scale = Scale(prefs())
 
-    top, below = (scale.grade(row).score for row in pool)
+    top = scale.grade(_listing(floor=20, building_floors=20))
+    below = scale.grade(_listing(floor=19, building_floors=20))
 
-    assert top < below
+    assert top.parts["floor"] < below.parts["floor"]
 
 
 def test_an_unknown_floor_is_missing_not_penalised(monkeypatch):
     """A portal that never publishes a floor must not be graded as if it were floor zero."""
     monkeypatch.setenv("DEPAS_FLOOR_TARGET", "5")
-    pool = [_listing(floor=5, building_floors=20), _listing(floor=None)]
-    scale = Scale(pool, prefs())
 
-    assert "floor" in scale.grade(pool[1]).missing
-    assert scale.grade(pool[1]).letter != "?"
+    graded = Scale(prefs()).grade(_listing(floor=None))
 
-
-def test_area_at_the_target_ties_at_the_top(monkeypatch):
-    """Past the ideal size, extra square metres stop earning score."""
-    monkeypatch.setenv("DEPAS_AREA_TARGET", "50")
-    monkeypatch.setenv("DEPAS_AREA_MIN", "42")
-    pool = [_listing(area=a) for a in (80.0, 50.0, 46.0, 42.0)]
-    scale = Scale(pool, prefs())
-
-    huge, target, middling, smallest = (scale.grade(row).score for row in pool)
-
-    assert huge == target > middling > smallest
+    assert "floor" in graded.missing
+    assert graded.letter != "?"
 
 
-def test_an_unknown_area_scores_bottom_but_still_grades(monkeypatch):
-    """A listing that hides its size must not outrank one that states it, nor be dropped."""
-    monkeypatch.setenv("DEPAS_AREA_TARGET", "50")
-    monkeypatch.setenv("DEPAS_AREA_MIN", "42")
-    pool = [_listing(area=50.0), _listing(area=42.0), _listing(area=None)]
-    scale = Scale(pool, prefs())
+def test_a_listing_that_hides_its_size_cannot_outrank_one_that_states_it():
+    """Silence is not free: the unstated metraje is shrunk out rather than assumed good."""
+    scale = Scale(prefs())
 
-    stated, smallest, unknown = (scale.grade(row) for row in pool)
+    unknown = scale.grade(_listing(area=None))
 
-    assert stated.score > unknown.score
-    assert unknown.score == smallest.score
-    assert "size" not in unknown.missing
+    assert "area" in unknown.missing
+    assert unknown.score < scale.grade(_listing(area=50.0)).score
 
 
-def test_a_thin_grade_cannot_outrank_a_complete_one(monkeypatch):
-    """Winning four axes must not beat winning the same four plus three more."""
-    monkeypatch.setenv("DEPAS_FLOOR_TARGET", "5")
-    monkeypatch.setenv("DEPAS_AREA_TARGET", "50")
-    monkeypatch.setenv("DEPAS_SECURITY_WANTED", "24 horas")
-    shared = {"net_monthly_clp": 500_000, "walk_minutes": 2, "area": 90.0,
-              "security_type": "24 horas"}
-    complete = shared | {"price_per_m2_uf": 0.2, "zone_price_per_m2_uf": 0.5,
-                         "has_elevator": 1, "floor": 8, "building_floors": 20}
-    thin = dict(shared)
-    filler = [{"net_monthly_clp": 900_000, "walk_minutes": 14, "area": 42.0,
-               "price_per_m2_uf": 0.6, "zone_price_per_m2_uf": 0.5, "has_pool": 0,
-               "floor": 1, "building_floors": 1, "security_type": None}]
-    scale = Scale([complete, thin] + filler, prefs())
+def test_more_amenities_than_expected_still_pay(monkeypatch):
+    """Four of nine is the expectation, so a building with eight has to read better."""
+    monkeypatch.setenv("DEPAS_AMENITIES_TARGET", "4")
+    scale = Scale(prefs())
 
-    assert scale.grade(complete).score > scale.grade(thin).score
+    extra = _listing(has_pool=1, has_gym=1, has_terrace=1, gated_community=1)
+
+    assert scale.grade(extra).parts["amenities"] > scale.grade(_listing()).parts["amenities"]
 
 
-def test_coverage_only_pulls_toward_the_middle(monkeypatch):
-    """Shrinking must never flip a thin listing below a genuinely worse complete one."""
-    monkeypatch.setenv("DEPAS_AREA_TARGET", "50")
-    good_thin = {"net_monthly_clp": 500_000, "area": 90.0}
-    bad_complete = {"net_monthly_clp": 950_000, "area": 42.0, "walk_minutes": 15,
-                    "price_per_m2_uf": 0.9, "zone_price_per_m2_uf": 0.5, "has_pool": 0}
-    scale = Scale([good_thin, bad_complete], prefs())
+def test_amenities_can_be_switched_off(monkeypatch):
+    """Expecting none of them turns the component off rather than passing everyone."""
+    monkeypatch.setenv("DEPAS_AMENITIES_TARGET", "0")
 
-    assert scale.grade(good_thin).score > scale.grade(bad_complete).score
+    graded = Scale(prefs()).grade(_listing())
 
-
-def test_a_preferred_line_scores_above_a_less_preferred_one(monkeypatch):
-    """Ranking line 1 first must lift its stations above stations on lines ranked later."""
-    monkeypatch.setenv("DEPAS_METRO_TIERS", "1 > 6 > 2")
-    pool = [_listing(nearest_station=station)
-            for station in ("Manuel Montt", "Ñuñoa", "Cementerios")]
-    scale = Scale(pool, prefs())
-
-    line_one, line_six, line_two = (scale.grade(row).score for row in pool)
-
-    assert line_one > line_six > line_two
+    assert "amenities" not in graded.parts
+    assert "amenities" not in graded.missing
 
 
-def test_an_interchange_is_judged_on_its_better_line(monkeypatch):
-    """Baquedano is on 1 and 5; ranking 1 first must score it as a line 1 station."""
-    monkeypatch.setenv("DEPAS_METRO_TIERS", "1 > 5")
-    pool = [_listing(nearest_station="Baquedano"), _listing(nearest_station="Manuel Montt"),
-            _listing(nearest_station="Bellavista de La Florida")]
-    scale = Scale(pool, prefs())
+@pytest.mark.parametrize("tiers, stations, ordered", [
+    ("1 > 6 > 2", ("Manuel Montt", "Ñuñoa", "Cementerios"), True),
+    ("1 > 5", ("Baquedano", "Manuel Montt"), False),
+    ("1", ("Manuel Montt", "Ñuñoa"), True),
+])
+def test_a_station_is_ranked_by_the_best_line_calling_at_it(monkeypatch, tiers, stations, ordered):
+    """An interchange takes its better line; an unranked line falls below every ranked one."""
+    monkeypatch.setenv("DEPAS_METRO_TIERS", tiers)
+    scale = Scale(prefs())
 
-    interchange, only_one, only_five = (scale.grade(row).score for row in pool)
+    scores = [scale.grade(_listing(nearest_station=station)).parts["metro"]
+              for station in stations]
 
-    assert interchange == only_one > only_five
-
-
-def test_an_unranked_line_falls_below_every_ranked_one(monkeypatch):
-    """Naming only line 1 must not make every other line tie with it."""
-    monkeypatch.setenv("DEPAS_METRO_TIERS", "1")
-    pool = [_listing(nearest_station="Manuel Montt"), _listing(nearest_station="Ñuñoa")]
-    scale = Scale(pool, prefs())
-
-    assert scale.grade(pool[0]).score > scale.grade(pool[1]).score
-
-
-def test_no_preference_leaves_the_line_unscored(monkeypatch):
-    """Without the setting, the metro line must not become a missing component."""
-    monkeypatch.delenv("DEPAS_METRO_TIERS", raising=False)
-    pool = [_listing(nearest_station="Manuel Montt")]
-
-    assert "metro" not in Scale(pool, prefs()).grade(pool[0]).missing
+    assert (scores[0] > scores[-1]) if ordered else (scores[0] == scores[-1])
 
 
 def test_lines_sharing_a_tier_score_the_same(monkeypatch):
     """Lines 3 and 6 in one tier must tie, and both sit between line 1 and the rest."""
     monkeypatch.setenv("DEPAS_METRO_TIERS", "1 > 3,6 > 2,4,4A,5")
-    pool = [_listing(nearest_station=station) for station in
-            ("Manuel Montt", "Ñuñoa", "Chile España", "Cementerios")]
-    scale = Scale(pool, prefs())
+    scale = Scale(prefs())
 
-    line_one, line_six, line_three, line_two = (scale.grade(row).score for row in pool)
+    one, six, three, two = (scale.grade(_listing(nearest_station=station)).parts["metro"]
+                            for station in
+                            ("Manuel Montt", "Ñuñoa", "Chile España", "Cementerios"))
 
-    assert line_one > line_six == line_three > line_two
+    assert one == BEST > six == three == MET > two
 
 
-def test_an_older_building_scores_lower_without_being_excluded(monkeypatch):
+def test_no_metro_preference_leaves_the_line_unscored(monkeypatch):
+    """Without the setting, the metro line must not become a missing component."""
+    monkeypatch.delenv("DEPAS_METRO_TIERS", raising=False)
+
+    assert "metro" not in Scale(prefs()).grade(_listing()).missing
+
+
+def test_an_older_building_scores_lower_without_being_excluded():
     """Age is a preference: past the target a listing loses score, never the alert."""
-    monkeypatch.setenv("DEPAS_AGE_TARGET", "25")
-    pool = [_listing(age=age) for age in (0, 25, 40, 60)]
-    scale = Scale(pool, prefs())
+    scale = Scale(prefs())
 
-    new, target, older, oldest = (scale.grade(row).score for row in pool)
+    new, target, older = (scale.grade(_listing(age=age)).parts["age"] for age in (0, 25, 40))
 
-    assert new == target > older > oldest
-    assert all(scale.grade(row).letter != "?" for row in pool)
+    assert new == BEST > target == MET > older
 
 
-def test_an_unknown_age_is_missing_not_penalised(monkeypatch):
+def test_an_unknown_age_is_missing_not_penalised():
     """Most portals never publish an antigüedad, so its absence must not be graded as old."""
-    monkeypatch.setenv("DEPAS_AGE_TARGET", "25")
-    pool = [_listing(age=5), _listing(age=None)]
-    scale = Scale(pool, prefs())
+    graded = Scale(prefs()).grade(_listing(age=None))
 
-    assert "age" in scale.grade(pool[1]).missing
-    assert scale.grade(pool[1]).letter != "?"
+    assert "age" in graded.missing
+    assert graded.letter != "?"
 
 
-def test_age_at_or_under_the_target_ties_at_the_top(monkeypatch):
-    """Beating 25 years is not a competition; the other components decide it."""
-    monkeypatch.setenv("DEPAS_AGE_TARGET", "25")
-    pool = [_listing(age=age) for age in (2, 25, 30)]
-    scale = Scale(pool, prefs())
+def test_under_25_years_is_the_target_with_nothing_configured(monkeypatch):
+    """Age is the one target that stands whether or not DEPAS_AGE_TARGET was ever set."""
+    monkeypatch.delenv("DEPAS_AGE_TARGET", raising=False)
 
-    brand_new, target, over = (scale.grade(row).score for row in pool)
-
-    assert brand_new == target > over
-
-
-def test_under_25_years_is_the_target_with_nothing_configured():
-    """The rule stands whether or not DEPAS_AGE_TARGET was ever set."""
-    pool = [_listing(age=age) for age in (10, 24, 40)]
-    scale = Scale(pool, prefs())
-
-    young, still_under, over = (scale.grade(row).score for row in pool)
-
-    assert young == still_under > over
+    assert Scale(prefs()).grade(_listing(age=25)).parts["age"] == MET

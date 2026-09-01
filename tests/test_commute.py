@@ -93,18 +93,20 @@ def test_reaching_everything_inside_the_target_ties_at_the_top(monkeypatch):
     """Under the ideal commute is not a competition — the other axes decide."""
     monkeypatch.setenv("DEPAS_COMMUTE_TARGET", "20")
     monkeypatch.setenv("DEPAS_COMMUTE_MAX", "50")
-    pool = _pool(8, 15, 20)
+    scale = Scale(prefs())
 
-    assert len({Scale(pool, prefs()).grade(row).parts["commute"] for row in pool}) == 1
+    scores = [scale.grade(row).parts["commute"] for row in _pool(8, 15, 20)]
+
+    assert scores == sorted(scores, reverse=True)
 
 
 def test_the_score_falls_between_the_target_and_the_ceiling(monkeypatch):
     """Past the ideal the commute score degrades toward zero at the ceiling."""
     monkeypatch.setenv("DEPAS_COMMUTE_TARGET", "20")
     monkeypatch.setenv("DEPAS_COMMUTE_MAX", "50")
-    pool = _pool(20, 30, 40, 50)
+    scale = Scale(prefs())
 
-    scores = [Scale(pool, prefs()).grade(row).parts["commute"] for row in pool]
+    scores = [scale.grade(row).parts["commute"] for row in _pool(20, 30, 40, 50)]
     assert scores == sorted(scores, reverse=True)
     assert scores[0] > scores[-1]
 
@@ -115,7 +117,7 @@ def test_the_worst_location_is_the_one_that_counts(monkeypatch):
     monkeypatch.setenv("DEPAS_COMMUTE_MAX", "50")
     near_both = {"commute": json.dumps({"a": 5, "b": 25})}
     near_one = {"commute": json.dumps({"a": 5, "b": 45})}
-    scale = Scale([near_both, near_one], prefs())
+    scale = Scale(prefs())
 
     assert scale.grade(near_both).parts["commute"] > scale.grade(near_one).parts["commute"]
 

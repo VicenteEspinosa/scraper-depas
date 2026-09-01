@@ -191,9 +191,9 @@ SETTINGS: tuple[Setting, ...] = (
             "pierde su alerta por esto.",
             example="2026-11-01"),
     Setting("DEPAS_GRADE_MIN", _whole,
-            "Nota mínima para publicar una tarjeta. Lo que queda debajo se marca igual, "
-            "así que no reaparece cuando el pool se mueve.",
-            example="70"),
+            "Nota mínima para publicar una tarjeta. La nota mide qué tanto se cumplen "
+            "tus preferencias, así que 100 es cumplirlas todas y se puede pasar.",
+            example="85"),
 
     # -- cost ---------------------------------------------------------------------
     Setting("DEPAS_COST_MAX", _whole,
@@ -259,8 +259,12 @@ SETTINGS: tuple[Setting, ...] = (
             example="1 > 3,6 > 2,4,4A,5"),
     _weight("metro"),
 
-    # Graded off the listing alone, so they weigh something without configuring anything.
+    # Graded off the listing alone, so it weighs something without configuring anything.
     _weight("value"),
+    Setting("DEPAS_AMENITIES_TARGET", _whole,
+            "Cuántas comodidades esperas encontrar, de nueve. En ese número la nota del "
+            "componente es máxima; más suman igual. En cero el componente se apaga.",
+            example="4", default="4"),
     _weight("amenities"),
 
     # -- yes/no properties, each either a deal-breaker or a dislike --------------------

@@ -13,20 +13,33 @@ listing at $800.000 with two parking spaces and a bodega can land below one
 asking $650.000. The portals never show this.
 
 **Amoblado is out, full stop.** A furnished apartment is never alerted on and
-never enters the pool the others are graded against — no setting turns it back on.
+never enters the pool at all — no setting turns it back on.
 It is caught from the `Amoblado` spec row, the description, or the title, whichever
 the portal bothered to fill in.
 
-**A grade that means something.** Every listing gets a 0–100 **percentile
-against the current pool**: `A 94` beats 94% of what is listed right now. Five
-components — value against the zone, net cost, walk to the Metro, size,
-amenities — with weights you control.
+**A grade that means something.** Every listing is scored **against your
+preferences and nothing else**, so `A 82` means it met what you asked for and beat
+some of it — not that it won a bad week. Eleven components — value against the
+zone, net cost, walk to the Metro, size, amenities, security, floor, Metro line,
+commute, antigüedad, traits — each on the same curve out of 100: **80** on your
+target, **40** on the hard bound you set, **100** a full span better than the
+target, and **0** two spans past the bound. Meeting a target is deliberately not
+full marks; the last fifth of every component is earned only by beating it, which
+is why 80 is a very good flat. The exception is a component that can only be
+matched — the conserjería you wanted, your best Metro line, carrying none of your
+dislikes — which scores the full 100, because for those there is nothing better
+than met. Weights you control, and the same listing grades the same tomorrow.
+
+A card carries ✅ when it is at or past **every target it could be scored on** —
+nothing compromised. Past **100** it has gone further and beaten those targets
+across the board, and the card opens with a row of 💎 so it cannot be scrolled
+past. Neither is common: nothing in the pool today earns either.
 
 ```
-grade  on   commune      area  floor  rent    gastos        est  bod  net     metro              walk
-A 99   5/5  providencia  43.0  9      600000  120000 (def)  0    1    690000  Manuel Montt       3
-A 97   5/5  providencia  42.0  11     653938  160000        1    1    723938  Pedro de Valdivia  3
-C 64   5/5  providencia  52.0  22     690000  80000         0    0    770000  Pedro de Valdivia  3
+grade  on     commune      area  floor  rent    gastos        est  bod  net     metro              walk
+A 87   9/9    providencia  43.0  9      600000  120000 (def)  0    1    690000  Manuel Montt       3
+B 79   9/9    providencia  42.0  11     653938  160000        1    1    723938  Pedro de Valdivia  3
+C 64*  7/9    providencia  52.0  22     690000  80000         0    0    770000  Pedro de Valdivia  3
 ```
 
 ## Quick start
@@ -90,7 +103,7 @@ a channel, or as a reply to it in a plain group:
 | Button | Command | Effect |
 | --- | --- | --- |
 | ⭐ Me interesa | `/like` | Marks the listing interesting. The card gains a ⭐. |
-| 🚫 Descartar | `/dislike` | Marks it out. The card gains a 🚫, loses everything below its price, and the listing leaves the pool: never announced again, gone from `show`, and no longer moving the percentiles everything else is graded against. Not even `resend` brings it back. |
+| 🚫 Descartar | `/dislike` | Marks it out. The card gains a 🚫, loses everything below its price, and the listing leaves the pool: never announced again and gone from `show`. Not even `resend` brings it back. |
 | ↩️ deshacer | — | Undoes whichever verdict was given: the listing goes back to unrated and the card is redrawn whole. |
 
 A verdict is changed by undoing it and giving the other one — the card only ever
@@ -158,7 +171,7 @@ depas/
   fetch.py       HTTP session with retries and a polite delay
   store.py       SQLite: upsert, price history, migrations
   detail.py      detail-page specs → columns + a features JSON blob
-  grade.py       percentile scoring
+  grade.py       scoring against your preferences
   metro.py       126 Santiago Metro stations (OpenStreetMap), distance fallback
   commute.py     travel time to your own locations, routed over buses and Metro
   uf.py          UF → CLP, so mixed-currency listings compare
@@ -206,8 +219,9 @@ Found the hard way, and handled in code:
   August is that August, not next year's.
 - **Assetplan's headline price is a promotion**, typically half of one month.
   The standing rent is the other figure, and that is the one stored.
-- Listings graded on partial data are marked `*` with an `on` column, so a high
-  score earned by dodging weak axes is visible rather than trusted.
+- Listings graded on partial data are marked `*` with an `on` column, and their
+  score is shrunk toward 40 in proportion to what they left unanswered — silence
+  is the one thing that cannot buy a good grade.
 
 ## Configuration
 
@@ -267,12 +281,14 @@ until you do, and says so: posting an alert without one raises rather than guess
 | --- | --- |
 | `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME` | Monthly CLP you would collect subletting. Default 0 — net then equals total, rather than inventing a market rate. |
 | `DEPAS_*_WEIGHT` | Relative weight per grading component. Default 1 each. |
-| `DEPAS_FURNISHED`, `DEPAS_TOP_FLOOR` | What a yes/no property does to a listing: `exclude` drops it (and keeps it out of the pool the others are ranked against), `penalise` only costs it score, `ignore` stops reading it. Defaults reproduce the old hardcoded behaviour — amoblado excluded, top floor docked. |
+| `DEPAS_FURNISHED`, `DEPAS_TOP_FLOOR` | What a yes/no property does to a listing: `exclude` drops it from the pool, `penalise` docks 20 points off the component it belongs to, `ignore` stops reading it. Defaults reproduce the old hardcoded behaviour — amoblado excluded, top floor docked. |
+| `DEPAS_GRADE_MIN` | Lowest grade worth a card. The scale is absolute, so 80 is "everything I asked for" and the number is comparable across weeks. |
+| `DEPAS_AMENITIES_TARGET` | How many of the nine amenities you expect. Full marks there, more still pays, and `0` switches the component off. Default 4. |
 | `DEPAS_COMMUNES`, `DEPAS_COST_MAX`, `DEPAS_BEDROOMS_MIN` | What the scheduled `watch` pass scrapes. The rent ceiling used while crawling is derived from the cost budget, so there is no separate asking-rent setting. |
 | `DEPAS_AVAILABLE_BY` | Latest move-in date you would accept, `YYYY-MM-DD`. A listing that only frees up after it is not alerted on; one that never stated a date still is, because most portals simply do not publish the field. |
-| `DEPAS_AGE_TARGET` | Ideal antigüedad in years. Defaults to **25 even when unset** — unlike the other targets, leaving it blank does not switch the component off. Full marks at or under it, then the score falls away; never a cutoff, and an undeclared antigüedad is left unscored rather than assumed old. |
+| `DEPAS_AGE_TARGET` | Ideal antigüedad in years. Defaults to **25 even when unset** — unlike the other targets, leaving it blank does not switch the component off. Newer than it earns score, older loses it; never a cutoff, and an undeclared antigüedad is left unscored rather than assumed old. |
 | `DEPAS_LOCATIONS` | `name,lat,lon` per place you need to reach, `;`-separated, any number of them. |
-| `DEPAS_COMMUTE_TARGET`, `DEPAS_COMMUTE_MAX` | Minutes to the location a listing reaches worst, by whichever of walking, bus and Metro is fastest. Full marks at or under the target, no alert over the ceiling. |
+| `DEPAS_COMMUTE_TARGET`, `DEPAS_COMMUTE_MAX` | Minutes to the location a listing reaches worst, by whichever of walking, bus and Metro is fastest. The target scores 80, the ceiling 40 — and the ceiling is also the point past which there is no alert. |
 | `DEPAS_CURRENT_HOME` | Your own apartment as one JSON object, which `/compare` sets a listing against and which `DEPAS_CURRENT_COST` falls back to. Requires `price_clp`, `common_expenses`, `area_m2`, `lat`, `lon`. |
 | `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. Environment only — it says where the settings live, so it cannot be one of them. |
 | `TELEGRAM_BOT_TOKEN` | From @BotFather. Environment only: a credential does not belong in the table beside the data. |

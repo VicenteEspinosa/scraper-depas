@@ -18,6 +18,8 @@ def _save(connection, external_id, **detail):
 def pool(tmp_path):
     """Three identical listings but for the trait each one carries."""
     connection = connect(tmp_path / "test.db")
+    # A penalty is docked inside a component, so the component has to be switched on.
+    store_preference(connection, "DEPAS_FLOOR_TARGET", "5")
     _save(connection, "plain", floor=3, building_floors=10)
     _save(connection, "furnished", floor=3, building_floors=10, furnished=1)
     _save(connection, "top", floor=10, building_floors=10)
@@ -31,9 +33,9 @@ def _pooled(connection):
 
 def _scores(connection):
     prefs = Preferences.load(connection)
-    rows = [dict(row) for row in connection.execute(pool_query(prefs))]
-    scale = Scale(rows, prefs)
-    return {row["external_id"]: scale.grade(row).score for row in rows}
+    scale = Scale(prefs)
+    return {row["external_id"]: scale.grade(dict(row)).score
+            for row in connection.execute(pool_query(prefs))}
 
 
 @pytest.mark.parametrize("disposition, expected", [
@@ -69,23 +71,23 @@ def test_an_ignored_trait_costs_nothing(pool):
 def test_a_listing_that_answers_nothing_is_not_scored_on_traits(pool):
     """Silence is not the same as not having the trait, so it must not earn a free pass."""
     store_preference(pool, "DEPAS_FURNISHED", "penalise")
-    prefs = Preferences.load(pool)
-    rows = [dict(row) for row in pool.execute(pool_query(prefs))]
 
-    graded = Scale(rows, prefs).grade({"net_monthly_clp": 500_000})
+    graded = Scale(Preferences.load(pool)).grade({"net_monthly_clp": 500_000})
 
     assert "traits" not in graded.parts
 
 
 def test_the_top_floor_penalty_stays_inside_the_floor_component(pool):
-    """It competes against the height shortfall, where its size means something."""
+    """It competes against the height the flat already earned, where its size means something."""
     prefs = Preferences.load(pool)
-    rows = [dict(row) for row in pool.execute(pool_query(prefs))]
+    scale = Scale(prefs)
+    top = next(dict(row) for row in pool.execute(pool_query(prefs))
+               if row["external_id"] == "top")
 
-    graded = Scale(rows, prefs).grade(next(r for r in rows if r["external_id"] == "top"))
+    graded = scale.grade(top)
 
     assert "traits" not in graded.parts
-    assert graded.parts["floor"] < 50
+    assert graded.parts["floor"] < scale.grade(top | {"building_floors": 11}).parts["floor"]
 
 
 def test_an_unknown_disposition_is_refused(pool):

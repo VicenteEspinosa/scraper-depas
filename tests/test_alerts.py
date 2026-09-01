@@ -73,7 +73,7 @@ def test_the_card_escapes_html_and_keeps_the_link(connection):
            "price_clp": 500_000, "common_expenses": 100_000, "url": "https://x/1?a=1&b=2",
            "nearest_station": "Ñuble <test>", "walk_minutes": 5}
 
-    card = format_listing(row, Scale([row], prefs()).grade(row), prefs())
+    card = format_listing(row, Scale(prefs()).grade(row), prefs())
 
     assert "&lt;test&gt;" in card and "<test>" not in card
     assert 'href="https://x/1?a=1&amp;b=2"' in card
@@ -86,7 +86,7 @@ def test_the_card_shows_the_publication_title():
     row = {"commune": "nunoa", "title": "Depto 2D & luminoso", "area": 50.0,
            "net_monthly_clp": 600_000, "price_clp": 500_000, "url": "https://x/1"}
 
-    card = format_listing(row, Scale([row], prefs()).grade(row), prefs())
+    card = format_listing(row, Scale(prefs()).grade(row), prefs())
 
     assert "<i>Depto 2D &amp; luminoso</i>" in card
     # No amount published: the assumed default is shown, labelled, and never a dash.
@@ -101,7 +101,7 @@ def test_the_card_labels_a_published_gasto_comun_as_published():
     row = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000,
            "price_clp": 500_000, "common_expenses": 80_000, "url": "https://x/1"}
 
-    card = format_listing(row, Scale([row], prefs()).grade(row), prefs())
+    card = format_listing(row, Scale(prefs()).grade(row), prefs())
 
     assert "arriendo + $80.000 gastos comunes" in card
     assert "por defecto" not in card
@@ -117,7 +117,7 @@ def test_a_discarded_card_is_cut_down_to_what_identifies_it():
            "price_clp": 500_000, "common_expenses": 100_000, "url": "https://x/1",
            "nearest_station": "Ñuble", "walk_minutes": 5, "has_pool": 1,
            "published_days_ago": 3}
-    scale = Scale([row], prefs())
+    scale = Scale(prefs())
 
     discarded = format_listing(row | {"interest": -1}, scale.grade(row), prefs())
 
@@ -331,15 +331,49 @@ def test_the_card_marks_how_complete_the_grade_is(monkeypatch):
 
     monkeypatch.setenv("DEPAS_FLOOR_TARGET", "5")
     complete = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000,
-                "price_clp": 600_000, "url": "https://x/1", "walk_minutes": 5, "floor": 6}
+                "price_clp": 600_000, "url": "https://x/1", "walk_minutes": 5, "floor": 6,
+                "age": 10, "has_elevator": 1, "price_per_m2_uf_effective": 0.30,
+                "zone_price_per_m2_uf_effective": 0.35}
     thin = complete | {"floor": None, "url": "https://x/2"}
-    scale = Scale([complete, thin], prefs())
+    scale = Scale(prefs())
 
     full_card = format_listing(complete, scale.grade(complete), prefs())
     thin_card = format_listing(thin, scale.grade(thin), prefs())
 
     assert COMPLETE_MARK in full_card and PARTIAL_MARK not in full_card
     assert PARTIAL_MARK in thin_card and COMPLETE_MARK not in thin_card
+
+
+def test_a_grade_past_a_hundred_opens_with_a_banner(monkeypatch):
+    """Beating every target across the board is the whole point, so it cannot be missed."""
+    from depas.grade import Scale
+    from depas.telegram import FLAWLESS_BANNER, FLAWLESS_SCORE
+
+    monkeypatch.setenv("DEPAS_COST_TARGET", "800000")
+    monkeypatch.setenv("DEPAS_COST_MAX", "1000000")
+    row = {"commune": "nunoa", "url": "https://x/1", "net_monthly_clp": 500_000,
+           "price_clp": 500_000, "age": 0, "has_elevator": 1, "has_concierge": 1,
+           "has_heating": 1, "has_air_conditioning": 1, "has_pool": 1,
+           "price_per_m2_uf_effective": 0.20, "zone_price_per_m2_uf_effective": 0.30}
+    grade = Scale(prefs()).grade(row)
+
+    card = format_listing(row, grade, prefs())
+
+    assert grade.score >= FLAWLESS_SCORE
+    assert card.startswith(FLAWLESS_BANNER)
+
+
+def test_an_ordinary_grade_gets_no_banner():
+    """The banner has to stay rare, or it stops meaning anything."""
+    from depas.grade import Scale
+    from depas.telegram import FLAWLESS_BANNER
+
+    row = {"commune": "nunoa", "url": "https://x/1", "net_monthly_clp": 900_000,
+           "price_clp": 900_000, "age": 40}
+
+    card = format_listing(row, Scale(prefs()).grade(row), prefs())
+
+    assert FLAWLESS_BANNER not in card
 
 
 def test_a_test_card_is_marked_as_one():
@@ -349,7 +383,7 @@ def test_a_test_card_is_marked_as_one():
 
     row = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000,
            "price_clp": 600_000, "url": "https://x/1"}
-    scale = Scale([row], prefs())
+    scale = Scale(prefs())
 
     assert format_listing(row, scale.grade(row), prefs(), is_test=True).startswith(TEST_MARK)
     assert TEST_MARK not in format_listing(row, scale.grade(row), prefs())
@@ -389,7 +423,7 @@ def test_the_card_carries_the_listing_number(connection):
                               bedrooms=2, area_m2=50.0, price_clp=600_000)])
     row = dict(connection.execute("SELECT * FROM listings_ranked").fetchone())
 
-    card = format_listing(row, Scale([row], prefs()).grade(row), prefs())
+    card = format_listing(row, Scale(prefs()).grade(row), prefs())
 
     assert f"[{row['id']}]" in card
     assert row["id"] == 1
@@ -402,7 +436,7 @@ def test_a_listing_without_a_commune_leaves_no_dangling_separator():
     row = {"id": 7, "commune": None, "area": 50.0, "net_monthly_clp": 600_000,
            "price_clp": 600_000, "url": "https://x/1"}
 
-    header = format_listing(row, Scale([row], prefs()).grade(row), prefs()).splitlines()[0]
+    header = format_listing(row, Scale(prefs()).grade(row), prefs()).splitlines()[0]
 
     assert "·  ·" not in header
     assert header.endswith("<code>[7]</code>")
@@ -511,7 +545,7 @@ def test_the_card_shows_the_age_and_flags_it_when_over_target(monkeypatch):
     young = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000, "age": 8,
              "price_clp": 600_000, "url": "https://x/1"}
     old = young | {"age": 44, "url": "https://x/2"}
-    scale = Scale([young, old], prefs())
+    scale = Scale(prefs())
 
     assert "8 años" in format_listing(young, scale.grade(young), prefs())
     assert "44 años, sobre los 25" in format_listing(old, scale.grade(old), prefs())

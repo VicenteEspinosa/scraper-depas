@@ -24,10 +24,10 @@ class Trait:
     penalising is a component scored per listing, and the two must agree on every row:
     a listing excluded for a trait is the same listing penalised for it.
 
-    `component` is where a penalty lands. Most traits have no natural home and share
-    `traits`, where they count equally -- a percentile only sees the order, so a size
-    would do nothing. One that belongs to an existing component says so and brings a
-    `penalty`, which there competes against a continuous score and does mean something.
+    `component` is where a penalty lands, and `penalty` is what it costs in points off
+    that component's score. Most traits have no natural home and share `traits`; one
+    that belongs to an existing component says so and is docked there, competing
+    against whatever that component already measured.
     """
 
     setting: str
@@ -36,7 +36,7 @@ class Trait:
     help: str
     default: str
     component: str = "traits"
-    penalty: float = 1.0
+    penalty: float = 20.0
 
 
 def _is_furnished(row: dict) -> bool:
@@ -66,7 +66,7 @@ TRAITS: tuple[Trait, ...] = (
           default=PENALISE,
           # Docked inside `floor`, on top of whatever the height already cost: a
           # penthouse stays worse than the identical unit one floor down.
-          component="floor", penalty=0.5),
+          component="floor"),
 )
 
 BY_SETTING = {trait.setting: trait for trait in TRAITS}
