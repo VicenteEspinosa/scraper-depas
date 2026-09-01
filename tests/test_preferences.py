@@ -235,6 +235,9 @@ def test_a_fresh_database_comes_up_configured(tmp_path, monkeypatch):
 
     assert prefs.communes()
     assert prefs.cost.maximum is not None
+    # Placeholders, but real ones: without any the commute component never scores and
+    # the ceiling filters nothing, so a fresh clone would look like it ignored both.
+    assert len(prefs.locations()) == 2
 
 
 def test_every_declared_setting_parses_its_own_example():
