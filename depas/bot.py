@@ -15,9 +15,9 @@ from depas.store import (DISLIKE, LIKE, card_for_message, card_for_thread, pool_
                          connect, link_thread, remember_card, save, save_detail,
                          set_interest)
 from depas.uf import normalize, stored_uf
-from depas.telegram import (DISLIKE_BUTTON, LIKE_BUTTON, answer_callback, call, edit_buttons,
-                            edit_listing, format_comparison, format_listing, reply, send_buttons,
-                            send_listing, verdict_buttons)
+from depas.telegram import (DISLIKE_BUTTON, LIKE_BUTTON, UNDO_BUTTON, answer_callback, call,
+                            edit_buttons, edit_listing, format_comparison, format_listing, reply,
+                            send_buttons, send_listing, verdict_buttons)
 
 POLL_TIMEOUT = 30
 # Telegram and the portals both blip. A blip should cost one poll, not the process:
@@ -258,8 +258,9 @@ def _compare(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
           thread, message["message_id"])
 
 
-BUTTONS = {LIKE_BUTTON: LIKE, DISLIKE_BUTTON: DISLIKE}
-TOAST = {LIKE: "⭐ anotado como interesante", DISLIKE: "🚫 descartado, no vuelve a aparecer"}
+BUTTONS = {LIKE_BUTTON: LIKE, DISLIKE_BUTTON: DISLIKE, UNDO_BUTTON: None}
+TOAST = {LIKE: "⭐ anotado como interesante", DISLIKE: "🚫 descartado, no vuelve a aparecer",
+         None: "↩️ veredicto deshecho, la tarjeta vuelve como estaba"}
 
 
 def _pressed_card(connection: sqlite3.Connection, message: dict, listing: dict) -> dict:
@@ -288,10 +289,10 @@ def _handle_callback(connection: sqlite3.Connection, callback: dict,
                      prefs: Preferences) -> None:
     """A button pressed on a card: the same verdict, with nothing typed and no reply posted."""
     action, _, listing_id = (callback.get("data") or "").partition(":")
-    interest = BUTTONS.get(action)
-    if interest is None or not listing_id.isdigit():
+    if action not in BUTTONS or not listing_id.isdigit():
         answer_callback(callback["id"], "botón no reconocido")
         return
+    interest = BUTTONS[action]
     listing = connection.execute(
         "SELECT portal, external_id FROM listings WHERE rowid = ?", (int(listing_id),)
     ).fetchone()

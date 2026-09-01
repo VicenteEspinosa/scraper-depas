@@ -107,6 +107,30 @@ def test_the_card_labels_a_published_gasto_comun_as_published():
     assert "por defecto" not in card
 
 
+def test_a_discarded_card_is_cut_down_to_what_identifies_it():
+    """A dislike is final, so the card keeps what says which listing it was and drops
+    the detail that was only there to decide with."""
+    from depas.grade import Scale
+
+    row = {"id": 7, "commune": "nunoa", "title": "Depto luminoso", "bedrooms": 2,
+           "bathrooms": 1, "area": 50.0, "floor": 8, "age": 5.0, "net_monthly_clp": 600_000,
+           "price_clp": 500_000, "common_expenses": 100_000, "url": "https://x/1",
+           "nearest_station": "Ñuble", "walk_minutes": 5, "has_pool": 1,
+           "published_days_ago": 3}
+    scale = Scale([row], prefs())
+
+    discarded = format_listing(row | {"interest": -1}, scale.grade(row), prefs())
+
+    assert discarded.startswith("🚫 ")
+    assert discarded.splitlines()[1:] == [
+        "<i>Depto luminoso</i>",
+        "🏠 2D · 1B · 50 m² · piso 8 · 5 años",
+        "💰 <b>$600.000</b> neto al mes",
+        "",
+        '<a href="https://x/1">Ver aviso →</a>',
+    ]
+
+
 def test_a_listing_with_a_photo_is_sent_as_one(monkeypatch):
     """sendPhoto carries the card as a caption; without an image it falls back to text."""
     calls = []
@@ -210,6 +234,21 @@ def test_a_reply_inside_a_comment_thread_stays_in_it(monkeypatch):
 
     assert calls[0]["message_thread_id"] == 77
     assert "message_thread_id" not in calls[1]
+
+
+def test_the_verdict_keyboard_is_posted_under_the_card(monkeypatch):
+    """A discussion group is not a forum: only a reply to Telegram's copy of the card
+    lands the buttons in that card's thread instead of loose in the group."""
+    calls = []
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr("depas.telegram.call",
+                        lambda method, **params: calls.append(params) or {})
+
+    from depas.telegram import send_buttons, verdict_buttons
+
+    send_buttons("-1002", "¿Qué te parece?", 77, verdict_buttons(3))
+
+    assert calls[0]["reply_parameters"] == {"message_id": 77}
 
 
 def test_requirements_gate_which_listings_are_announced(connection, sent, monkeypatch):
