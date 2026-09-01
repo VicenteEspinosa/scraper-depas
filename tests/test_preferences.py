@@ -6,7 +6,8 @@ import pytest
 
 from depas.cli import _announce, _requirement_clauses
 from depas.models import Listing
-from depas.preferences import (BOOTSTRAP, DEFAULTED, SET, SETTINGS, UNSET, Preferences,
+from depas.config import defaults
+from depas.preferences import (DEFAULTED, SET, SETTINGS, UNSET, Preferences,
                                check_environment, clear_preference, described,
                                seed_from_env, set_preference, setting)
 from depas.store import connect, forget_preference, save, save_detail, store_preference
@@ -204,14 +205,39 @@ def test_clearing_the_sublet_income_moves_it_back(connection):
 # -- the registry itself ---------------------------------------------------------
 
 
-def test_every_documented_setting_is_declared():
-    """.env.example is the tour of what can be configured; drift there is a missing knob."""
-    declared = {declared.name for declared in SETTINGS}
-    example = (Path(__file__).resolve().parents[1] / ".env.example").read_text()
-    documented = {line.split("=")[0].strip() for line in example.splitlines()
-                  if "=" in line and not line.startswith("#")}
+SEED_FILE = Path(__file__).resolve().parents[1] / "seed.env"
 
-    assert documented - set(BOOTSTRAP) <= declared
+
+@pytest.fixture
+def seeded(monkeypatch):
+    """The real seed.env, which the hermetic fixture otherwise hides from every test."""
+    monkeypatch.setattr("depas.config.SEED_FILE", SEED_FILE)
+    return defaults()
+
+
+def test_the_seed_file_only_names_settings_that_exist(seeded):
+    """seed.env is applied verbatim, so a stale name there is a knob that silently does nothing."""
+    assert seeded
+    assert set(seeded) <= {declared.name for declared in SETTINGS}
+
+
+def test_every_seeded_value_survives_its_own_parser(seeded):
+    """A checked-in default that does not parse would stop the first connect of a fresh clone."""
+    for name, raw in seeded.items():
+        setting(name).parse(name, raw)
+
+
+def test_a_fresh_database_comes_up_configured(tmp_path, monkeypatch):
+    """The point of the file: a clone that was never configured still scrapes something."""
+    monkeypatch.setattr("depas.config.SEED_FILE", SEED_FILE)
+
+    prefs = Preferences.load(connect(tmp_path / "fresh.db"))
+
+    assert prefs.communes()
+    assert prefs.cost.maximum is not None
+    # Placeholders, but real ones: without any the commute component never scores and
+    # the ceiling filters nothing, so a fresh clone would look like it ignored both.
+    assert len(prefs.locations()) == 2
 
 
 def test_every_declared_setting_parses_its_own_example():

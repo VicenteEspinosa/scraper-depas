@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ENV_FILE = Path(".env")
+# The starting set a fresh database is seeded from, checked in so a clone that has
+# never been configured still scrapes something sensible. .env overrides it, and once
+# the table exists neither file is consulted again.
+SEED_FILE = Path("seed.env")
 
 # Most publishers simply omit gastos comunes, and treating that as zero makes a
 # listing look cheaper than any building it could actually be in. Assume a typical
@@ -24,22 +28,33 @@ DEFAULT_TARGET_AGE = 25
 HOME_REQUIRED = ("price_clp", "common_expenses", "area_m2", "lat", "lon")
 
 
-def _load_env_file() -> None:
-    """Read .env into the environment without overriding anything already exported."""
-    if not ENV_FILE.exists():
-        return
-    seen: set[str] = set()
-    for line in ENV_FILE.read_text().splitlines():
+def _parse(path: Path) -> dict[str, str]:
+    """`KEY=value` lines, comments and blanks skipped, in file order."""
+    found: dict[str, str] = {}
+    for line in path.read_text().splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         key, _, value = stripped.partition("=")
         key = key.strip()
         # A repeated key silently kept the first value, which hides a pasted-in update.
-        if key in seen:
-            raise ValueError(f"{ENV_FILE} defines {key} more than once; keep a single line")
-        seen.add(key)
-        os.environ.setdefault(key, value.strip())
+        if key in found:
+            raise ValueError(f"{path} defines {key} more than once; keep a single line")
+        found[key] = value.strip()
+    return found
+
+
+def _load_env_file() -> None:
+    """Read .env into the environment without overriding anything already exported."""
+    if not ENV_FILE.exists():
+        return
+    for key, value in _parse(ENV_FILE).items():
+        os.environ.setdefault(key, value)
+
+
+def defaults() -> dict[str, str]:
+    """The checked-in starting set, which anything the environment says overrides."""
+    return _parse(SEED_FILE) if SEED_FILE.exists() else {}
 
 
 def environment() -> dict[str, str]:

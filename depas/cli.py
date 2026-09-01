@@ -5,7 +5,7 @@ from collections.abc import Iterator
 
 from depas.bot import refresh_card, run as run_bot
 from depas.communes import SANTIAGO_PROVINCE, Commune
-from depas.commute import as_text as commute_text
+from depas.commute import as_text as commute_text, resolve_locations
 from depas.detail import infer_from_description
 from depas.config import DEFAULT_COMMON_EXPENSES
 from depas.fetch import Fetcher
@@ -445,9 +445,20 @@ def config_get(args: argparse.Namespace) -> None:
 
 def config_set(args: argparse.Namespace) -> None:
     """Write one setting, refusing anything that does not parse."""
+    written = " ".join(args.value)
+    # The only setting you can give in words: an address is geocoded here, once, so what
+    # gets stored is the coordinates every later read expects.
+    if args.name == "DEPAS_LOCATIONS":
+        fetcher = Fetcher()
+        try:
+            written, matched = resolve_locations(fetcher, written)
+        finally:
+            fetcher.close()
+        for match in matched:
+            print(f"  {match}")
     connection = connect()
     try:
-        value = store_preference(connection, args.name, " ".join(args.value))
+        value = store_preference(connection, args.name, written)
     finally:
         connection.close()
     print(f"{args.name} = {value!r}")
