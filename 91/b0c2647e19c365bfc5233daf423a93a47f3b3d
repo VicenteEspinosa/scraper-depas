@@ -1,0 +1,24 @@
+tests/test_deploy_script.py
+  s_f2ff6001677c53::t_2f1c0bdcbe688d 46
+  s_f2ff6001677c53::t_50aefe260c49b9 1-10,13-16,22-23,27-45,47-50,56-60
+  s_f2ff6001677c53::t_20e31dbd521f00 11,54
+  s_f2ff6001677c53::t_fab04c4541b1c6 12,17-21,24-26,51-53,55,61
+scripts/deploy-remote.sh
+  s_f2ff6001677c53::t_4a19d124961c3b 47-50,52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "91b0c2647e19c365bfc5233daf423a93a47f3b3d",
+  "prompts": {},
+  "sessions": {
+    "s_f2ff6001677c53": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d9a507a2-e1f9-4e8b-9f1f-72902af9d98b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
