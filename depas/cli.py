@@ -15,11 +15,12 @@ from depas.portals import PORTALS
 from depas.metro import nearest_station
 from depas.preferences import (DEFAULTED, SET, Preferences, check_environment, described,
                                seed_from_env, setting)
-from depas.store import (NOT_FURNISHED, NOT_REJECTED, POOL_QUERY, clear_notified, connect,
-                        forget_preference, mark_notified, refresh_commutes,
+from depas.store import (KEPT, clear_notified, connect, forget_preference,
+                        mark_notified, pool_query, refresh_commutes,
                         refresh_zone_benchmarks, remember_card, save, save_detail,
                         store_preference, sync_lease_income)
 from depas.telegram import chat_type, chats, format_listing, send_listing, verdict_buttons
+from depas.traits import EXCLUDE
 from depas.uf import normalize, stored_uf
 
 TOP_QUERY = """
@@ -135,13 +136,12 @@ FILTERS = (
 )
 
 
-def _build_query(args: argparse.Namespace) -> tuple[str, tuple[object, ...]]:
+def _build_query(args: argparse.Namespace,
+                 prefs: Preferences) -> tuple[str, tuple[object, ...]]:
     """Assemble the ranked query from whichever filters were actually given."""
-    # An unenriched listing would be graded on two components and beat everything,
-    # amoblado is never on the table however good the rest of the row looks, and a
-    # listing already turned down in the chat is not worth scanning past again.
-    conditions = ["is_project = 0", "detail_fetched_at IS NOT NULL", NOT_FURNISHED,
-                  NOT_REJECTED]
+    # The same pool the grading uses, so browsing and alerting agree on what is even
+    # a candidate, plus whatever the flags asked for on top.
+    conditions = [KEPT, *(f"({trait.keeps})" for trait in prefs.traits(EXCLUDE))]
     parameters: list[object] = []
     for name, condition in FILTERS:
         value = getattr(args, name)
@@ -195,14 +195,14 @@ def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) ->
     """Post enriched, un-announced listings that clear DEPAS_GRADE_MIN."""
     conditions, parameters = _requirement_clauses(prefs)
     candidates = connection.execute(
-        f"{POOL_QUERY} AND notified_at IS NULL"
+        f"{pool_query(prefs)} AND notified_at IS NULL"
         + "".join(f" AND {condition}" for condition in conditions),
         parameters,
     ).fetchall()
     if not candidates:
         return 0
 
-    pool = connection.execute(POOL_QUERY).fetchall()
+    pool = connection.execute(pool_query(prefs)).fetchall()
     scale = Scale([dict(row) for row in pool], prefs)
     minimum = prefs.value("DEPAS_GRADE_MIN") or 0
 
@@ -293,7 +293,7 @@ def test_alert(args: argparse.Namespace) -> None:
     connection = connect()
     prefs = Preferences.load(connection)
     try:
-        pool = [dict(row) for row in connection.execute(POOL_QUERY)]
+        pool = [dict(row) for row in connection.execute(pool_query(prefs))]
         if not pool:
             raise ValueError("nothing enriched to post; run `depas enrich` first")
         scale = Scale(pool, prefs)
@@ -345,12 +345,12 @@ def redraw(args: argparse.Namespace) -> None:
 def show(args: argparse.Namespace) -> None:
     connection = connect()
     prefs = Preferences.load(connection)
-    query, parameters = (args.sql, ()) if args.sql else _build_query(args)
+    query, parameters = (args.sql, ()) if args.sql else _build_query(args, prefs)
     rows = connection.execute(query, parameters).fetchall()
     if args.sql:
         _print_table(rows)
         return
-    pool = connection.execute(POOL_QUERY).fetchall()
+    pool = connection.execute(pool_query(prefs)).fetchall()
     scale = Scale([dict(row) for row in pool], prefs)
     # grading ranks against the whole pool, so the limit can only be applied afterwards
     graded = sorted((_summarise(row, scale) for row in rows),

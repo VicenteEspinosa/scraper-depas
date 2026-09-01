@@ -27,6 +27,7 @@ from datetime import UTC, date, datetime
 
 from depas.communes import Commune
 from depas.config import DEFAULT_TARGET_AGE, HOME_REQUIRED, Location, environment
+from depas.traits import DISPOSITIONS, PENALISE, TRAITS
 
 # ── how a setting's text becomes a value ────────────────────────────────────────
 # Every parser takes the raw string and either returns the value or raises ValueError
@@ -99,6 +100,14 @@ def _tiers(name: str, raw: str) -> list[list[str]]:
     return [tier for tier in tiers if tier]
 
 
+def _disposition(name: str, raw: str) -> str:
+    """What a trait does to a listing that has it, which is the only thing a trait sets."""
+    choice = raw.strip().lower()
+    if choice not in DISPOSITIONS:
+        raise ValueError(f"{name} must be one of {', '.join(DISPOSITIONS)}, got {raw!r}")
+    return choice
+
+
 def _home(name: str, raw: str) -> dict:
     try:
         home = json.loads(raw)
@@ -139,7 +148,14 @@ class Setting:
 # category: `walk` is minutes to the metro and `area` is square metres, which is what
 # DEPAS_WALK_* and DEPAS_AREA_* configure.
 WEIGHTED = ("value", "cost", "walk", "area", "amenities", "security", "floor",
-            "metro", "commute", "age")
+            "metro", "commute", "age", "traits")
+
+
+def _trait_settings() -> list[Setting]:
+    """One setting per trait, declared from the same registry the scoring reads."""
+    return [Setting(trait.setting, _disposition, trait.help,
+                    example=trait.default, default=trait.default)
+            for trait in TRAITS]
 
 
 def _weight(component: str) -> Setting:
@@ -245,6 +261,10 @@ SETTINGS: tuple[Setting, ...] = (
     # Graded off the listing alone, so they weigh something without configuring anything.
     _weight("value"),
     _weight("amenities"),
+
+    # -- yes/no properties, each either a deal-breaker or a dislike --------------------
+    *_trait_settings(),
+    _weight("traits"),
 
     # -- what a listing is priced and compared against --------------------------------
     Setting("DEPAS_PARKING_INCOME", _clp,
@@ -428,6 +448,13 @@ class Preferences:
 
     def security_wanted(self) -> str | None:
         return self.value("DEPAS_SECURITY_WANTED")
+
+    def traits(self, disposition: str) -> list:
+        """Every trait currently set to `exclude`, or to `penalise`."""
+        return [trait for trait in TRAITS if self.value(trait.setting) == disposition]
+
+    def penalised_traits(self) -> list:
+        return self.traits(PENALISE)
 
     def chat_id(self) -> str:
         """The Telegram chat alerts are posted to."""

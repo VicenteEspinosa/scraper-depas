@@ -6,7 +6,7 @@ from curl_cffi.requests.exceptions import RequestException
 from depas.bot import (GONE, NO_CARD, _handle, _handle_callback, _offset, _remember_offset,
                        find_links, run)
 from depas.models import Listing
-from depas.store import POOL_QUERY, connect, remember_card, save, save_detail
+from depas.store import connect, pool_query, remember_card, save, save_detail
 from tests.support import prefs
 
 
@@ -252,7 +252,7 @@ def test_a_dislike_takes_the_listing_out_of_the_pool(announced, answers):
     _handle(announced, None, _comment("/dislike"), prefs())
 
     assert _verdict(announced)["interest"] == -1
-    assert announced.execute(POOL_QUERY).fetchall() == []
+    assert announced.execute(pool_query(prefs())).fetchall() == []
 
 
 def test_the_card_itself_is_redrawn_with_the_verdict(announced, answers):

@@ -12,6 +12,7 @@ from depas.fetch import Fetcher
 from depas.detail import DETAIL_COLUMNS
 from depas.models import Listing
 from depas.preferences import Preferences, clear_preference, seed_from_env, set_preference
+from depas.traits import EXCLUDE
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
@@ -99,25 +100,27 @@ SELECT *,
 FROM listings;
 """
 
-# Amoblado is a hard no rather than a preference: a furnished flat is excluded
-# outright, and it is kept out of the pool everything else is ranked against too,
-# so percentiles are measured against apartments we would actually take. An
-# undeclared `furnished` is not a reason to drop a listing, but a title that says
-# amoblado is — the portals that publish no spec row for it still say it there.
-NOT_FURNISHED = ("COALESCE(furnished, 0) = 0"
-                 " AND (title IS NULL OR lower(title) NOT LIKE '%amoblad%')")
-
 # A listing turned down with /dislike is out for good: never announced again, and
 # kept out of the pool the others are ranked against, so a flat nobody would take
-# stops moving the percentiles the rest are graded on.
+# stops moving the percentiles the rest are graded on. Not a preference, unlike the
+# traits below: there is no reading of a /dislike that means "rank it lower".
 NOT_REJECTED = "COALESCE(interest, 0) >= 0"
 
-# Every listing worth ranking or alerting on: enriched, an actual unit rather than
-# a project, not furnished and not rejected. An unenriched listing would be graded
-# on two components and beat everything.
-POOL_QUERY = ("SELECT * FROM listings_ranked "
-              f"WHERE detail_fetched_at IS NOT NULL AND is_project = 0 "
-              f"AND {NOT_FURNISHED} AND {NOT_REJECTED}")
+# Enriched, an actual unit rather than a project, and not turned down. An unenriched
+# listing would be graded on two components and beat everything.
+KEPT = ("detail_fetched_at IS NOT NULL AND is_project = 0 "
+        f"AND {NOT_REJECTED}")
+
+
+def pool_query(prefs: Preferences) -> str:
+    """Every listing worth ranking or alerting on, minus the traits you rule out.
+
+    An excluded trait leaves the pool rather than merely scoring badly, so percentiles
+    are measured against apartments you would actually take -- which is why this is a
+    function of the preferences and not a constant.
+    """
+    excluded = [f"({trait.keeps})" for trait in prefs.traits(EXCLUDE)]
+    return f"SELECT * FROM listings_ranked WHERE {' AND '.join([KEPT, *excluded])}"
 
 
 def refresh_zone_benchmarks(connection: sqlite3.Connection) -> int:
