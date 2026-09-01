@@ -53,6 +53,9 @@ uv run depas enrich --limit 100
 uv run depas show --max-cost 800000 --max-walk 12 --min-bedrooms 2
 ```
 
+Wiring it to your own Telegram chat and running it hourly on a box of your own is
+[docs/SELF-HOSTING.md](docs/SELF-HOSTING.md), start to finish.
+
 ## How it works
 
 Scraping is two-stage, because detail pages are expensive:
@@ -302,7 +305,9 @@ in `schema_migrations`. Add a column by adding `002_*.sql` — never by editing
 
 ## Deploying
 
-Docker, on an arm64 host, built natively — see [docs/DEPLOY.md](docs/DEPLOY.md).
+Docker, on an arm64 host, built natively — [docs/DEPLOY.md](docs/DEPLOY.md) is how
+this one is deployed, and [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) is how to
+stand up your own from a clone.
 
 ## Tests
 
