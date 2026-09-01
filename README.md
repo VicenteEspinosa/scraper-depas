@@ -64,9 +64,16 @@ Scraping is two-stage, because detail pages are expensive:
 ### Judging a listing from the chat
 
 Every card comes with two buttons — **⭐ Me interesa** and **🚫 Descartar**.
-Pressing one records the verdict, ticks the button that won, and redraws the card.
-Nothing is typed and nothing is posted to the chat: the answer comes back as a
-toast, so a thread of judged listings stays a thread of listings.
+Pressing one records the verdict, redraws the card, and replaces both buttons with
+a single **↩️ deshacer**, which is the way back: it clears the verdict and puts the
+card and its two buttons back exactly as they were. Nothing is typed and nothing is
+posted to the chat: the answer comes back as a toast, so a thread of judged listings
+stays a thread of listings.
+
+A discarded card is also cut down to what says which listing it was — grade,
+commune, id, title, the 🏠 line, the price and the link. The photo stays, because
+Telegram cannot turn a photo message into a text one, and deleting the card to
+repost it would take its whole comment thread with it.
 
 Where the buttons sit depends on the chat, and not by choice. In a group they are
 on the card. In a channel with a discussion group they are the first comment in
@@ -83,10 +90,11 @@ a channel, or as a reply to it in a plain group:
 | Button | Command | Effect |
 | --- | --- | --- |
 | ⭐ Me interesa | `/like` | Marks the listing interesting. The card gains a ⭐. |
-| 🚫 Descartar | `/dislike` | Marks it out. The card gains a 🚫 and the listing leaves the pool: never announced again, gone from `show`, and no longer moving the percentiles everything else is graded against. Not even `resend` brings it back. |
+| 🚫 Descartar | `/dislike` | Marks it out. The card gains a 🚫, loses everything below its price, and the listing leaves the pool: never announced again, gone from `show`, and no longer moving the percentiles everything else is graded against. Not even `resend` brings it back. |
+| ↩️ deshacer | — | Undoes whichever verdict was given: the listing goes back to unrated and the card is redrawn whole. |
 
-Either verdict can be changed by pressing the other button; both stay live on the
-card.
+A verdict is changed by undoing it and giving the other one — the card only ever
+shows the buttons that make sense for the state it is in.
 
 ### Comparing a listing with where you live now
 
@@ -125,7 +133,7 @@ goes out bare and the keyboard is posted into the thread as soon as Telegram's c
 of the card shows up — the same update the thread id is learned from. A channel
 with no discussion group keeps its buttons on the card, since there are no comments
 there to lose. A press in the thread rates the card the thread hangs off, redraws
-that card in the channel, and ticks the keyboard where it sits, which is a separate
+that card in the channel, and redraws the keyboard where it sits, which is a separate
 message from the card.
 
 Both the buttons and the typed commands need the bot to be a member of the

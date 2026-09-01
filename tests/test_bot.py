@@ -357,7 +357,21 @@ def test_a_pressed_button_redraws_the_card_it_sat_on(announced, answers, pressed
     chat, message, text, buttons = answers.edited[0]
     assert (chat, message) == (str(CHANNEL), CARD)
     assert text.startswith("🚫 ")
-    assert buttons["inline_keyboard"][0][1]["text"] == "🚫 Descartado ✓"
+    assert buttons["inline_keyboard"][0][0]["text"] == "🚫 Descartado · ↩️ deshacer"
+
+
+def test_undoing_a_verdict_clears_it_and_brings_the_card_back(announced, answers, pressed):
+    """A verdict given by mistake has to be reversible from the keyboard that gave it."""
+    listing_id = _listing_id(announced)
+    _handle_callback(announced, _press(announced, f"dislike:{listing_id}"), prefs())
+
+    _handle_callback(announced, _press(announced, f"undo:{listing_id}"), prefs())
+
+    assert _verdict(announced)["interest"] is None
+    _, _, text, buttons = answers.edited[-1]
+    assert [button["text"] for button in buttons["inline_keyboard"][0]] \
+        == ["⭐ Me interesa", "🚫 Descartar"]
+    assert "gastos comunes" in text  # the card is whole again, not the discarded version
 
 
 def test_pressing_the_copy_in_the_group_edits_the_channel_post(announced, answers, pressed):
@@ -429,7 +443,7 @@ def test_the_pressed_keyboard_is_ticked_where_it_sits(announced, answers, presse
 
     chat, message, buttons = answers.ticked[0]
     assert (chat, message) == (str(GROUP), KEYBOARD)
-    assert buttons["inline_keyboard"][0][1]["text"] == "🚫 Descartado ✓"
+    assert buttons["inline_keyboard"][0][0]["text"] == "🚫 Descartado · ↩️ deshacer"
 
 
 def test_a_press_on_the_card_itself_is_not_ticked_twice(announced, answers, pressed):

@@ -268,8 +268,8 @@ LIKE, DISLIKE = 1, -1
 
 
 def set_interest(connection: sqlite3.Connection, portal: str, external_id: str,
-                 interest: int, rated_by: str | None = None) -> None:
-    """Record the verdict somebody gave a listing from the chat."""
+                 interest: int | None, rated_by: str | None = None) -> None:
+    """Record the verdict somebody gave a listing from the chat, or None to undo it."""
     connection.execute(
         "UPDATE listings SET interest = ?, rated_at = ?, rated_by = ? "
         "WHERE portal = ? AND external_id = ?",

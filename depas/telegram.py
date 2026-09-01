@@ -174,6 +174,14 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
     lines.append("🏠 " + " · ".join(part for part in spec if part))
 
     lines.append(f"💰 <b>{_clp(row.get('net_monthly_clp'))}</b> neto al mes")
+
+    link = f'\n<a href="{_escape(row["url"])}">Ver aviso →</a>'
+    # A discarded listing keeps only what says which one it was; everything below is
+    # there to decide with, and that decision has been made.
+    if row.get("interest") == -1:
+        lines.append(link)
+        return "\n".join(lines)
+
     gastos = row.get("common_expenses")
     breakdown = f"    ↳ {_clp(row.get('price_clp'))} arriendo"
     # Undeclared gastos comunes are estimated, and the net figure above already
@@ -227,7 +235,7 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
     if row.get("published_days_ago") is not None:
         lines.append(f"🕐 publicado hace {row['published_days_ago']} días")
 
-    lines.append(f'\n<a href="{_escape(row["url"])}">Ver aviso →</a>')
+    lines.append(link)
     return "\n".join(lines)
 
 
@@ -328,18 +336,21 @@ def format_comparison(row: dict[str, Any], grade: Any,
 CAPTION_LIMIT = 1024
 
 
-LIKE_BUTTON, DISLIKE_BUTTON = "like", "dislike"
+LIKE_BUTTON, DISLIKE_BUTTON, UNDO_BUTTON = "like", "dislike", "undo"
+UNDO_LABEL = {1: "⭐ Interesa · ↩️ deshacer", -1: "🚫 Descartado · ↩️ deshacer"}
 
 
 def verdict_buttons(listing_id: int, interest: int | None = None) -> dict[str, Any]:
-    """The keyboard under a card, ticked to show whatever verdict it already carries."""
+    """The keyboard under a card: both verdicts, or the way back from the one given."""
     # callback_data is capped at 64 bytes, so what travels is the listing's rowid --
     # stable for the life of a listing -- rather than the portal and its external id.
+    if interest is not None:
+        return {"inline_keyboard": [[
+            {"text": UNDO_LABEL[interest], "callback_data": f"{UNDO_BUTTON}:{listing_id}"},
+        ]]}
     return {"inline_keyboard": [[
-        {"text": "⭐ Interesa ✓" if interest == 1 else "⭐ Me interesa",
-         "callback_data": f"{LIKE_BUTTON}:{listing_id}"},
-        {"text": "🚫 Descartado ✓" if interest == -1 else "🚫 Descartar",
-         "callback_data": f"{DISLIKE_BUTTON}:{listing_id}"},
+        {"text": "⭐ Me interesa", "callback_data": f"{LIKE_BUTTON}:{listing_id}"},
+        {"text": "🚫 Descartar", "callback_data": f"{DISLIKE_BUTTON}:{listing_id}"},
     ]]}
 
 
