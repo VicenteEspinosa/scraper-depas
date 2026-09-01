@@ -236,6 +236,40 @@ SETTINGS: tuple[Setting, ...] = (
 
 BY_NAME: Mapping[str, Setting] = {setting.name: setting for setting in SETTINGS}
 
+# Read before a database can be opened, or too sensitive to sit in it, so these stay
+# in the environment and are not settings. Named here so a check over .env can tell
+# them apart from a key somebody misspelled.
+BOOTSTRAP = frozenset({"DEPAS_DB_PATH", "TELEGRAM_BOT_TOKEN"})
+CONFIGURABLE_PREFIXES = ("DEPAS_", "TELEGRAM_")
+
+
+def check_environment() -> tuple[int, list[str]]:
+    """Parse every setting .env declares, reporting what a seed would refuse or ignore.
+
+    Worth its own pass because a value only reaches the table through a parser: a .env
+    that no longer validates stops the process at `connect`, which on a box that
+    restarts its containers is a crash loop rather than an error somebody reads. Run
+    this before restarting anything, and the deploy fails instead of the bot.
+    """
+    found = environment()
+    problems, checked = [], 0
+    for declared in SETTINGS:
+        raw = found.get(declared.name, "").strip()
+        if not raw:
+            continue
+        checked += 1
+        try:
+            declared.parse(declared.name, raw)
+        except ValueError as error:
+            problems.append(str(error))
+    # The quieter failure: a misspelled or renamed key is not refused, it is skipped,
+    # and the setting it was meant to be simply never turns on.
+    problems += [f"{name} is not a setting, so it would be ignored"
+                 for name in sorted(found)
+                 if name.startswith(CONFIGURABLE_PREFIXES)
+                 and name not in BY_NAME and name not in BOOTSTRAP]
+    return checked, problems
+
 
 def setting(name: str) -> Setting:
     """The declaration for one setting, or a ValueError naming the likeliest typo."""
@@ -450,6 +484,6 @@ def described(preferences: Preferences) -> list[tuple[Setting, str | None, str]]
     return rows
 
 
-__all__ = ["BY_NAME", "DEFAULTED", "Preferences", "SET", "SETTINGS", "Setting", "UNSET",
-           "WEIGHTED", "clear_preference", "described", "seed_from_env", "set_preference",
-           "setting"]
+__all__ = ["BOOTSTRAP", "BY_NAME", "DEFAULTED", "Preferences", "SET", "SETTINGS", "Setting",
+           "UNSET", "WEIGHTED", "check_environment", "clear_preference", "described",
+           "seed_from_env", "set_preference", "setting"]

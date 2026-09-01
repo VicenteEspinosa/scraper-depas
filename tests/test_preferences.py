@@ -5,9 +5,9 @@ import pytest
 
 from depas.cli import _announce, _requirement_clauses
 from depas.models import Listing
-from depas.preferences import (DEFAULTED, SET, SETTINGS, UNSET, Preferences,
-                               clear_preference, described, seed_from_env, set_preference,
-                               setting)
+from depas.preferences import (BOOTSTRAP, DEFAULTED, SET, SETTINGS, UNSET, Preferences,
+                               check_environment, clear_preference, described,
+                               seed_from_env, set_preference, setting)
 from depas.store import connect, forget_preference, save, save_detail, store_preference
 
 
@@ -203,9 +203,6 @@ def test_clearing_the_sublet_income_moves_it_back(connection):
 # -- the registry itself ---------------------------------------------------------
 
 
-BOOTSTRAP = {"DEPAS_DB_PATH", "TELEGRAM_BOT_TOKEN"}
-
-
 def test_every_documented_setting_is_declared():
     """.env.example is the tour of what can be configured; drift there is a missing knob."""
     declared = {declared.name for declared in SETTINGS}
@@ -213,7 +210,7 @@ def test_every_documented_setting_is_declared():
     documented = {line.split("=")[0].strip() for line in example.splitlines()
                   if "=" in line and not line.startswith("#")}
 
-    assert documented - BOOTSTRAP <= declared
+    assert documented - set(BOOTSTRAP) <= declared
 
 
 def test_every_declared_setting_parses_its_own_example():
@@ -228,3 +225,43 @@ def test_every_declared_default_parses():
     for declared in SETTINGS:
         if declared.default is not None:
             declared.parse(declared.name, declared.default)
+
+
+# -- checking the environment before anything is restarted -----------------------
+
+
+def test_a_valid_environment_reports_no_problems(monkeypatch):
+    """The happy path a deploy takes: every value parses, nothing to say."""
+    monkeypatch.setenv("DEPAS_TARGET_COST", "850000")
+    monkeypatch.setenv("DEPAS_ALERT_COMMUNES", "nunoa,santiago")
+
+    assert check_environment() == (2, [])
+
+
+def test_a_value_the_parsers_refuse_is_reported_rather_than_raised(monkeypatch):
+    """Every problem at once: a deploy should not be a game of fixing them one per push."""
+    monkeypatch.setenv("DEPAS_ALERT_COMMUNES", "nunoa,las condes")
+    monkeypatch.setenv("DEPAS_AVAILABLE_BY", "01/11/2026")
+
+    _, problems = check_environment()
+
+    assert len(problems) == 2
+    assert any("las condes" in problem for problem in problems)
+    assert any("YYYY-MM-DD" in problem for problem in problems)
+
+
+def test_a_key_that_is_not_a_setting_is_reported_too(monkeypatch):
+    """The quieter failure: a misspelled name is skipped by the seed, never refused."""
+    monkeypatch.setenv("DEPAS_ALERT_MAX_PRICE", "900000")
+
+    _, problems = check_environment()
+
+    assert problems == ["DEPAS_ALERT_MAX_PRICE is not a setting, so it would be ignored"]
+
+
+def test_the_bootstrap_variables_are_not_mistaken_for_typos(monkeypatch):
+    """They are read before a database exists, so they are absent from the registry on purpose."""
+    monkeypatch.setenv("DEPAS_DB_PATH", "/data/depas.db")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:fake")
+
+    assert check_environment() == (0, [])

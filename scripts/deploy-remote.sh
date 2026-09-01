@@ -36,8 +36,19 @@ log "fast-forward checkout to ${GITHUB_SHA:0:7}"
 git fetch origin
 git reset --hard "$GITHUB_SHA"
 
-log "docker compose up -d --build"
-docker compose up -d --build
+log "docker compose build"
+docker compose build
+
+# The settings are parsed on the way into the database now, so a .env the current
+# parsers refuse stops `connect` -- and with `restart: unless-stopped` that is a crash
+# loop, not an error anybody reads. Checking here, after the build and before the
+# restart, turns it into a failed deploy with the old containers still serving. It
+# opens nothing and writes nothing.
+log "validate .env against the settings registry"
+docker compose run --rm depas-bot depas config check
+
+log "docker compose up -d"
+docker compose up -d
 
 echo "$GITHUB_SHA" > .last-deployed-sha
 log "deploy of ${GITHUB_SHA:0:7} applied"

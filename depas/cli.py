@@ -13,8 +13,8 @@ from depas.grade import Scale
 from depas.models import Listing, Query
 from depas.portals import PORTALS
 from depas.metro import nearest_station
-from depas.preferences import (DEFAULTED, SET, Preferences, described, seed_from_env,
-                               setting)
+from depas.preferences import (DEFAULTED, SET, Preferences, check_environment, described,
+                               seed_from_env, setting)
 from depas.store import (NOT_FURNISHED, NOT_REJECTED, POOL_QUERY, clear_notified, connect,
                         forget_preference, mark_notified, refresh_commutes,
                         refresh_zone_benchmarks, remember_card, save, save_detail,
@@ -463,6 +463,21 @@ def config_unset(args: argparse.Namespace) -> None:
     print(f"{args.name} unset; it now means {value!r}")
 
 
+def config_check(args: argparse.Namespace) -> None:
+    """Validate .env against the registry without opening the database.
+
+    Deliberately touches nothing: this is what a deploy runs after building the image
+    and before restarting anything, so a .env the new parsers refuse fails the deploy
+    while the old containers are still serving.
+    """
+    checked, problems = check_environment()
+    for problem in problems:
+        print(f"  {problem}")
+    if problems:
+        raise SystemExit(f"{len(problems)} problem(s) in the environment; nothing was changed")
+    print(f"{checked} settings in the environment, all valid")
+
+
 def config_import_env(args: argparse.Namespace) -> None:
     """Pull .env back into the table, which is otherwise only ever done once."""
     connection = connect()
@@ -548,6 +563,10 @@ def main() -> None:
     unsetter = actions.add_parser("unset", help="forget one setting, back to its default")
     unsetter.add_argument("name")
     unsetter.set_defaults(func=config_unset)
+
+    checker = actions.add_parser(
+        "check", help="validate .env against the registry, touching nothing")
+    checker.set_defaults(func=config_check)
 
     importer = actions.add_parser(
         "import-env", help="pull .env into the database again, after the initial seed")

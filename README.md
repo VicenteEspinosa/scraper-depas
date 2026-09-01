@@ -215,7 +215,13 @@ uv run depas config get DEPAS_TARGET_COST # one setting, with what it means
 uv run depas config set DEPAS_TARGET_COST 850000
 uv run depas config unset DEPAS_TARGET_COST   # back to its default, or off
 uv run depas config import-env --force        # pull .env in again, on purpose
+uv run depas config check                     # validate .env, touching nothing
 ```
+
+`config check` is what the deploy runs after building the image and before restarting
+anything: a value the parsers refuse would otherwise stop `connect()`, and with
+`restart: unless-stopped` that is a crash loop rather than an error somebody reads. It
+also names any `DEPAS_*` key that is not a setting, which the seed would silently skip.
 
 Every value is checked before it is stored, against the same declaration that
 `config get` prints — a commune that does not exist, a date that is not a date or a
@@ -230,7 +236,7 @@ opened or must not be stored beside the data: `TELEGRAM_BOT_TOKEN` and `DEPAS_DB
 | --- | --- |
 | `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME` | Monthly CLP you would collect subletting. Default 0 — net then equals total, rather than inventing a market rate. |
 | `DEPAS_WEIGHT_*` | Relative weight per grading component. Default 1 each. |
-| `DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MAX_PRICE`, `DEPAS_ALERT_MIN_BEDROOMS` | What the scheduled `watch` pass scrapes. |
+| `DEPAS_ALERT_COMMUNES`, `DEPAS_ALERT_MAX_COST`, `DEPAS_ALERT_MIN_BEDROOMS` | What the scheduled `watch` pass scrapes. The rent ceiling used while crawling is derived from the cost budget, so there is no separate asking-rent setting. |
 | `DEPAS_AVAILABLE_BY` | Latest move-in date you would accept, `YYYY-MM-DD`. A listing that only frees up after it is not alerted on; one that never stated a date still is, because most portals simply do not publish the field. |
 | `DEPAS_TARGET_AGE` | Ideal antigüedad in years. Defaults to **25 even when unset** — unlike the other targets, leaving it blank does not switch the component off. Full marks at or under it, then the score falls away; never a cutoff, and an undeclared antigüedad is left unscored rather than assumed old. |
 | `DEPAS_LOCATIONS` | `name,lat,lon` per place you need to reach, `;`-separated, any number of them. |
