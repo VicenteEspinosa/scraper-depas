@@ -530,3 +530,22 @@ def test_a_typed_value_carrying_a_tag_cannot_break_the_answer(connection, posted
     # The screen's own <b> is still there; what must not survive is the typed one.
     assert "<b>x" not in posted["sent"][0][0]
     assert "&lt;b&gt;x" in posted["sent"][0][0]
+
+
+def test_start_opens_the_menu_too(connection, posted):
+    """The START button a private chat shows is the first thing a new admin ever sends."""
+    from depas.bot import _handle
+
+    _handle(connection, None, _message("/start"), Preferences.load(connection))
+
+    assert "Configuración" in posted["sent"][0][0]
+
+
+def test_start_from_a_stranger_still_answers_with_their_id(connection, posted):
+    """Which is how somebody who has just found the bot gets what an admin needs to add."""
+    from depas.bot import _handle
+
+    _handle(connection, None, _message("/start", user_id=STRANGER),
+            Preferences.load(connection))
+
+    assert str(STRANGER) in posted["sent"][0][0]

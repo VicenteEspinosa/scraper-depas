@@ -349,7 +349,7 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
     if command == COMPARE:
         _compare(connection, fetcher, message, prefs)
         return
-    if command == configure.COMMAND:
+    if command in (configure.COMMAND, configure.START):
         configure.open_menu(connection, message, prefs)
         return
     # Read before the links below: an answer to a settings prompt is an address or a

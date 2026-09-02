@@ -460,9 +460,14 @@ def ask_value(chat_id: str, text: str, thread_id: int | None = None) -> dict[str
     """Ask for a value no keyboard can offer, as a reply the answer will quote back."""
     # force_reply is what makes the answer carry reply_to_message, which is where the
     # setting being edited is read back from -- there is no pending-edit state anywhere.
+    #
+    # Not `selective`: it targets only somebody @mentioned in the text or, where the
+    # bot's message is itself a reply, whoever it answers. This message is neither -- it
+    # is posted from a button press, which carries no message of the presser's to reply
+    # to -- so selective would target nobody and the reply box would open for no one.
     where: dict[str, Any] = {"message_thread_id": thread_id} if thread_id else {}
     return call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
-                reply_markup={"force_reply": True, "selective": True},
+                reply_markup={"force_reply": True},
                 link_preview_options={"is_disabled": True}, **where)
 
 

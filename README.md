@@ -121,6 +121,12 @@ of them, and its current value on the button so you can see what you are about t
 change. Each press writes immediately and takes effect on the next pass — nothing is
 restarted, because the bot reloads the preferences every poll.
 
+**Nothing to register.** `/config` works as soon as the bot is running — and so does
+`/start`, which is what the START button in a fresh private chat sends, so a person who
+has just found the bot gets an answer rather than silence. `/setcommands` in @BotFather
+is optional and only buys autocomplete; privacy mode has to be off for the group, which
+it already does to see pasted links at all.
+
 **Who may.** `DEPAS_ADMINS` holds the Telegram user ids allowed to edit, and it is
 checked on the message *and on every press*: in a group anybody can reach the buttons
 on somebody else's message. Being in the alert chat is deliberately not enough — a
@@ -205,7 +211,7 @@ message from the card.
 Both the buttons and the typed commands need the bot to be a member of the
 discussion group — that is where comments land, and now where the keyboards live,
 not the channel — and its privacy mode must be off in @BotFather, which it already
-needs to be to see pasted links at all. Registering the two commands with
+needs to be to see pasted links at all. Registering the commands with
 `/setcommands` is optional and only buys autocomplete.
 
 Anyone who can see the chat can press a button — there is no per-user check, which

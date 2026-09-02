@@ -32,6 +32,10 @@ from depas.telegram import answer_callback, ask_value, edit_menu, escape, send_m
 from depas.traits import DISPOSITIONS, EXCLUDE, IGNORE, PENALISE
 
 COMMAND = "/config"
+# What Telegram sends when somebody opens a private chat with the bot and presses the
+# START button it shows them. It is the first thing a new admin ever sends, so it opens
+# the menu too rather than going unanswered.
+START = "/start"
 # Every callback this module owns starts here, so `bot` can route a press without
 # knowing anything about the menu behind it.
 PREFIX = "k:"
@@ -854,5 +858,6 @@ def _coordinates(fetcher: Fetcher, address: str) -> tuple[float, float, str]:
     return float(lat), float(lon), matched[0].removeprefix("casa → ") if matched else address
 
 
-__all__ = ["COMMAND", "GROUPS", "KIND", "LABELS", "MENU", "PREFIX", "answer_prompt",
+__all__ = ["COMMAND", "GROUPS", "KIND", "LABELS", "MENU", "PREFIX", "START",
+           "answer_prompt",
            "group_screen", "kind", "main_screen", "open_menu", "press", "setting_screen"]
