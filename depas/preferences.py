@@ -164,7 +164,7 @@ class Setting:
 # category: `walk` is minutes to the metro and `area` is square metres, which is what
 # DEPAS_WALK_* and DEPAS_AREA_* configure.
 WEIGHTED = ("value", "cost", "walk", "area", "amenities", "security", "floor",
-            "metro", "commute", "age", "traits")
+            "metro", "commute", "age", "availability", "traits")
 
 
 def _trait_settings() -> list[Setting]:
@@ -206,10 +206,6 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("DEPAS_BEDROOMS_MIN", _whole,
             "Mínimo de dormitorios. Se aplica al buscar y otra vez al alertar.",
             example="2"),
-    Setting("DEPAS_AVAILABLE_BY", _day,
-            "Última fecha de entrega que aceptarías. Un aviso que no declara fecha nunca "
-            "pierde su alerta por esto.",
-            example="2026-11-01"),
     Setting("DEPAS_GRADE_MIN", _whole,
             "Nota mínima para publicar una tarjeta. La nota mide qué tanto se cumplen "
             "tus preferencias, así que 100 es cumplirlas todas y se puede pasar.",
@@ -269,6 +265,13 @@ SETTINGS: tuple[Setting, ...] = (
             "borrarlo no apaga la preferencia, vuelve al estándar de 25.",
             example="25", default=str(DEFAULT_TARGET_AGE)),
     _weight("age"),
+    Setting("DEPAS_AVAILABILITY_TARGET", _day,
+            "Fecha de entrega ideal. Todo lo que se desocupa entre hoy y esa fecha sirve, "
+            "y puntúa mejor mientras más cerca de ella; después cae rápido, porque una "
+            "semana tarde ya es un tramo entero. Nunca es un corte, y un aviso que no "
+            "declara fecha queda sin puntuar.",
+            example="2026-11-01"),
+    _weight("availability"),
     Setting("DEPAS_SECURITY_WANTED", _text,
             "Conserjería buscada. No es un corte: quien no la declara puntúa más bajo.",
             example="24 horas"),

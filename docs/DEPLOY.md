@@ -58,17 +58,23 @@ Requirements apply at two different points. The derived rent ceiling and
 `DEPAS_BEDROOMS_MIN` bound the scrape, so listings far outside budget never enter
 the database at all — but every requirement is re-checked when announcing, because
 enrichment can overwrite a card value (bedrooms included) with the detail page's.
-`DEPAS_COST_MAX`, `DEPAS_WALK_MAX`, `DEPAS_AREA_MIN`, `DEPAS_AVAILABLE_BY` and
-`DEPAS_COMMUTE_MAX` depend on the detail page, so they gate *alerts* instead — the
-listings are still stored and queryable.
+`DEPAS_COST_MAX`, `DEPAS_WALK_MAX`, `DEPAS_AREA_MIN` and `DEPAS_COMMUTE_MAX`
+depend on the detail page, so they gate *alerts* instead — the listings are still
+stored and queryable.
 
 The targets are not filters: at `DEPAS_COST_TARGET` or `DEPAS_WALK_TARGET` a listing
 scores 80 on that component, beating it earns the rest, and past the target the score
 degrades to 40 at the matching maximum. Nothing is excluded for being over target, it just
-ranks lower. `DEPAS_SECURITY_WANTED` and `DEPAS_FLOOR_TARGET` are preferences all
-the way — neither ever excludes. Many publishers declare no security type and most
-declare no floor, so filtering on either dropped listings for missing data rather
-than for being a bad fit; both cost score instead.
+ranks lower. `DEPAS_SECURITY_WANTED`, `DEPAS_FLOOR_TARGET` and
+`DEPAS_AVAILABILITY_TARGET` are preferences all the way — none of them ever
+excludes. Many publishers declare no security type, most declare no floor and most
+publish no entrega at all, so filtering on any of them dropped listings for missing
+data rather than for being a bad fit; they cost score instead. The entrega is the
+one scored on distance, and asymmetrically: everything free between today and the
+date you want is in play — 80 at the near end of that window, 100 on the date — while
+a week past the date already costs a whole span, because taking a flat early only
+overlaps with the rent you are already paying and taking it late leaves you nowhere
+to live.
 
 A listing that misses a requirement is left unstamped rather than marked notified,
 so a later price drop can still bring it into range. A listing that clears the

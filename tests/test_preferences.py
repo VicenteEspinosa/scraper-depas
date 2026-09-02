@@ -301,7 +301,7 @@ def test_a_valid_environment_reports_no_problems(monkeypatch):
 def test_a_value_the_parsers_refuse_is_reported_rather_than_raised(monkeypatch):
     """Every problem at once: a deploy should not be a game of fixing them one per push."""
     monkeypatch.setenv("DEPAS_COMMUNES", "nunoa,las condes")
-    monkeypatch.setenv("DEPAS_AVAILABLE_BY", "01/11/2026")
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "01/11/2026")
 
     _, problems = check_environment()
 
@@ -359,11 +359,26 @@ def test_a_parameter_only_declares_the_slots_it_has(connection):
     assert prefs.cost.minimum is None
 
 
-def test_the_rename_migration_lands_on_names_that_exist():
+def test_every_rename_migration_lands_on_names_that_exist():
     """A migration renaming a row to a name nothing declares would silently drop the value."""
-    sql = (Path(__file__).resolve().parents[1]
-           / "migrations" / "011_rename_preferences.sql").read_text()
-    renamed = re.findall(r"SET name = '([A-Z_]+)'", sql)
+    migrations = (Path(__file__).resolve().parents[1] / "migrations").glob("*.sql")
+    renamed = re.findall(r"SET name = '([A-Z_]+)'", "".join(
+        sql.read_text() for sql in migrations))
 
     assert renamed
     assert {name for name in renamed} <= {declared.name for declared in SETTINGS}
+
+
+def test_the_entrega_keeps_its_value_when_it_stops_being_a_bound(tmp_path):
+    """The date somebody set as a deadline is the date the new component scores against."""
+    path = tmp_path / "entrega.db"
+    old = connect(path)
+    old.execute("INSERT INTO preferences (name, value, updated_at) "
+                "VALUES ('DEPAS_AVAILABLE_BY', '2026-11-15', '2026-01-01')")
+    old.execute("DELETE FROM schema_migrations WHERE version = 12")
+    old.commit()
+    old.close()
+
+    prefs = Preferences.load(connect(path))
+
+    assert prefs.value("DEPAS_AVAILABILITY_TARGET") == "2026-11-15"

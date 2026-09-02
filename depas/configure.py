@@ -63,7 +63,6 @@ LABELS = {
     "DEPAS_ADMINS": "👥 Quién configura",
     "DEPAS_COMMUNES": "🗺️ Comunas",
     "DEPAS_BEDROOMS_MIN": "🛏️🔻 Dormitorios mín.",
-    "DEPAS_AVAILABLE_BY": "📅🔺 Entrega hasta",
     "DEPAS_GRADE_MIN": "🏅🔻 Nota mínima",
     "DEPAS_COST_MAX": "💰🔺 Techo de costo",
     "DEPAS_COST_TARGET": "💰🎯 Costo objetivo",
@@ -89,6 +88,8 @@ LABELS = {
     "DEPAS_FLOOR_WEIGHT": "🛗 Peso · piso",
     "DEPAS_AGE_TARGET": "🏗️🎯 Antigüedad ideal",
     "DEPAS_AGE_WEIGHT": "🏗️ Peso · antigüedad",
+    "DEPAS_AVAILABILITY_TARGET": "📅🎯 Entrega ideal",
+    "DEPAS_AVAILABILITY_WEIGHT": "📅 Peso · entrega",
     "DEPAS_AMENITIES_TARGET": "🏊🎯 Comodidades",
     "DEPAS_AMENITIES_WEIGHT": "🏊 Peso · comodidades",
     "DEPAS_SECURITY_WANTED": "🛎️ Conserjería",
@@ -101,10 +102,9 @@ LABELS = {
 # Group key, its heading, and the settings it holds in the order they are shown. Every
 # setting appears exactly once, which is what lets an editor know where its «Volver»
 # goes -- and the weights are all in «Pesos» rather than each beside the parameter it
-# scales, because a weight only means anything against the other ten.
+# scales, because a weight only means anything against the other eleven.
 MENU: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("search", "🔍 Búsqueda", ("DEPAS_COMMUNES", "DEPAS_BEDROOMS_MIN",
-                               "DEPAS_AVAILABLE_BY", "DEPAS_GRADE_MIN")),
+    ("search", "🔍 Búsqueda", ("DEPAS_COMMUNES", "DEPAS_BEDROOMS_MIN", "DEPAS_GRADE_MIN")),
     ("cost", "💰 Costo", ("DEPAS_COST_MAX", "DEPAS_COST_TARGET", "DEPAS_PARKING_INCOME",
                           "DEPAS_STORAGE_INCOME", "DEPAS_CURRENT_COST",
                           "DEPAS_CURRENT_HOME")),
@@ -112,7 +112,7 @@ MENU: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("commute", "🧭 Viajes", ("DEPAS_LOCATIONS", "DEPAS_COMMUTE_MAX",
                               "DEPAS_COMMUTE_TARGET")),
     ("flat", "🏠 Depto", ("DEPAS_AREA_MIN", "DEPAS_AREA_TARGET", "DEPAS_FLOOR_TARGET",
-                          "DEPAS_AGE_TARGET")),
+                          "DEPAS_AGE_TARGET", "DEPAS_AVAILABILITY_TARGET")),
     ("extras", "✨ Extras", ("DEPAS_AMENITIES_TARGET", "DEPAS_SECURITY_WANTED",
                              "DEPAS_FURNISHED", "DEPAS_TOP_FLOOR")),
     ("weights", "⚖️ Pesos", tuple(name for name in BY_NAME if name.endswith("_WEIGHT"))),

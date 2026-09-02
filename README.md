@@ -19,16 +19,17 @@ the portal bothered to fill in.
 
 **A grade that means something.** Every listing is scored **against your
 preferences and nothing else**, so `A 82` means it met what you asked for and beat
-some of it — not that it won a bad week. Eleven components — value against the
+some of it — not that it won a bad week. Twelve components — value against the
 zone, net cost, walk to the Metro, size, amenities, security, floor, Metro line,
-commute, antigüedad, traits — each on the same curve out of 100: **80** on your
-target, **40** on the hard bound you set, **100** a full span better than the
-target, and **0** two spans past the bound. Meeting a target is deliberately not
-full marks; the last fifth of every component is earned only by beating it, which
-is why 80 is a very good flat. The exception is a component that can only be
-matched — the conserjería you wanted, your best Metro line, carrying none of your
-dislikes — which scores the full 100, because for those there is nothing better
-than met. Weights you control, and the same listing grades the same tomorrow.
+commute, antigüedad, entrega, traits — each on the same curve out of 100: **80**
+on your target, **40** on the hard bound you set, **100** a full span better than
+the target, and **0** two spans past the bound. Meeting a target is deliberately
+not full marks; the last fifth of every component is earned only by beating it,
+which is why 80 is a very good flat. The exception is a component that can only be
+matched — the conserjería you wanted, your best Metro line, an entrega on the date
+you asked for, carrying none of your dislikes — which scores the full 100, because
+for those there is nothing better than met. Weights you control, and the same
+listing grades the same tomorrow.
 
 A card carries ✅ when it is at or past **every target it could be scored on** —
 nothing compromised. Past **100** it has gone further and beaten those targets
@@ -353,7 +354,7 @@ whatever was edited from the chat since.
 | `DEPAS_GRADE_MIN` | Lowest grade worth a card. The scale is absolute, so 80 is "everything I asked for" and the number is comparable across weeks. |
 | `DEPAS_AMENITIES_TARGET` | How many of the nine amenities you expect. Full marks there, more still pays, and `0` switches the component off. Default 4. |
 | `DEPAS_COMMUNES`, `DEPAS_COST_MAX`, `DEPAS_BEDROOMS_MIN` | What the scheduled `watch` pass scrapes. The rent ceiling used while crawling is derived from the cost budget, so there is no separate asking-rent setting. |
-| `DEPAS_AVAILABLE_BY` | Latest move-in date you would accept, `YYYY-MM-DD`. A listing that only frees up after it is not alerted on; one that never stated a date still is, because most portals simply do not publish the field. |
+| `DEPAS_AVAILABILITY_TARGET` | The move-in date you are aiming for, `YYYY-MM-DD`. Scored on distance rather than as a deadline, and the two sides are not the same: everything that frees up between **today and that date** is in play, worth 80 at the near end of the window and 100 on the date itself, while past the date the score falls a whole span per week — 80 a week late, 40 two weeks late, nothing at three. Taking a flat early only costs you the overlap; taking it late leaves you nowhere to live. Never a cutoff, and a listing that stated no date is left unscored on it, because most portals simply do not publish the field. |
 | `DEPAS_AGE_TARGET` | Ideal antigüedad in years. Defaults to **25 even when unset** — unlike the other targets, leaving it blank does not switch the component off. Newer than it earns score, older loses it; never a cutoff, and an undeclared antigüedad is left unscored rather than assumed old. |
 | `DEPAS_LOCATIONS` | `name,lat,lon` per place you need to reach, `;`-separated, any number of them. |
 | `DEPAS_COMMUTE_TARGET`, `DEPAS_COMMUTE_MAX` | Minutes to the location a listing reaches worst, by whichever of walking, bus and Metro is fastest. The target scores 80, the ceiling 40 — and the ceiling is also the point past which there is no alert. |

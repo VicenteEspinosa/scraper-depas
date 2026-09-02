@@ -17,6 +17,7 @@ points, and the last fifth is only ever earned by beating it. So the score reads
 """
 import json
 from dataclasses import dataclass
+from datetime import date
 
 from depas.metro import STATION_LINES
 # The components are exactly the things that carry a DEPAS_*_WEIGHT, so the registry
@@ -37,6 +38,10 @@ BREACHED = 40.0    # on the hard bound, one span the wrong side of the target
 BEST = 100.0       # one span the right side of it, and the most a component can score
 # Paying your zone's average UF/m2 is MET; this much off that average is a whole span.
 ZONE_SPAN = 0.20
+# Days past the move-in date you want that cost a whole span: a week late is already
+# everything you asked for and no more. Only the late side has a fixed span -- the early
+# one is measured against the window between today and that date.
+LATE_SPAN = 7
 # What meeting every target on complete data is worth on top, since the components
 # alone cannot say "and nothing at all was compromised".
 PERFECT_BONUS = 5.0
@@ -145,6 +150,26 @@ def _age(row: dict, prefs: Preferences) -> float | None:
     return _from_target(float(age), prefs.age.target, prefs.age.maximum)
 
 
+def _availability(row: dict, prefs: Preferences) -> float | None:
+    """Scored on how close the entrega lands to the date you want, from either side.
+
+    The two sides are not the same shape. Everything free between today and your date is
+    a flat you could actually take, so the whole of that window is one span and anything
+    in it reads as met or better -- the closer to the date, the better. Past the date
+    there is nowhere to live, so a week is a whole span on its own.
+    """
+    configured, stated = prefs.value("DEPAS_AVAILABILITY_TARGET"), row.get("available_from")
+    if configured is None or not stated:
+        return None
+    today, wanted = date.today(), date.fromisoformat(configured)
+    # A date already reached is entrega inmediata, not however long ago it was written.
+    frees_up = max(date.fromisoformat(stated), today)
+    # Early is measured against the whole window you are shopping in, which is always at
+    # least a day wide: an entrega before your date is one that is also after today.
+    span = (wanted - today).days if frees_up < wanted else LATE_SPAN
+    return _points(abs((frees_up - wanted).days) / span - 1)
+
+
 def _metro(row: dict, prefs: Preferences) -> float | None:
     """Your top tier is BEST, the next one MET, and the rest drop evenly to an unranked line."""
     tiers = prefs.metro_tiers()
@@ -190,7 +215,8 @@ def _traits(row: dict, prefs: Preferences) -> float | None:
 # special case for the one that happens not to consult any.
 SCORERS = {"value": _value, "cost": _cost, "walk": _walk, "area": _area,
            "amenities": _amenities, "security": _security, "floor": _floor, "metro": _metro,
-           "commute": _commute, "age": _age, "traits": _traits}
+           "commute": _commute, "age": _age, "availability": _availability,
+           "traits": _traits}
 
 
 def _applicable(prefs: Preferences) -> set[str]:
@@ -211,6 +237,7 @@ def _applicable(prefs: Preferences) -> set[str]:
         "metro": bool(prefs.metro_tiers()),
         "commute": prefs.commute.target is not None,
         "age": prefs.age.target is not None,
+        "availability": prefs.value("DEPAS_AVAILABILITY_TARGET") is not None,
         "traits": any(trait.component == "traits" for trait in prefs.penalised_traits()),
     }
     return {name for name in COMPONENTS if configured[name]}

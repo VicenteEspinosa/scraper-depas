@@ -1,4 +1,6 @@
 """A grade is measured against the preferences alone, so it never moves when the market does."""
+from datetime import date
+
 import pytest
 
 from depas.grade import BEST, BREACHED, COMPONENTS, MET, PERFECT_BONUS, Scale
@@ -278,3 +280,88 @@ def test_under_25_years_is_the_target_with_nothing_configured(monkeypatch):
     monkeypatch.delenv("DEPAS_AGE_TARGET", raising=False)
 
     assert Scale(prefs()).grade(_listing(age=25)).parts["age"] == MET
+
+
+@pytest.fixture
+def today(monkeypatch):
+    """Freeze the clock: an entrega already reached is read as of today, not as written."""
+    class Frozen(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 9, 1)
+
+    monkeypatch.setattr("depas.grade.date", Frozen)
+
+
+@pytest.mark.parametrize("stated, expected", [
+    ("2026-11-01", BEST),
+    ("2026-09-01", MET),
+    ("2026-11-08", MET),
+    ("2026-11-15", BREACHED),
+])
+def test_the_entrega_scores_on_how_close_it_lands(monkeypatch, today, stated, expected):
+    """The window from today to your date is one span; a week past it is another."""
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-11-01")
+
+    graded = Scale(prefs()).grade(_listing(available_from=stated))
+
+    assert graded.parts["availability"] == expected
+
+
+def test_everything_free_before_the_date_is_in_play_closest_first(monkeypatch, today):
+    """Taking a flat early only costs the overlap, so the whole window is worth alerting on."""
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-11-01")
+    scale = Scale(prefs())
+
+    now, halfway, on_the_date = (scale.grade(_listing(available_from=stated))
+                                 for stated in ("2026-09-01", "2026-10-01", "2026-11-01"))
+
+    scores = [graded.parts["availability"] for graded in (now, halfway, on_the_date)]
+    assert MET == scores[0] < scores[1] < scores[2] == BEST
+    assert all(graded.meets_targets for graded in (now, halfway, on_the_date))
+
+
+def test_the_near_end_of_the_window_is_met_however_narrow_the_window(monkeypatch, today):
+    """A flat free today is the near end of what you would take, wide window or narrow."""
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-09-04")
+
+    graded = Scale(prefs()).grade(_listing(available_from="2026-09-01"))
+
+    assert graded.parts["availability"] == MET
+
+
+def test_a_late_entrega_costs_more_than_the_same_wait_before_the_date(monkeypatch, today):
+    """A month early is a flat you can take; a month late is nowhere to live."""
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-11-01")
+    scale = Scale(prefs())
+
+    early = scale.grade(_listing(available_from="2026-10-02"))
+    late = scale.grade(_listing(available_from="2026-12-01"))
+
+    assert early.parts["availability"] > late.parts["availability"]
+
+
+def test_an_entrega_already_reached_is_read_as_today(monkeypatch, today):
+    """A stale date means entrega inmediata, not the months of drift it looks like."""
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-10-01")
+
+    graded = Scale(prefs()).grade(_listing(available_from="2026-01-15"))
+
+    assert graded.parts["availability"] == MET
+
+
+def test_an_undeclared_entrega_is_missing_not_late(monkeypatch):
+    """Most portals publish no date at all, and silence is unanswered rather than wrong."""
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-11-01")
+
+    graded = Scale(prefs()).grade(_listing())
+
+    assert "availability" in graded.missing
+
+
+def test_no_entrega_preference_leaves_the_date_unscored():
+    """Without a date of your own to compare against there is nothing to score."""
+    graded = Scale(prefs()).grade(_listing(available_from="2026-12-01"))
+
+    assert "availability" not in graded.parts
+    assert "availability" not in graded.missing
