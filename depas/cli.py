@@ -3,22 +3,42 @@ import sqlite3
 import time
 from collections.abc import Iterator
 
-from depas.bot import refresh_card, run as run_bot
+from depas.bot import refresh_card
+from depas.bot import run as run_bot
 from depas.communes import SANTIAGO_PROVINCE, Commune
-from depas.commute import as_text as commute_text, resolve_locations
-from depas.detail import infer_from_description
+from depas.commute import as_text as commute_text
+from depas.commute import resolve_locations
 from depas.config import DEFAULT_COMMON_EXPENSES
+from depas.detail import infer_from_description
 from depas.fetch import Fetcher
 from depas.grade import Scale
+from depas.metro import nearest_station
 from depas.models import Listing, Query
 from depas.portals import PORTALS
-from depas.metro import nearest_station
-from depas.preferences import (DEFAULTED, SET, Preferences, check_environment, described,
-                               seed_from_env, setting)
-from depas.store import (KEPT, clear_notified, connect, forget_preference,
-                        mark_notified, pool_query, refresh_commutes,
-                        refresh_zone_benchmarks, remember_card, save, save_detail,
-                        store_preference, sync_lease_income)
+from depas.preferences import (
+    DEFAULTED,
+    SET,
+    Preferences,
+    check_environment,
+    described,
+    seed_from_env,
+    setting,
+)
+from depas.store import (
+    KEPT,
+    clear_notified,
+    connect,
+    forget_preference,
+    mark_notified,
+    pool_query,
+    refresh_commutes,
+    refresh_zone_benchmarks,
+    remember_card,
+    save,
+    save_detail,
+    store_preference,
+    sync_lease_income,
+)
 from depas.telegram import chat_type, chats, format_listing, send_listing, verdict_buttons
 from depas.traits import EXCLUDE
 from depas.uf import normalize, stored_uf
@@ -42,7 +62,8 @@ def scrape(args: argparse.Namespace) -> None:
         stored_uf(connection, fetcher)
         for name in args.portals or PORTALS:
             try:
-                counts = save(connection, _matching(PORTALS[name].search(fetcher, query), fetcher, query))
+                found = _matching(PORTALS[name].search(fetcher, query), fetcher, query)
+                counts = save(connection, found)
             except NotImplementedError as error:
                 print(f"{name}: skipped ({error})")
                 continue
@@ -178,8 +199,10 @@ def _requirement_clauses(prefs: Preferences) -> tuple[list[str], list[object]]:
     reach = prefs.commute.maximum
     if reach is not None:
         for place in prefs.locations():
-            conditions.append(f"json_extract(commute, '$.{place.name}') <= ?")
-            parameters.append(reach)
+            # The path is bound, not interpolated, and quoted so a label with a dot or
+            # a space in it still names its key instead of silently matching nothing.
+            conditions.append("json_extract(commute, ?) <= ?")
+            parameters.extend((f'$."{place.name}"', reach))
     communes = prefs.communes()
     if communes:
         conditions.append(f"commune IN ({', '.join('?' * len(communes))})")
@@ -386,9 +409,9 @@ def _print_table(rows: list[sqlite3.Row] | list[dict[str, object]]) -> None:
         return
     columns = rows[0].keys()
     widths = [max(len(c), *(len(str(r[c])) for r in rows)) for c in columns]
-    print("  ".join(c.ljust(w) for c, w in zip(columns, widths)))
+    print("  ".join(c.ljust(w) for c, w in zip(columns, widths, strict=True)))
     for row in rows:
-        print("  ".join(str(row[c]).ljust(w) for c, w in zip(columns, widths)))
+        print("  ".join(str(row[c]).ljust(w) for c, w in zip(columns, widths, strict=True)))
 
 
 # The settings live in the database, so these are how they are read and written from a

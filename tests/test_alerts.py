@@ -1,4 +1,4 @@
-import argparse
+import json
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -77,6 +77,21 @@ def test_the_card_escapes_html_and_keeps_the_link(connection):
 
     assert "&lt;test&gt;" in card and "<test>" not in card
     assert 'href="https://x/1?a=1&amp;b=2"' in card
+
+
+def test_the_card_escapes_what_the_settings_put_in_it(connection, monkeypatch):
+    """A conserjería and a place name are typed by a person and land in HTML unescaped."""
+    from depas.grade import Scale
+    monkeypatch.setenv("DEPAS_SECURITY_WANTED", "24 h <b>diurna</b>")
+    monkeypatch.setenv("DEPAS_LOCATIONS", "pega <b>1</b>,-33.42,-70.61")
+    row = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000,
+           "price_clp": 500_000, "common_expenses": 100_000, "url": "https://x/1",
+           "security_type": "otra", "commute": json.dumps({"pega <b>1</b>": 20})}
+
+    card = format_listing(row, Scale(prefs()).grade(row), prefs())
+
+    assert "<b>diurna</b>" not in card and "&lt;b&gt;diurna&lt;/b&gt;" in card
+    assert "pega &lt;b&gt;1&lt;/b&gt;" in card
 
 
 def test_the_card_shows_the_publication_title():
@@ -259,6 +274,20 @@ def test_requirements_gate_which_listings_are_announced(connection, sent, monkey
 
     assert posted == 2  # walk_minutes 1 and 2 qualify; 3 and 4 do not
     assert len(sent) == 2
+
+
+def test_a_location_named_with_a_dot_still_filters_on_its_commute(connection, sent,
+                                                                  monkeypatch):
+    """The label is a JSON key, so `Av. Providencia` must not read as a nested path."""
+    monkeypatch.setenv("DEPAS_LOCATIONS", "Av. Providencia,-33.42,-70.61")
+    monkeypatch.setenv("DEPAS_COMMUTE_MAX", "30")
+    for index in range(4):
+        save_detail(connection, "pi", str(index),
+                    {"commute": json.dumps({"Av. Providencia": 10 + index * 15})})
+
+    posted = _announce(connection, prefs(), limit=10)
+
+    assert posted == 2  # 10 and 25 minutes are within reach; 40 and 55 are not
 
 
 def test_a_listing_that_misses_a_requirement_stays_eligible(connection, sent, monkeypatch):

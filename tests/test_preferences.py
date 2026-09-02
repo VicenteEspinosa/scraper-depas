@@ -5,11 +5,21 @@ from pathlib import Path
 import pytest
 
 from depas.cli import _announce, _requirement_clauses
-from depas.models import Listing
 from depas.config import defaults
-from depas.preferences import (DEFAULTED, SET, SETTINGS, UNSET, Preferences,
-                               check_environment, clear_preference, described,
-                               seed_from_env, set_preference, setting)
+from depas.models import Listing
+from depas.preferences import (
+    DEFAULTED,
+    SET,
+    SETTINGS,
+    UNSET,
+    Preferences,
+    check_environment,
+    clear_preference,
+    described,
+    seed_from_env,
+    set_preference,
+    setting,
+)
 from depas.store import connect, forget_preference, save, save_detail, store_preference
 
 
@@ -130,6 +140,12 @@ def test_a_username_is_refused_where_an_id_is_wanted(connection):
     """A username can be given away and reclaimed; a whitelist keyed on one changes hands."""
     with pytest.raises(ValueError, match="not a username"):
         set_preference(connection, "DEPAS_ADMINS", "@VicenteEspinosa")
+
+
+def test_a_quoted_place_name_is_refused(connection):
+    """The label is a JSON key the alert query looks up by path; a quote ends the key."""
+    with pytest.raises(ValueError, match="cannot have a"):
+        set_preference(connection, "DEPAS_LOCATIONS", 'pe"ga,-33.42,-70.61')
 
 
 def test_an_unknown_setting_is_refused_with_a_suggestion():
@@ -366,7 +382,7 @@ def test_every_rename_migration_lands_on_names_that_exist():
         sql.read_text() for sql in migrations))
 
     assert renamed
-    assert {name for name in renamed} <= {declared.name for declared in SETTINGS}
+    assert set(renamed) <= {declared.name for declared in SETTINGS}
 
 
 def test_the_entrega_keeps_its_value_when_it_stops_being_a_bound(tmp_path):

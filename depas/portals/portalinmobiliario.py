@@ -174,7 +174,8 @@ def fetch_detail(fetcher: Fetcher, url: str) -> dict[str, object]:
     if description:
         detail["description"] = description.text(strip=True)
 
-    published = PUBLISHED.search(tree.css_first(".ui-pdp-subtitle").text()) if tree.css_first(".ui-pdp-subtitle") else None
+    subtitle = tree.css_first(".ui-pdp-subtitle")
+    published = PUBLISHED.search(subtitle.text()) if subtitle else None
     if published:
         detail["published_label"] = published.group(1).strip()
         detail["published_days_ago"] = published_days_ago(published.group(1))
@@ -230,7 +231,8 @@ def _parse_price_benchmark(tree: HTMLParser) -> dict[str, float]:
         return {}
     labels = [node.text(strip=True) for node in comparison.css("span") if node.text(strip=True)]
     benchmark = {}
-    for label, column in (("Esta propiedad", "price_per_m2_uf"), ("Promedio en la zona", "zone_price_per_m2_uf")):
+    for label, column in (("Esta propiedad", "price_per_m2_uf"),
+                          ("Promedio en la zona", "zone_price_per_m2_uf")):
         if label in labels:
             match = UF_PER_M2.search(labels[labels.index(label) + 1])
             if match:

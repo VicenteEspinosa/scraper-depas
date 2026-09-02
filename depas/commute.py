@@ -7,8 +7,14 @@ from curl_cffi.requests.exceptions import RequestException
 
 from depas.config import Location
 from depas.fetch import Fetcher
-from depas.metro import (DETOUR_FACTOR, STATION_COORDS, STATION_LINES, WALK_SPEED_M_PER_MIN,
-                         haversine_m, nearest_station)
+from depas.metro import (
+    DETOUR_FACTOR,
+    STATION_COORDS,
+    STATION_LINES,
+    WALK_SPEED_M_PER_MIN,
+    haversine_m,
+    nearest_station,
+)
 
 # Transitous routes over Santiago's whole Red network, buses included, from the DTPM
 # feed. It is community-run and best-effort, so every answer is cached and the offline

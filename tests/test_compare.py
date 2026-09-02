@@ -68,7 +68,8 @@ def test_a_compare_with_no_home_configured_says_so(connection, answered):
 @pytest.mark.parametrize(
     ("expected", "reason"),
     [
-        ("💰 neto al mes: $780.000 → $790.000 · 🔺 $10.000 peor", "sublet income nets the home down"),
+        ("💰 neto al mes: $780.000 → $790.000 · 🔺 $10.000 peor",
+         "sublet income nets the home down"),
         ("📐 superficie: 62 m² → 50 m² · 🔻 12 m² peor", "smaller is worse"),
         ("🛏️ dormitorios: 2 → 3 · 🔺 1 mejor", "more bedrooms is better"),
         ("🏗️ antigüedad: 30 años → 4 años · 🔻 26 años mejor", "newer is better"),

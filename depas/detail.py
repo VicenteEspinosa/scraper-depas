@@ -46,7 +46,7 @@ SPEC_COLUMNS: dict[str, tuple[str, str]] = {
 }
 
 DETAIL_COLUMNS: dict[str, str] = {
-    **{column: sql_type for column, sql_type in SPEC_COLUMNS.values()},
+    **dict(SPEC_COLUMNS.values()),
     "description": "TEXT",
     "published_label": "TEXT",
     "published_days_ago": "INTEGER",
@@ -204,7 +204,8 @@ def parse_specs(rows: list[tuple[str, str]]) -> dict[str, object]:
         if label in SPEC_COLUMNS:
             column, sql_type = SPEC_COLUMNS[label]
             value = _coerce(raw, sql_type)
-            if column == "common_expenses" and value is not None and value < MIN_PLAUSIBLE_COMMON_EXPENSES:
+            if (column == "common_expenses" and value is not None
+                    and value < MIN_PLAUSIBLE_COMMON_EXPENSES):
                 value = None
             # keep the raw text rather than lose a value we could not parse or trust
             if value is None:

@@ -12,13 +12,34 @@ from depas.metro import nearest_station
 from depas.portals import PORTALS
 from depas.portals.portalinmobiliario import clean_url
 from depas.preferences import Preferences
-from depas.store import (DISLIKE, LIKE, card_for_message, card_for_thread,
-                         connect, link_thread, remember_card, save, save_detail,
-                         set_interest)
+from depas.store import (
+    DISLIKE,
+    LIKE,
+    card_for_message,
+    card_for_thread,
+    connect,
+    link_thread,
+    remember_card,
+    save,
+    save_detail,
+    set_interest,
+)
+from depas.telegram import (
+    DISLIKE_BUTTON,
+    LIKE_BUTTON,
+    UNDO_BUTTON,
+    answer_callback,
+    call,
+    edit_buttons,
+    edit_listing,
+    format_comparison,
+    format_listing,
+    reply,
+    send_buttons,
+    send_listing,
+    verdict_buttons,
+)
 from depas.uf import normalize, stored_uf
-from depas.telegram import (DISLIKE_BUTTON, LIKE_BUTTON, UNDO_BUTTON, answer_callback, call,
-                            edit_buttons, edit_listing, format_comparison, format_listing, reply,
-                            send_buttons, send_listing, verdict_buttons)
 
 POLL_TIMEOUT = 30
 # Telegram and the portals both blip. A blip should cost one poll, not the process:

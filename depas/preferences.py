@@ -26,8 +26,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 from depas.communes import Commune
-from depas.config import (DEFAULT_TARGET_AGE, HOME_REQUIRED, Location, defaults,
-                          environment)
+from depas.config import DEFAULT_TARGET_AGE, HOME_REQUIRED, Location, defaults, environment
 from depas.traits import DISPOSITIONS, PENALISE, TRAITS
 
 # ── how a setting's text becomes a value ────────────────────────────────────────
@@ -102,6 +101,10 @@ def _locations(name: str, raw: str) -> list[Location]:
         if len(parts) != 3:
             raise ValueError(f"{name} entry must be name,lat,lon: {entry!r}")
         label, lat, lon = parts
+        # The label is a JSON key and the alert query looks it up by path, where a
+        # double quote ends the key and the lookup quietly matches nothing.
+        if '"' in label:
+            raise ValueError(f'{name} entry cannot have a " in its name: {label!r}')
         try:
             found.append(Location(label, float(lat), float(lon)))
         except ValueError:

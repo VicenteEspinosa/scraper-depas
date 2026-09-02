@@ -1,6 +1,7 @@
 name: Test
 
-# Also callable from the deploy workflow, so main is never deployed untested.
+# Also callable from the deploy workflow, so main is never deployed untested --
+# which waits on every job below, not just the tests.
 on:
   pull_request:
   push:
@@ -11,6 +12,23 @@ permissions:
   contents: read
 
 jobs:
+  # Its own job rather than a step beside the tests: a lint complaint and a red
+  # suite are separate answers, and each should be able to report one.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --locked --dev
+
+      - name: Ruff
+        run: uv run ruff check
+
   pytest:
     runs-on: ubuntu-latest
     steps:

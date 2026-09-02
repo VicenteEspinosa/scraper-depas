@@ -3,8 +3,16 @@ from types import SimpleNamespace
 import pytest
 from curl_cffi.requests.exceptions import RequestException
 
-from depas.bot import (GONE, NO_CARD, _handle, _handle_callback, _offset, _remember_offset,
-                       find_links, run)
+from depas.bot import (
+    GONE,
+    NO_CARD,
+    _handle,
+    _handle_callback,
+    _offset,
+    _remember_offset,
+    find_links,
+    run,
+)
 from depas.models import Listing
 from depas.store import connect, pool_query, remember_card, save, save_detail
 from tests.support import prefs
@@ -75,7 +83,8 @@ def pressed(monkeypatch):
     [
         ("https://portalinmobiliario.com/MLC-123-depto-_JM", 1),
         ("mira esto https://www.portalinmobiliario.com/MLC-9-x-_JM que tal", 1),
-        ("dos: https://portalinmobiliario.com/MLC-1-a-_JM y https://portalinmobiliario.com/MLC-2-b-_JM", 2),
+        ("dos: https://portalinmobiliario.com/MLC-1-a-_JM y "
+         "https://portalinmobiliario.com/MLC-2-b-_JM", 2),
         ("https://www.houm.com/propiedad/123", 0),
         ("sin links", 0),
     ],
@@ -118,7 +127,8 @@ def test_the_same_link_twice_in_one_message_answers_once(connection, sent, monke
 
 def test_a_message_with_no_link_is_ignored(connection, sent):
     """Ordinary group chatter produces no reply."""
-    _handle(connection, None, {"chat": {"id": -100}, "text": "hola, alguien vio el depto?"}, prefs())
+    _handle(connection, None,
+            {"chat": {"id": -100}, "text": "hola, alguien vio el depto?"}, prefs())
 
     assert sent == []
 
@@ -156,7 +166,7 @@ def test_other_links_are_left_alone(url):
 
 
 def test_the_same_listing_on_either_host_is_one_row(connection, sent, monkeypatch):
-    """A shared MercadoLibre link for a listing scraped from Portal Inmobiliario is not refetched."""
+    """A MercadoLibre link for a listing scraped from Portal Inmobiliario is not refetched."""
     monkeypatch.setattr("depas.portals.portalinmobiliario.fetch_standalone",
                         lambda *a: pytest.fail("should recognise the id, not refetch"))
     monkeypatch.setattr("depas.portals.portalinmobiliario.fetch_detail",

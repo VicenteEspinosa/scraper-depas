@@ -43,8 +43,11 @@ def test_project_card_keeps_the_lower_bound_of_each_range():
     [
         (Query(), 1, "/arriendo/departamento/nunoa-metropolitana"),
         (Query(operation="sale"), 1, "/venta/departamento/nunoa-metropolitana"),
-        (Query(max_price=800_000), 1, "/arriendo/departamento/nunoa-metropolitana/_PriceRange_0-800000CLP"),
-        (Query(min_bedrooms=2), 49, "/arriendo/departamento/nunoa-metropolitana/_BEDROOMS_2-*/_Desde_49_NoIndex_True"),
+        (Query(max_price=800_000), 1,
+         "/arriendo/departamento/nunoa-metropolitana/_PriceRange_0-800000CLP"),
+        (Query(min_bedrooms=2), 49,
+         "/arriendo/departamento/nunoa-metropolitana/_BEDROOMS_2-*/"
+         "_Desde_49_NoIndex_True"),
     ],
 )
 def test_build_url(query, offset, expected):
@@ -83,7 +86,8 @@ def test_pagination_stops_at_the_first_404_and_keeps_earlier_pages():
 
 @pytest.mark.parametrize(
     ("label", "days"),
-    [("hace 39 días", 39), ("hace 3 meses", 90), ("hace 2 años", 730), ("esta semana", 3), ("por ", None)],
+    [("hace 39 días", 39), ("hace 3 meses", 90), ("hace 2 años", 730),
+     ("esta semana", 3), ("por ", None)],
 )
 def test_published_days_ago(label, days):
     """Relative publication labels collapse to a comparable day count."""
@@ -119,7 +123,8 @@ def test_portal_transit_beats_the_computed_estimate():
     transit = _parse_transit(tree)
 
     assert [p["name"] for p in transit["estaciones_de_metro"]][:2] == ["Rodrigo de Araya", "Ñuble"]
-    assert transit["estaciones_de_metro"][0] == {"name": "Rodrigo de Araya", "minutes": 12, "metres": 927}
+    assert transit["estaciones_de_metro"][0] == {
+        "name": "Rodrigo de Araya", "minutes": 12, "metres": 927}
     assert transit["paraderos"][0]["metres"] == 262
 
 

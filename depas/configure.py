@@ -21,8 +21,8 @@ import sqlite3
 from datetime import date
 
 from depas.communes import SANTIAGO_PROVINCE
-from depas.config import HOME_REQUIRED
 from depas.commute import resolve_locations
+from depas.config import HOME_REQUIRED
 from depas.detail import MONTH_NAMES
 from depas.fetch import Fetcher
 from depas.metro import STATION_LINES
