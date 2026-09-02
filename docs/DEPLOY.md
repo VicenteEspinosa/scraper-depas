@@ -70,8 +70,10 @@ ranks lower. `DEPAS_SECURITY_WANTED`, `DEPAS_FLOOR_TARGET` and
 excludes. Many publishers declare no security type, most declare no floor and most
 publish no entrega at all, so filtering on any of them dropped listings for missing
 data rather than for being a bad fit; they cost score instead. The entrega is the
-one scored on distance in both directions: a flat that frees up months before you
-need it is rent you cannot use, so it reads no better than one that frees up late.
+one scored on distance, and asymmetrically: everything free between today and the
+date you want is in play — 80 at the near end of that window, 100 on the date — while
+a month past the date costs a whole span, because taking a flat early only overlaps
+with the rent you are already paying and taking it late leaves you nowhere to live.
 
 A listing that misses a requirement is left unstamped rather than marked notified,
 so a later price drop can still bring it into range. A listing that clears the

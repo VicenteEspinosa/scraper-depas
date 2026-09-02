@@ -266,9 +266,10 @@ SETTINGS: tuple[Setting, ...] = (
             example="25", default=str(DEFAULT_TARGET_AGE)),
     _weight("age"),
     Setting("DEPAS_AVAILABILITY_TARGET", _day,
-            "Fecha de entrega ideal. Puntúa por cercanía a esa fecha en cualquiera de las "
-            "dos direcciones, así que entregar meses antes tampoco es gratis. Nunca es un "
-            "corte, y un aviso que no declara fecha queda sin puntuar.",
+            "Fecha de entrega ideal. Todo lo que se desocupa entre hoy y esa fecha sirve, "
+            "y puntúa mejor mientras más cerca de ella; después cae rápido, porque un mes "
+            "tarde ya es un tramo entero. Nunca es un corte, y un aviso que no declara "
+            "fecha queda sin puntuar.",
             example="2026-11-01"),
     _weight("availability"),
     Setting("DEPAS_SECURITY_WANTED", _text,

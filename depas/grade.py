@@ -38,8 +38,9 @@ BREACHED = 40.0    # on the hard bound, one span the wrong side of the target
 BEST = 100.0       # one span the right side of it, and the most a component can score
 # Paying your zone's average UF/m2 is MET; this much off that average is a whole span.
 ZONE_SPAN = 0.20
-# One span away from the move-in date you want, in days, in either direction.
-AVAILABILITY_SPAN = 30
+# Days past the move-in date you want that cost a whole span. The early side is
+# measured against the window between today and that date instead, so it is not here.
+LATE_SPAN = 30
 # What meeting every target on complete data is worth on top, since the components
 # alone cannot say "and nothing at all was compromised".
 PERFECT_BONUS = 5.0
@@ -149,19 +150,23 @@ def _age(row: dict, prefs: Preferences) -> float | None:
 
 
 def _availability(row: dict, prefs: Preferences) -> float | None:
-    """Scored on how far the entrega sits from the date you want, in either direction.
+    """Scored on how close the entrega lands to the date you want, from either side.
 
-    A distance rather than a deadline: a flat that frees up months early is rent on a
-    place you cannot use yet, one that frees up after it is nowhere to live. Landing on
-    the date is BEST, as it is for every component that can only be matched.
+    The two sides are not the same shape. Everything free between today and your date is
+    a flat you could actually take, so the whole of that window is one span and anything
+    in it reads as met or better -- the closer to the date, the better. Past the date
+    there is nowhere to live, so a month is a whole span on its own.
     """
-    wanted, stated = prefs.value("DEPAS_AVAILABILITY_TARGET"), row.get("available_from")
-    if wanted is None or not stated:
+    configured, stated = prefs.value("DEPAS_AVAILABILITY_TARGET"), row.get("available_from")
+    if configured is None or not stated:
         return None
+    today, wanted = date.today(), date.fromisoformat(configured)
     # A date already reached is entrega inmediata, not however long ago it was written.
-    frees_up = max(date.fromisoformat(stated), date.today())
-    away = abs((frees_up - date.fromisoformat(wanted)).days)
-    return _points(away / AVAILABILITY_SPAN - 1)
+    frees_up = max(date.fromisoformat(stated), today)
+    # Early is measured against the whole window you are shopping in, which a date of
+    # your own that is close or already past would collapse -- so it floors at a month.
+    span = max((wanted - today).days, LATE_SPAN) if frees_up < wanted else LATE_SPAN
+    return _points(abs((frees_up - wanted).days) / span - 1)
 
 
 def _metro(row: dict, prefs: Preferences) -> float | None:

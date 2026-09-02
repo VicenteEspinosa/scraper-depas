@@ -295,17 +295,41 @@ def today(monkeypatch):
 
 @pytest.mark.parametrize("stated, expected", [
     ("2026-11-01", BEST),
+    ("2026-09-01", MET),
     ("2026-12-01", MET),
-    ("2026-10-02", MET),
     ("2026-12-31", BREACHED),
 ])
 def test_the_entrega_scores_on_how_close_it_lands(monkeypatch, today, stated, expected):
-    """Both sides cost the same: early is rent on a flat you cannot use, late is nowhere to live."""
+    """The window from today to your date is one span; a month past it is another."""
     monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-11-01")
 
     graded = Scale(prefs()).grade(_listing(available_from=stated))
 
     assert graded.parts["availability"] == expected
+
+
+def test_everything_free_before_the_date_is_in_play_closest_first(monkeypatch, today):
+    """Taking a flat early only costs the overlap, so the whole window is worth alerting on."""
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-11-01")
+    scale = Scale(prefs())
+
+    now, halfway, on_the_date = (scale.grade(_listing(available_from=stated))
+                                 for stated in ("2026-09-01", "2026-10-01", "2026-11-01"))
+
+    scores = [graded.parts["availability"] for graded in (now, halfway, on_the_date)]
+    assert MET == scores[0] < scores[1] < scores[2] == BEST
+    assert all(graded.meets_targets for graded in (now, halfway, on_the_date))
+
+
+def test_a_late_entrega_costs_more_than_the_same_wait_before_the_date(monkeypatch, today):
+    """Two months early is a flat you can take; two months late is nowhere to live."""
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-11-01")
+    scale = Scale(prefs())
+
+    early = scale.grade(_listing(available_from="2026-09-02"))
+    late = scale.grade(_listing(available_from="2026-12-31"))
+
+    assert early.parts["availability"] > late.parts["availability"]
 
 
 def test_an_entrega_already_reached_is_read_as_today(monkeypatch, today):
