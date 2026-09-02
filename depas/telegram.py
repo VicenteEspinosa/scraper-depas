@@ -31,7 +31,8 @@ def call(method: str, **params: Any) -> Any:
         # Telegram puts the actionable part in `parameters` — a migrated chat's new id
         # lands there, and dropping it turns a one-line fix into a debugging session.
         detail = payload.get("parameters") or ""
-        raise RuntimeError(f"telegram {method} failed: {payload.get('description')} {detail}".strip())
+        raise RuntimeError(
+            f"telegram {method} failed: {payload.get('description')} {detail}".strip())
     return payload["result"]
 
 
@@ -128,7 +129,7 @@ def _cons(row: dict[str, Any], prefs: Preferences) -> list[str]:
         cons.append(f"{age:.0f} años, sobre los {oldest}")
     wanted = prefs.security_wanted()
     if wanted and row.get("security_type") != wanted:
-        cons.append(f"sin conserjería {wanted}")
+        cons.append(f"sin conserjería {escape(wanted)}")
     return cons
 
 
@@ -221,7 +222,7 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
 
     travel = commute_text(row.get("commute"))
     if travel:
-        lines.append(f"🧭 {travel} min")
+        lines.append(f"🧭 {escape(travel)} min")
 
     asking = row.get("price_per_m2_uf_effective")
     zone = row.get("zone_price_per_m2_uf_effective")
@@ -298,7 +299,7 @@ def _commute_lines(home: dict[str, Any], row: dict[str, Any]) -> list[str]:
     """One line per configured location, so a move is judged on every trip it changes."""
     here = json.loads(home.get("commute") or "{}")
     there = json.loads(row.get("commute") or "{}")
-    return [_difference(f"🧭 {name}", here[name], minutes, _minutes, True)
+    return [_difference(f"🧭 {escape(name)}", here[name], minutes, _minutes, True)
             for name, minutes in there.items() if name in here]
 
 
