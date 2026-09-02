@@ -149,7 +149,8 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 STATION_LINES: dict[str, tuple[str, ...]] = {name: lines for name, _, _, lines in STATIONS}
-STATION_COORDS: dict[str, tuple[float, float]] = {name: (lat, lon) for name, lat, lon, _ in STATIONS}
+STATION_COORDS: dict[str, tuple[float, float]] = {
+    name: (lat, lon) for name, lat, lon, _ in STATIONS}
 
 
 def nearest_station(lat: float, lon: float) -> tuple[str, int, int]:

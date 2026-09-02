@@ -1,10 +1,8 @@
 import json
 import re
-from datetime import UTC, datetime
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any
-
-from selectolax.parser import HTMLParser
 
 from depas.communes import Commune
 from depas.detail import available_on

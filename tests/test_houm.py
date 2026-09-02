@@ -8,7 +8,7 @@ from depas.portals import PORTALS, houm
 def test_every_portal_exposes_the_same_interface():
     """The registry holds modules now, so each must carry the whole contract."""
     for name, module in PORTALS.items():
-        assert module.NAME == name
+        assert name == module.NAME
         assert callable(module.search) and callable(module.fetch_detail)
 
 

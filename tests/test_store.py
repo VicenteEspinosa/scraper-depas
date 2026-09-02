@@ -4,9 +4,8 @@ import pytest
 
 from depas.config import DEFAULT_COMMON_EXPENSES
 from depas.models import Listing
+from depas.store import MIGRATIONS_DIR, connect, migrate, pool_query, save, save_detail
 from tests.support import prefs
-from depas.store import (MIGRATIONS_DIR, connect, migrate, pool_query, save,
-                         save_detail)
 
 
 def _listing(price: int) -> Listing:
@@ -54,7 +53,8 @@ def test_net_cost_subtracts_lease_income_from_the_environment(tmp_path, monkeypa
     save_detail(connection, "houm", "42",
                 {"common_expenses": 100_000, "parking_spaces": 2, "storage_units": 1})
 
-    row = connection.execute("SELECT total_monthly_clp, net_monthly_clp FROM listings_ranked").fetchone()
+    row = connection.execute(
+        "SELECT total_monthly_clp, net_monthly_clp FROM listings_ranked").fetchone()
     assert row["total_monthly_clp"] == 700_000
     assert row["net_monthly_clp"] == 700_000 - 2 * 60_000 - 30_000
 
@@ -68,7 +68,8 @@ def test_lease_income_defaults_to_zero_rather_than_a_guessed_rate(tmp_path, monk
 
     save_detail(connection, "houm", "42", {"common_expenses": 100_000, "parking_spaces": 2})
 
-    row = connection.execute("SELECT total_monthly_clp, net_monthly_clp FROM listings_ranked").fetchone()
+    row = connection.execute(
+        "SELECT total_monthly_clp, net_monthly_clp FROM listings_ranked").fetchone()
     assert row["net_monthly_clp"] == row["total_monthly_clp"] == 700_000
 
 
@@ -82,7 +83,8 @@ def test_an_undeclared_gasto_comun_falls_back_to_the_default(tmp_path, monkeypat
 
     save_detail(connection, "houm", "42", {"floor": 7, **detail})
 
-    row = connection.execute("SELECT total_monthly_clp, net_monthly_clp FROM listings_ranked").fetchone()
+    row = connection.execute(
+        "SELECT total_monthly_clp, net_monthly_clp FROM listings_ranked").fetchone()
     assert row["total_monthly_clp"] == row["net_monthly_clp"] == 600_000 + DEFAULT_COMMON_EXPENSES
 
 
@@ -132,7 +134,8 @@ def test_rescraping_does_not_wipe_detail_data(tmp_path):
     save(connection, [_listing(500_000)])
 
     row = connection.execute("SELECT * FROM listings").fetchone()
-    assert (row["common_expenses"], row["lat"], row["lon"], row["floor"]) == (90_000, -33.4, -70.6, 7)
+    assert ((row["common_expenses"], row["lat"], row["lon"], row["floor"])
+            == (90_000, -33.4, -70.6, 7))
 
 
 def test_the_backfill_prices_rows_stored_without_one(tmp_path):
@@ -142,7 +145,8 @@ def test_the_backfill_prices_rows_stored_without_one(tmp_path):
     connection.executemany(
         "INSERT INTO listings (portal, external_id, url, price, currency, first_seen, last_seen) "
         "VALUES (?, ?, ?, ?, ?, 'now', 'now')",
-        [("houm", "43", "https://x/43", 750_000, "CLP"), ("houm", "44", "https://x/44", 12.25, "UF")],
+        [("houm", "43", "https://x/43", 750_000, "CLP"),
+         ("houm", "44", "https://x/44", 12.25, "UF")],
     )
 
     connection.executescript((MIGRATIONS_DIR / "004_backfill_price_clp.sql").read_text())

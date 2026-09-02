@@ -6,12 +6,19 @@ import pytest
 from selectolax.parser import HTMLParser
 
 from depas.communes import Commune
+from depas.detail import parse_specs
 from depas.models import Query
 from depas.portals.chilepropiedades import (
-    SPEC_LABELS, _detail_specs, _number, _parse_card, _published_days_ago,
-    _published_listing, fetch_detail, listing_id, search,
+    SPEC_LABELS,
+    _detail_specs,
+    _number,
+    _parse_card,
+    _published_days_ago,
+    _published_listing,
+    fetch_detail,
+    listing_id,
+    search,
 )
-from depas.detail import parse_specs
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

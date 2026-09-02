@@ -101,9 +101,11 @@ def _parse_price(card: Node) -> tuple[float, Currency] | None:
 
 
 def _card_features(card: Node) -> dict[str, str]:
+    # strict=False: a markup change that unpairs the two leaves the specs it did pair
+    # rather than killing the scrape.
     return {label.text(strip=True): value.text(strip=True)
             for label, value in zip(card.css("span.clp-feature-description"),
-                                    card.css("span.clp-feature-value"))}
+                                    card.css("span.clp-feature-value"), strict=False)}
 
 
 def _number(text: str | None) -> float | None:
@@ -155,7 +157,8 @@ def fetch_detail(fetcher: Fetcher, url: str) -> dict[str, Any]:
 def _detail_specs(tree: HTMLParser) -> list[tuple[str, str]]:
     return [(label.text(strip=True), value.text(strip=True))
             for label, value in zip(tree.css("span.clp-publication-detail-label"),
-                                    tree.css("strong.clp-publication-detail-value"))]
+                                    tree.css("strong.clp-publication-detail-value"),
+                                    strict=False)]
 
 
 def _published_listing(tree: HTMLParser) -> dict[str, Any] | None:

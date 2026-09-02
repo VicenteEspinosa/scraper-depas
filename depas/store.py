@@ -8,8 +8,8 @@ from statistics import median
 
 from depas.commute import from_listing
 from depas.config import DEFAULT_COMMON_EXPENSES, db_path
-from depas.fetch import Fetcher
 from depas.detail import DETAIL_COLUMNS
+from depas.fetch import Fetcher
 from depas.models import Listing
 from depas.preferences import Preferences, clear_preference, seed_from_env, set_preference
 from depas.traits import EXCLUDE
@@ -210,7 +210,8 @@ def save_detail(
     """Write one listing's detail-page fields onto its existing row."""
     columns = [name for name in detail if name in DETAIL_COLUMNS or name in ("lat", "lon")]
     connection.execute(
-        f"UPDATE listings SET {', '.join(f'{name} = ?' for name in columns)}, detail_fetched_at = ? "
+        f"UPDATE listings SET {', '.join(f'{name} = ?' for name in columns)}, "
+        "detail_fetched_at = ? "
         "WHERE portal = ? AND external_id = ?",
         [*(detail[name] for name in columns), datetime.now(UTC).isoformat(), portal, external_id],
     )
@@ -231,7 +232,8 @@ def save(connection: sqlite3.Connection, listings: Iterable[Listing]) -> dict[st
         values = [getattr(listing, name) for name in FIELDS]
         if previous is None:
             connection.execute(
-                f"INSERT INTO listings (portal, external_id, {', '.join(FIELDS)}, first_seen, last_seen) "
+                f"INSERT INTO listings (portal, external_id, {', '.join(FIELDS)}, "
+                "first_seen, last_seen) "
                 f"VALUES (?, ?, {', '.join('?' * len(FIELDS))}, ?, ?)",
                 [*key, *values, now, now],
             )

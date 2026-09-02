@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from depas.metro import STATION_LINES
+
 # The components are exactly the things that carry a DEPAS_*_WEIGHT, so the registry
 # owns the list and this reads it rather than keeping a second copy in step.
 from depas.preferences import WEIGHTED as COMPONENTS

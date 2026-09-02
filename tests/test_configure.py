@@ -1,12 +1,23 @@
 """The settings menu: what it offers, who it obeys, and what a press actually writes."""
-import json
 
 import pytest
 
 from depas import configure
-from depas.configure import (DATA_LIMIT, GROUPS, KIND, LABELS, LAST_ADMIN, MENU, PREFIX,
-                             answer_prompt, group_screen, main_screen, open_menu, press,
-                             setting_screen)
+from depas.configure import (
+    DATA_LIMIT,
+    GROUPS,
+    KIND,
+    LABELS,
+    LAST_ADMIN,
+    MENU,
+    PREFIX,
+    answer_prompt,
+    group_screen,
+    main_screen,
+    open_menu,
+    press,
+    setting_screen,
+)
 from depas.preferences import BY_NAME, Preferences, set_preference
 from depas.store import connect
 
