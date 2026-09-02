@@ -1,0 +1,43 @@
+depas/cli.py
+  s_a3c90545adeae3::t_3f52d1d1725b5b 160-161
+seed.env
+  s_a3c90545adeae3::t_5d39a88325a3f4 63-64
+depas/preferences.py
+  s_a3c90545adeae3::t_0e8bb0d6ada6bc 167,268,272-273
+README.md
+  s_a3c90545adeae3::t_4560176cfe6ac3 22
+  s_a3c90545adeae3::t_d9a54564014e4d 24-32
+tests/test_grade.py
+  s_a3c90545adeae3::t_0257db2c7e6919 2-3,283-298,300-301,304-308,311-334
+  s_a3c90545adeae3::t_43efd9e58e4cdb 302
+depas/configure.py
+  s_a3c90545adeae3::t_5d39a88325a3f4 105
+  s_a3c90545adeae3::t_75bb515875be8f 107
+  s_a3c90545adeae3::t_3f52d1d1725b5b 115
+docs/DEPLOY.md
+  s_a3c90545adeae3::t_4560176cfe6ac3 61,68
+  s_a3c90545adeae3::t_d9a54564014e4d 62-63,69-72
+tests/test_preferences.py
+  s_a3c90545adeae3::t_0257db2c7e6919 304
+  s_a3c90545adeae3::t_30792fa3b5347b 362,364-366,370-384
+migrations/012_entrega_is_a_preference.sql
+  s_a3c90545adeae3::t_5d39a88325a3f4 1-8
+depas/grade.py
+  s_a3c90545adeae3::t_0aad58bcccbc90 20,151,157,160-161,165-166,212-213,234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3e5cab7f7b2d8b58fc008907c02263757c0dc0f2",
+  "prompts": {},
+  "sessions": {
+    "s_a3c90545adeae3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ddd5e044-4adc-41e3-9940-6a1c83ec3c51",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
