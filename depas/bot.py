@@ -4,6 +4,7 @@ import time
 
 from curl_cffi.requests.exceptions import RequestException
 
+from depas import configure
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.home import row as home_row
@@ -285,6 +286,9 @@ def _pressed_card(connection: sqlite3.Connection, message: dict, listing: dict) 
 def _handle_callback(connection: sqlite3.Connection, callback: dict,
                      prefs: Preferences) -> None:
     """A button pressed on a card: the same verdict, with nothing typed and no reply posted."""
+    if (callback.get("data") or "").startswith(configure.PREFIX):
+        configure.press(connection, callback, prefs)
+        return
     action, _, listing_id = (callback.get("data") or "").partition(":")
     if action not in BUTTONS or not listing_id.isdigit():
         answer_callback(callback["id"], "botón no reconocido")
@@ -344,6 +348,13 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
         return
     if command == COMPARE:
         _compare(connection, fetcher, message, prefs)
+        return
+    if command == configure.COMMAND:
+        configure.open_menu(connection, message, prefs)
+        return
+    # Read before the links below: an answer to a settings prompt is an address or a
+    # number, and whatever it is, it was not posted to be graded.
+    if configure.answer_prompt(connection, fetcher, message, prefs):
         return
 
     for portal_name, url in find_links(text):

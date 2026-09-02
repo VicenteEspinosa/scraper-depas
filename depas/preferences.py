@@ -303,8 +303,9 @@ SETTINGS: tuple[Setting, ...] = (
             "se calcula solo.",
             example="930000"),
     Setting("DEPAS_CURRENT_HOME", _home,
-            "Tu propio depto como un objeto JSON, para que /compare pueda medir cualquier "
-            f"aviso contra él. Obligatorios: {', '.join(HOME_REQUIRED)}.",
+            "Tu propio depto, para que /compare pueda medir cualquier aviso contra él. "
+            "Desde el chat se arma campo por campo; en la CLI es un objeto JSON. "
+            f"Obligatorios: {', '.join(HOME_REQUIRED)}.",
             example='{"commune":"nunoa","price_clp":800000,"common_expenses":130000,'
                     '"area_m2":62,"lat":-33.45590,"lon":-70.59780}'),
 

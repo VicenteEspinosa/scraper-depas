@@ -76,6 +76,8 @@ Scraping is two-stage, because detail pages are expensive:
   takes the verdict commands below. Re-reads the settings on every poll, so a
   preference edited while it runs takes effect without a restart.
 - **`config`** — read and edit those settings; see [Configuration](#configuration).
+  The same settings are editable from Telegram with `/config`; see
+  [Changing the settings from the chat](#changing-the-settings-from-the-chat).
 
 ### Judging a listing from the chat
 
@@ -111,6 +113,52 @@ a channel, or as a reply to it in a plain group:
 
 A verdict is changed by undoing it and giving the other one — the card only ever
 shows the buttons that make sense for the state it is in.
+
+### Changing the settings from the chat
+
+`/config` opens the whole registry as a menu: eight groups, every setting inside one
+of them, and its current value on the button so you can see what you are about to
+change. Each press writes immediately and takes effect on the next pass — nothing is
+restarted, because the bot reloads the preferences every poll.
+
+**Who may.** `DEPAS_ADMINS` holds the Telegram user ids allowed to edit, and it is
+checked on the message *and on every press*: in a group anybody can reach the buttons
+on somebody else's message. Being in the alert chat is deliberately not enough — a
+channel's discussion group is joinable. `/config` from anybody else answers with their
+own id, which is what they paste into `depas config set DEPAS_ADMINS` on the box or
+send to somebody who is already an admin. Bootstrapping the first one is a shell
+command by design; anything the chat could bootstrap, whoever got there first could.
+
+It works in a private chat with the bot and in the discussion group. It cannot work in
+the channel itself, and says so: a channel post is signed by the channel rather than by
+a person, so there is nobody for the whitelist to match.
+
+**Only valid values are offered.** The editor for a setting is chosen by the parser the
+setting already declares, so what you get is what the value can be:
+
+| What it is | How you set it |
+| --- | --- |
+| A weight | Six presets, `0` through `3`, the one in use ticked. |
+| A number of pesos | `±$25.000` and `±$100.000`, never below zero. |
+| Minutes, m², floors, years | `±1` and `±5`, with the unit shown. |
+| Amoblado, último piso | The three things a trait can mean: excluir, castigar, ignorar. |
+| Comunas | A checklist of the 43 the portal indexes, paged, ticked. |
+| Líneas de metro | One row per line, its tier ticked — the `>` and `,` string is rebuilt for you. |
+| Entrega hasta | The first of each of the next six months. |
+| Conserjería, dónde publicar | The values that appear in the database, so nothing offered could fail to match. |
+| Tu depto actual | Field by field, saved only once it has everything `/compare` needs. |
+
+Four things are genuinely open sets and are the only ones typed: an address (geocoded
+on the way in, same as the CLI), somebody's user id, and the two escape hatches — every
+editor keeps an **✏️ Escribir** and a **🗑️ Borrar**. A typed value answers a
+force-reply prompt that names the setting, which is how it finds its way home without
+any pending-edit state to go stale.
+
+Every write goes through the same path `depas config set` uses, so a value the parsers
+refuse is refused here too, with the same message, before it is stored.
+
+The one edit the menu will not make is emptying `DEPAS_ADMINS`: there would be nobody
+left it would take an edit from.
 
 ### Comparing a listing with where you live now
 
