@@ -38,9 +38,10 @@ BREACHED = 40.0    # on the hard bound, one span the wrong side of the target
 BEST = 100.0       # one span the right side of it, and the most a component can score
 # Paying your zone's average UF/m2 is MET; this much off that average is a whole span.
 ZONE_SPAN = 0.20
-# Days past the move-in date you want that cost a whole span. The early side is
-# measured against the window between today and that date instead, so it is not here.
-LATE_SPAN = 30
+# Days past the move-in date you want that cost a whole span: a week late is already
+# everything you asked for and no more. The early side is measured against the window
+# between today and that date instead, so it is not here.
+LATE_SPAN = 7
 # What meeting every target on complete data is worth on top, since the components
 # alone cannot say "and nothing at all was compromised".
 PERFECT_BONUS = 5.0
@@ -155,7 +156,7 @@ def _availability(row: dict, prefs: Preferences) -> float | None:
     The two sides are not the same shape. Everything free between today and your date is
     a flat you could actually take, so the whole of that window is one span and anything
     in it reads as met or better -- the closer to the date, the better. Past the date
-    there is nowhere to live, so a month is a whole span on its own.
+    there is nowhere to live, so a week is a whole span on its own.
     """
     configured, stated = prefs.value("DEPAS_AVAILABILITY_TARGET"), row.get("available_from")
     if configured is None or not stated:
