@@ -1,4 +1,6 @@
 """A grade is measured against the preferences alone, so it never moves when the market does."""
+from datetime import date
+
 import pytest
 
 from depas.grade import BEST, BREACHED, COMPONENTS, MET, PERFECT_BONUS, Scale
@@ -278,3 +280,55 @@ def test_under_25_years_is_the_target_with_nothing_configured(monkeypatch):
     monkeypatch.delenv("DEPAS_AGE_TARGET", raising=False)
 
     assert Scale(prefs()).grade(_listing(age=25)).parts["age"] == MET
+
+
+@pytest.fixture
+def today(monkeypatch):
+    """Freeze the clock: an entrega already reached is read as of today, not as written."""
+    class Frozen(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 9, 1)
+
+    monkeypatch.setattr("depas.grade.date", Frozen)
+
+
+@pytest.mark.parametrize("stated, expected", [
+    ("2026-11-01", BEST),
+    ("2026-12-01", MET),
+    ("2026-10-02", MET),
+    ("2026-12-31", BREACHED),
+])
+def test_the_entrega_scores_on_how_close_it_lands(monkeypatch, today, stated, expected):
+    """Both sides cost the same: early is rent on a flat you cannot use, late is nowhere to live."""
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-11-01")
+
+    graded = Scale(prefs()).grade(_listing(available_from=stated))
+
+    assert graded.parts["availability"] == expected
+
+
+def test_an_entrega_already_reached_is_read_as_today(monkeypatch, today):
+    """A stale date means entrega inmediata, not the months of drift it looks like."""
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-10-01")
+
+    graded = Scale(prefs()).grade(_listing(available_from="2026-01-15"))
+
+    assert graded.parts["availability"] == MET
+
+
+def test_an_undeclared_entrega_is_missing_not_late(monkeypatch):
+    """Most portals publish no date at all, and silence is unanswered rather than wrong."""
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-11-01")
+
+    graded = Scale(prefs()).grade(_listing())
+
+    assert "availability" in graded.missing
+
+
+def test_no_entrega_preference_leaves_the_date_unscored():
+    """Without a date of your own to compare against there is nothing to score."""
+    graded = Scale(prefs()).grade(_listing(available_from="2026-12-01"))
+
+    assert "availability" not in graded.parts
+    assert "availability" not in graded.missing

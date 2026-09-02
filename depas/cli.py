@@ -120,10 +120,6 @@ def enrich(args: argparse.Namespace) -> None:
     print(f"\n{len(pending)} listings enriched")
 
 
-# Most listings never state when they free up, and an undeclared date must not be read
-# as "never": it is the portals that are silent, not the apartment.
-AVAILABLE_BY = "(available_from IS NULL OR available_from <= ?)"
-
 FILTERS = (
     ("max_cost", "net_monthly_clp <= ?"),
     ("max_walk", "walk_minutes <= ?"),
@@ -132,7 +128,6 @@ FILTERS = (
     ("min_area", "area >= ?"),
     ("max_age", "age <= ?"),
     ("security", "security_type = ?"),
-    ("available_by", AVAILABLE_BY),
 )
 
 
@@ -162,12 +157,13 @@ ALERT_DELAY_SECONDS = 3
 # detail page's, so a listing can stop qualifying after it was stored.
 # Floor is deliberately absent: it grades rather than excludes, because the
 # portals that publish the most listings never publish a floor number at all.
+# So is the entrega date, for its own reason: what counts is how close it lands
+# to the date you want, and a distance is a score rather than a bound.
 ALERT_REQUIREMENTS = (
     ("DEPAS_COST_MAX", "net_monthly_clp <= ?"),
     ("DEPAS_BEDROOMS_MIN", "bedrooms >= ?"),
     ("DEPAS_WALK_MAX", "walk_minutes <= ?"),
     ("DEPAS_AREA_MIN", "(area IS NULL OR area >= ?)"),
-    ("DEPAS_AVAILABLE_BY", AVAILABLE_BY),
 )
 
 
@@ -593,7 +589,6 @@ def main() -> None:
     viewer.add_argument("--max-age", type=int,
                         help="max years since the building went up; alerts never filter on it")
     viewer.add_argument("--security", help='e.g. "24 horas"')
-    viewer.add_argument("--available-by", help="latest move-in date, as 2026-11-01")
     viewer.add_argument("--commune", action="append", default=[], type=Commune,
                         choices=list(Commune), metavar="SLUG")
     viewer.set_defaults(func=show)

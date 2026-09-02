@@ -595,18 +595,3 @@ def test_prose_states_the_move_in_date_when_the_spec_table_does_not(today):
     assert infer_from_description(
         "Depto luminoso. Disponible desde el 15 de octubre.")["available_from"] == "2026-10-15"
     assert "available_from" not in infer_from_description("Bodega disponible en el subterráneo.")
-
-
-def test_a_listing_free_only_after_the_move_in_date_is_not_announced(connection, sent, monkeypatch):
-    """A flat that frees up in December is no use when you need it by November."""
-    monkeypatch.setenv("DEPAS_AVAILABLE_BY", "2026-11-01")
-    save_detail(connection, "pi", "0", {"available_from": "2026-12-01"})
-    save_detail(connection, "pi", "1", {"available_from": "2026-10-01"})
-
-    _announce(connection, prefs(), limit=10)
-
-    announced = " ".join(text for text, _ in sent)
-    assert "https://x/0" not in announced
-    assert "https://x/1" in announced
-    # Nobody publishes this field reliably; silence must not cost a listing its alert.
-    assert "https://x/2" in announced
