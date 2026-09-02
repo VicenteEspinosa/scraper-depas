@@ -39,8 +39,8 @@ BEST = 100.0       # one span the right side of it, and the most a component can
 # Paying your zone's average UF/m2 is MET; this much off that average is a whole span.
 ZONE_SPAN = 0.20
 # Days past the move-in date you want that cost a whole span: a week late is already
-# everything you asked for and no more. The early side is measured against the window
-# between today and that date instead, so it is not here.
+# everything you asked for and no more. Only the late side has a fixed span -- the early
+# one is measured against the window between today and that date.
 LATE_SPAN = 7
 # What meeting every target on complete data is worth on top, since the components
 # alone cannot say "and nothing at all was compromised".
@@ -164,9 +164,9 @@ def _availability(row: dict, prefs: Preferences) -> float | None:
     today, wanted = date.today(), date.fromisoformat(configured)
     # A date already reached is entrega inmediata, not however long ago it was written.
     frees_up = max(date.fromisoformat(stated), today)
-    # Early is measured against the whole window you are shopping in, which a date of
-    # your own that is close or already past would collapse -- so it floors at a month.
-    span = max((wanted - today).days, LATE_SPAN) if frees_up < wanted else LATE_SPAN
+    # Early is measured against the whole window you are shopping in, which is always at
+    # least a day wide: an entrega before your date is one that is also after today.
+    span = (wanted - today).days if frees_up < wanted else LATE_SPAN
     return _points(abs((frees_up - wanted).days) / span - 1)
 
 

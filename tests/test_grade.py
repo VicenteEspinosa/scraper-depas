@@ -321,6 +321,15 @@ def test_everything_free_before_the_date_is_in_play_closest_first(monkeypatch, t
     assert all(graded.meets_targets for graded in (now, halfway, on_the_date))
 
 
+def test_the_near_end_of_the_window_is_met_however_narrow_the_window(monkeypatch, today):
+    """A flat free today is the near end of what you would take, wide window or narrow."""
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-09-04")
+
+    graded = Scale(prefs()).grade(_listing(available_from="2026-09-01"))
+
+    assert graded.parts["availability"] == MET
+
+
 def test_a_late_entrega_costs_more_than_the_same_wait_before_the_date(monkeypatch, today):
     """A month early is a flat you can take; a month late is nowhere to live."""
     monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-11-01")
