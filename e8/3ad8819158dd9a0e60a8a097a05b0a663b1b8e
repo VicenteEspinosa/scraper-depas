@@ -1,0 +1,20 @@
+docs/DESIGN.md
+  s_4e320d37a52223::t_63933a02ada6d7 1-227,235-261
+  s_4e320d37a52223::t_8f4b577fccf67d 228-234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e83ad8819158dd9a0e60a8a097a05b0a663b1b8e",
+  "prompts": {},
+  "sessions": {
+    "s_4e320d37a52223": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5004ed69-a66b-40ab-8779-2e505d2a9500",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
