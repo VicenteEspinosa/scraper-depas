@@ -20,7 +20,7 @@ import re
 import sqlite3
 from datetime import date
 
-from depas.communes import Commune
+from depas.communes import SANTIAGO_PROVINCE
 from depas.config import HOME_REQUIRED
 from depas.commute import resolve_locations
 from depas.detail import MONTH_NAMES
@@ -144,7 +144,10 @@ WEIGHT_PRESETS = ("0", "0.5", "1", "1.5", "2", "3")
 # How many months ahead the entrega picker offers, which is as far as a portal ever
 # publishes a date.
 MONTHS_OFFERED = 6
-COMMUNES_PER_PAGE = 14
+# The checklist offers the Provincia de Santiago and nothing else: the other eleven RM
+# communes the portal indexes are an hour out and would double a list you scroll past
+# every time. They are still settable -- typed, like every other open set.
+COMMUNES_PER_PAGE = 16
 # Three tiers is what a preference between metro lines is ever worth spelling out; a
 # line in none of them ranks below all of them, which is what the parser already means.
 TIERS_OFFERED = 3
@@ -246,7 +249,8 @@ CLEAR = "🗑️ Borrar"
 
 def _footer(name: str, group: str, clearable: bool = True, writable: bool = True) -> list:
     """The row every editor ends with: type it instead, forget it, or go back."""
-    return [_button(WRITE, "w", _short(name)) if writable else None,
+    written = ADD if name in SEPARATOR else REPLACE
+    return [_button(WRITE, "w", _short(name), written) if writable else None,
             _button(CLEAR, "x", _short(name)) if clearable else None,
             _button(BACK, "g", group)]
 
@@ -311,7 +315,12 @@ def _day_screen(name: str, prefs: Preferences, group: str) -> tuple[str, dict]:
 def _communes_screen(name: str, prefs: Preferences, group: str,
                      page: int = 0) -> tuple[str, dict]:
     chosen = prefs.value(name) or []
-    every = [commune.value for commune in Commune]
+    # Whatever is already chosen is offered too, wherever it is: a commune typed in has
+    # to be visible, or the checklist would be a place you could not untick it. First,
+    # not last -- an unusual choice belongs where you would look for it, not on a page
+    # of its own behind the thirty-two you did not pick.
+    province = [commune.value for commune in sorted(SANTIAGO_PROVINCE)]
+    every = [slug for slug in chosen if slug not in province] + province
     pages = (len(every) + COMMUNES_PER_PAGE - 1) // COMMUNES_PER_PAGE
     page = max(0, min(page, pages - 1))
     shown = every[page * COMMUNES_PER_PAGE:(page + 1) * COMMUNES_PER_PAGE]
@@ -323,10 +332,11 @@ def _communes_screen(name: str, prefs: Preferences, group: str,
     rows.append([_button("◀️", "p", _short(name), page - 1) if page else None,
                  _button(f"{page + 1}/{pages}", "p", _short(name), page),
                  _button("▶️", "p", _short(name), page + 1) if page < pages - 1 else None])
-    rows.append(_footer(name, group, writable=False))
+    rows.append(_footer(name, group))
     text = _text(name, prefs)
     if chosen:
         text += "\n\n" + " · ".join(_pretty(slug) for slug in chosen)
+    text += "\n\nLa lista es la Provincia de Santiago; el resto de la RM se agrega con ✏️."
     return text, _keyboard(*rows)
 
 
@@ -447,7 +457,9 @@ def _home_field_screen(connection: sqlite3.Connection, prefs: Preferences,
 def _home_commune_screen(connection: sqlite3.Connection, prefs: Preferences,
                          page: int = 0) -> tuple[str, dict]:
     home = _home_draft(connection, prefs)
-    every = [commune.value for commune in Commune]
+    every = [commune.value for commune in sorted(SANTIAGO_PROVINCE)]
+    if home.get("commune") and home["commune"] not in every:
+        every.append(home["commune"])
     pages = (len(every) + COMMUNES_PER_PAGE - 1) // COMMUNES_PER_PAGE
     page = max(0, min(page, pages - 1))
     shown = every[page * COMMUNES_PER_PAGE:(page + 1) * COMMUNES_PER_PAGE]
@@ -459,9 +471,11 @@ def _home_commune_screen(connection: sqlite3.Connection, prefs: Preferences,
     rows.append([_button("◀️", "hc", page - 1) if page else None,
                  _button(f"{page + 1}/{pages}", "hc", page),
                  _button("▶️", "hc", page + 1) if page < pages - 1 else None])
-    rows.append([_button(BACK, "s", "CURRENT_HOME")])
+    rows.append([_button(WRITE, "w", "CURRENT_HOME", COMMUNE),
+                 _button(BACK, "s", "CURRENT_HOME")])
     text = ("🏙️ <b>Comuna</b> · tu depto\n\nDe aquí sale el precio por m² de la zona "
-            "contra el que se compara.")
+            "contra el que se compara.\n\nLa lista es la Provincia de Santiago; el resto "
+            "de la RM se escribe con ✏️.")
     return text, _keyboard(*rows)
 
 
@@ -553,17 +567,20 @@ def setting_screen(connection: sqlite3.Connection, name: str,
 # setting and the action on its first line and the reply quotes it back, which is how a
 # typed answer finds its way home without a pending-edit table to go stale.
 
-REPLACE, ADD, ADDRESS = "reemplazar", "agregar", "direccion"
+REPLACE, ADD, ADDRESS, COMMUNE = "reemplazar", "agregar", "direccion", "comuna"
 PROMPT_HEAD = re.compile(r"^⚙️ ([A-Z_]+) · (\w+)$")
 ASKED = {
     REPLACE: "Responde a este mensaje con el nuevo valor.",
     ADD: "Responde a este mensaje con lo que quieras agregar.",
     ADDRESS: "Responde a este mensaje con la dirección de tu depto; la geocodifico y "
              "guardo las coordenadas.",
+    COMMUNE: "Responde a este mensaje con el slug de la comuna donde vives.",
 }
 EXAMPLES = {ADD: {"DEPAS_LOCATIONS": "pega, Avenida Providencia 1234",
-                  "DEPAS_ADMINS": "467291452"},
-            ADDRESS: {"DEPAS_CURRENT_HOME": "Avenida Los Leones 500, Providencia"}}
+                  "DEPAS_ADMINS": "467291452",
+                  "DEPAS_COMMUNES": "puente-alto, san-bernardo"},
+            ADDRESS: {"DEPAS_CURRENT_HOME": "Avenida Los Leones 500, Providencia"},
+            COMMUNE: {"DEPAS_CURRENT_HOME": "puente-alto"}}
 
 
 def _prompt(name: str, action: str) -> str:
@@ -705,7 +722,9 @@ def _toggle(connection: sqlite3.Connection, callback: dict, rest: str) -> str:
 
 
 LAST_ADMIN = "no puedo dejar la lista vacía: nadie podría volver a configurar desde el chat"
-SEPARATOR = {"DEPAS_LOCATIONS": "; ", "DEPAS_ADMINS": ","}
+# The list settings, and what joins their entries. Being in here is what makes an
+# editor append what is typed rather than replace everything with it.
+SEPARATOR = {"DEPAS_LOCATIONS": "; ", "DEPAS_ADMINS": ",", "DEPAS_COMMUNES": ","}
 
 
 def _drop(connection: sqlite3.Connection, callback: dict, rest: str) -> str:
@@ -802,14 +821,23 @@ def answer_prompt(connection: sqlite3.Connection, fetcher: Fetcher, message: dic
 def _typed(connection: sqlite3.Connection, fetcher: Fetcher, name: str, action: str,
            typed: str, prefs: Preferences) -> str:
     """Apply one typed value: replacing the setting, appending to it, or geocoding it."""
+    if action == COMMUNE:
+        # Validated by the commune parser rather than by a second list of slugs: one
+        # place knows what a commune is called, and it is already the one that says so.
+        setting("DEPAS_COMMUNES").parse("La comuna", typed)
+        home = _home_draft(connection, prefs) | {"commune": typed.strip()}
+        return _keep_home(connection, home)
     if action == ADDRESS:
         lat, lon, where = _coordinates(fetcher, typed)
         home = _home_draft(connection, prefs) | {"lat": lat, "lon": lon}
         return f"📍 {escape(where)}\n{_keep_home(connection, home)}"
     if action == ADD:
-        existing = (prefs.raw(name) or "").strip()
         separator = SEPARATOR[name]
-        typed = f"{existing}{separator}{typed}" if existing else typed
+        existing = [entry.strip() for entry in (prefs.raw(name) or "").split(separator.strip())]
+        added = [entry.strip() for entry in typed.split(separator.strip())]
+        # Deduplicated: typing a commune already ticked would otherwise double it, and a
+        # list setting means the same thing either way -- so it should read the same too.
+        typed = separator.join(dict.fromkeys(entry for entry in existing + added if entry))
     if name == "DEPAS_LOCATIONS":
         # An address is a way of typing coordinates, resolved once on the way in so the
         # table keeps what routing actually wants. Same call the CLI makes.

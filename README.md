@@ -142,17 +142,19 @@ setting already declares, so what you get is what the value can be:
 | A number of pesos | `±$25.000` and `±$100.000`, never below zero. |
 | Minutes, m², floors, years | `±1` and `±5`, with the unit shown. |
 | Amoblado, último piso | The three things a trait can mean: excluir, castigar, ignorar. |
-| Comunas | A checklist of the 43 the portal indexes, paged, ticked. |
+| Comunas | A paged checklist of the 32 in the Provincia de Santiago, ticked. The other eleven RM communes the portal indexes are an hour out, so they are typed rather than scrolled past every time — and once chosen, one shows up first in the checklist so it can be unticked like any other. |
 | Líneas de metro | One row per line, its tier ticked — the `>` and `,` string is rebuilt for you. |
 | Entrega hasta | The first of each of the next six months. |
 | Conserjería, dónde publicar | The values that appear in the database, so nothing offered could fail to match. |
 | Tu depto actual | Field by field, saved only once it has everything `/compare` needs. |
 
-Four things are genuinely open sets and are the only ones typed: an address (geocoded
-on the way in, same as the CLI), somebody's user id, and the two escape hatches — every
-editor keeps an **✏️ Escribir** and a **🗑️ Borrar**. A typed value answers a
-force-reply prompt that names the setting, which is how it finds its way home without
-any pending-edit state to go stale.
+What is typed is what a keyboard should not carry: an address (geocoded on the way in,
+same as the CLI), somebody's user id, and the tail of a list too long to be worth
+scrolling — plus the escape hatch every editor keeps, an **✏️ Escribir** and a
+**🗑️ Borrar**. Typing into a list setting appends to it and de-duplicates, so it adds
+to the checklist rather than replacing it. A typed value answers a force-reply prompt
+that names the setting, which is how it finds its way home without any pending-edit
+state to go stale.
 
 Every write goes through the same path `depas config set` uses, so a value the parsers
 refuse is refused here too, with the same message, before it is stored.

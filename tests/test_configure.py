@@ -55,6 +55,19 @@ def _labels(keyboard):
     return [button["text"] for row in keyboard["inline_keyboard"] for button in row]
 
 
+def _paged(connection, label, name="DEPAS_COMMUNES", home=False):
+    """Find one button anywhere in a paged checklist, as (its data, the page it is on)."""
+    prefs = Preferences.load(connection)
+    for page in range(6):
+        _, keyboard = (configure._home_commune_screen(connection, prefs, page) if home
+                       else setting_screen(connection, name, prefs, page))
+        for row in keyboard["inline_keyboard"]:
+            for button in row:
+                if button["text"] == label:
+                    return button["callback_data"].removeprefix(PREFIX), page
+    return None, None
+
+
 def _data_for(keyboard, label):
     for row in keyboard["inline_keyboard"]:
         for button in row:
@@ -213,11 +226,71 @@ def test_a_commune_is_ticked_and_unticked_from_the_checklist(connection, posted)
     assert "cerrillos" not in Preferences.load(connection).communes()
 
 
-def test_the_commune_checklist_pages_rather_than_sending_forty_three_rows(connection):
+def test_the_checklist_offers_the_province_and_leaves_the_rest_to_be_typed(connection):
+    """Forty-three is a list you scroll past; the eleven an hour out are not worth it."""
     _, keyboard = setting_screen(connection, "DEPAS_COMMUNES", Preferences.load(connection))
 
-    assert "1/4" in _labels(keyboard)
-    assert "⬜ Vitacura" not in _labels(keyboard)
+    assert _paged(connection, "⬜ Providencia")[0] is not None
+    assert _paged(connection, "⬜ Puente Alto")[0] is None
+    assert configure.WRITE in _labels(keyboard)
+
+
+def test_a_commune_outside_the_province_is_typed_and_then_untickable(connection, posted):
+    """Whatever is chosen is offered too, wherever it is, or it could not be removed."""
+    answer_prompt(connection, None,
+                  _message("puente-alto", replying="⚙️ DEPAS_COMMUNES · agregar"),
+                  Preferences.load(connection))
+    assert "puente-alto" in Preferences.load(connection).communes()
+
+    data, _ = _paged(connection, "✅ Puente Alto")
+    _press(connection, data)
+
+    assert "puente-alto" not in Preferences.load(connection).communes()
+
+
+def test_typing_a_commune_adds_it_rather_than_replacing_the_checklist(connection, posted):
+    set_preference(connection, "DEPAS_COMMUNES", "providencia,nunoa")
+
+    answer_prompt(connection, None,
+                  _message("puente-alto", replying="⚙️ DEPAS_COMMUNES · agregar"),
+                  Preferences.load(connection))
+
+    assert Preferences.load(connection).communes() == ["providencia", "nunoa", "puente-alto"]
+
+
+def test_typing_a_commune_already_ticked_does_not_double_it(connection, posted):
+    set_preference(connection, "DEPAS_COMMUNES", "providencia")
+
+    answer_prompt(connection, None,
+                  _message("providencia, nunoa", replying="⚙️ DEPAS_COMMUNES · agregar"),
+                  Preferences.load(connection))
+
+    assert Preferences.load(connection).communes() == ["providencia", "nunoa"]
+
+
+def test_a_commune_that_does_not_exist_is_refused_where_it_was_typed(connection, posted):
+    """The same parser the CLI uses, so the same message names what a slug looks like."""
+    set_preference(connection, "DEPAS_COMMUNES", "providencia")
+
+    answer_prompt(connection, None,
+                  _message("nuñoa", replying="⚙️ DEPAS_COMMUNES · agregar"),
+                  Preferences.load(connection))
+
+    assert "estacion-central" in posted["sent"][0][0]
+    assert Preferences.load(connection).communes() == ["providencia"]
+
+
+def test_your_own_commune_can_also_be_typed_when_it_is_out_of_the_province(connection, posted):
+    """The home picker is the same shortened list, so it needs the same way out."""
+    for field, value in (("price_clp", 800_000), ("common_expenses", 130_000),
+                         ("area_m2", 62)):
+        _press(connection, f"i:{field}:{value}")
+
+    answer_prompt(connection, None,
+                  _message("puente-alto", replying="⚙️ DEPAS_CURRENT_HOME · comuna"),
+                  Preferences.load(connection))
+
+    assert _paged(connection, "● Puente Alto", home=True)[0] is not None
 
 
 def test_a_metro_line_moves_tier_without_anybody_writing_the_string(connection, posted):
