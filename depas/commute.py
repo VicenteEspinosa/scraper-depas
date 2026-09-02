@@ -16,19 +16,15 @@ from depas.metro import (
     nearest_station,
 )
 
-# Transitous routes over Santiago's whole Red network, buses included, from the DTPM
-# feed. It is community-run and best-effort, so every answer is cached and the offline
-# estimate below stands in whenever it cannot answer.
+# Transitous routes Santiago's whole Red network, buses included, from the DTPM feed.
 ROUTER = "https://api.transitous.org/api/v1/plan"
-# The same service geocodes, so an address can be typed instead of coordinates and no
-# second provider has to be trusted, rate-limited or credentialed.
+# The same service geocodes, so an address needs no second provider to be trusted.
 GEOCODER = "https://api.transitous.org/api/v1/geocode"
 # Their terms ask callers to identify themselves rather than arrive anonymously.
 USER_AGENT = "scraper-depas/1.0 (+https://github.com/VicenteEspinosa/scraper-depas)"
 SANTIAGO = ZoneInfo("America/Santiago")
 
-# Metro de Santiago's commercial speed, stops included, and how much longer the track
-# runs than the straight line between two stations.
+# Metro's commercial speed with stops, and how much longer the track runs than the line.
 METRO_SPEED_M_PER_MIN = 580.0
 METRO_ROUTE_FACTOR = 1.2
 # Waiting for the first train, and again after changing lines.
@@ -57,18 +53,13 @@ def estimated_minutes(lat: float, lon: float, to_lat: float, to_lon: float) -> i
 
 
 def coordinates(fetcher: Fetcher, address: str) -> tuple[float, float, str]:
-    """Where an address is, plus the place the geocoder actually matched it to.
-
-    The match comes back so whoever typed the address can see what it was read as: a
-    street number that does not exist still resolves, to the nearest one that does.
-    """
+    """Where an address is, plus the place the geocoder actually matched it to."""
     response = fetcher.get(GEOCODER, params={"text": address, "language": "es"},
                            headers={"User-Agent": USER_AGENT})
     matches = [found for found in response.json() if found.get("type") != "STOP"]
     if not matches:
         raise ValueError(f"no place found for {address!r}")
-    # A street and number is meant literally, and the geocoder will happily rank a
-    # landmark with a similar name above it, so a real address wins when there is one.
+    # A street and number is meant literally, so a real address beats a similar landmark.
     best = next((found for found in matches if found.get("type") == "ADDRESS"), matches[0])
     where = ", ".join(area["name"] for area in best.get("areas", []) if area.get("default"))
     return best["lat"], best["lon"], f"{best['name']}{f', {where}' if where else ''}"
@@ -85,12 +76,7 @@ def _coordinates_already(parts: list[str]) -> bool:
 
 
 def resolve_locations(fetcher: Fetcher, raw: str) -> tuple[str, list[str]]:
-    """Turn any `name,address` entries into `name,lat,lon`, reporting what each matched.
-
-    Resolved on the way in rather than on every read: the table keeps coordinates, which
-    is what routing wants, and the address is a way of typing them rather than a second
-    thing to store and keep fresh.
-    """
+    """Turn any `name,address` entries into `name,lat,lon`, reporting what each matched."""
     resolved, matched = [], []
     for entry in raw.split(";"):
         parts = [part.strip() for part in entry.split(",")]

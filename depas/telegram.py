@@ -28,8 +28,7 @@ def call(method: str, **params: Any) -> Any:
     response = requests.post(f"{API}/bot{bot_token()}/{method}", json=params, timeout=TIMEOUT)
     payload = response.json()
     if not payload.get("ok"):
-        # Telegram puts the actionable part in `parameters` — a migrated chat's new id
-        # lands there, and dropping it turns a one-line fix into a debugging session.
+        # Telegram puts the actionable part in `parameters`: a migrated chat's new id.
         detail = payload.get("parameters") or ""
         raise RuntimeError(
             f"telegram {method} failed: {payload.get('description')} {detail}".strip())
@@ -40,11 +39,7 @@ _CHATS: dict[str, dict[str, Any]] = {}
 
 
 def _chat(chat_id: str) -> dict[str, Any]:
-    """getChat for one chat, asked once per process rather than once per card.
-
-    What is read out of it — the type, and whether a discussion group is linked —
-    only changes when the channel itself is reconfigured, which is a restart.
-    """
+    """getChat for one chat, asked once per process: what it says only changes on a restart."""
     if chat_id not in _CHATS:
         _CHATS[chat_id] = call("getChat", chat_id=chat_id)
     return _CHATS[chat_id]
@@ -56,22 +51,15 @@ def chat_type(chat_id: str) -> str:
 
 
 def hides_comments(chat_id: str) -> bool:
-    """Whether an inline keyboard posted here would hide the way into a card's comments.
-
-    A channel post's «Comentarios» button and a bot's inline keyboard share the one
-    slot under the message, and the keyboard wins: attach one to a card in a channel
-    with a linked discussion group and the thread can no longer be opened from the
-    channel at all (bugs.telegram.org/c/41803). So a card posted there carries no
-    keyboard, and the verdict buttons are posted into the thread instead.
-    """
+    """Whether an inline keyboard posted here would hide the way into a card's comments."""
+    # A keyboard takes the slot «Comentarios» lives in: bugs.telegram.org/c/41803.
     chat = _chat(str(chat_id))
     return chat.get("type") == "channel" and chat.get("linked_chat_id") is not None
 
 
 def _markup(chat_id: str, buttons: dict[str, Any] | None) -> dict[str, Any]:
     """The reply_markup for a card, left off wherever a keyboard would cost the comments."""
-    # Asked only when there is a keyboard to place, so a card with no buttons never
-    # spends a getChat call.
+    # Asked only when there is a keyboard to place, so a card with none spends no getChat.
     if not buttons or hides_comments(chat_id):
         return {}
     return {"reply_markup": buttons}
@@ -94,13 +82,11 @@ COMPLETE_MARK = "✔️"
 PARTIAL_MARK = "❓"
 # At or past every target it could be scored on: nothing was compromised.
 MEETS_TARGETS_MARK = "✅"
-# Past 100 the listing has not merely met the targets, it has beaten them across the
-# board — the flat this whole thing is looking for. It gets a banner, not a mark.
+# Past 100 it has beaten every target across the board, so it gets a banner, not a mark.
 FLAWLESS_SCORE = 100
 FLAWLESS_BANNER = "💎💎💎💎💎💎💎💎"
 TEST_MARK = "🧪"
-# The verdict given from the chat, so a scroll through the channel shows at a
-# glance what has already been judged.
+# The verdict given from the chat, so a scroll through the channel shows what is judged.
 INTEREST_MARK = {1: "⭐", -1: "🚫"}
 AMENITY_LABELS = (
     ("has_elevator", "ascensor"), ("has_concierge", "conserjería"),
@@ -186,16 +172,14 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
     lines.append(f"💰 <b>{_clp(row.get('net_monthly_clp'))}</b> neto al mes")
 
     link = f'\n<a href="{escape(row["url"])}">Ver aviso →</a>'
-    # A discarded listing keeps only what says which one it was; everything below is
-    # there to decide with, and that decision has been made.
+    # A discarded listing keeps only what says which one it was; the decision is made.
     if row.get("interest") == -1:
         lines.append(link)
         return "\n".join(lines)
 
     gastos = row.get("common_expenses")
     breakdown = f"    ↳ {_clp(row.get('price_clp'))} arriendo"
-    # Undeclared gastos comunes are estimated, and the net figure above already
-    # includes the estimate, so the card has to admit which number it used.
+    # The net figure above already includes the estimate, so the card admits which it used.
     lines.append(
         f"{breakdown} + {_clp(gastos)} gastos comunes" if gastos
         else f"{breakdown} + {_clp(DEFAULT_COMMON_EXPENSES)} gastos comunes "
@@ -352,8 +336,7 @@ UNDO_LABEL = {1: "⭐ Interesa · ↩️ deshacer", -1: "🚫 Descartado · ↩�
 
 def verdict_buttons(listing_id: int, interest: int | None = None) -> dict[str, Any]:
     """The keyboard under a card: both verdicts, or the way back from the one given."""
-    # callback_data is capped at 64 bytes, so what travels is the listing's rowid --
-    # stable for the life of a listing -- rather than the portal and its external id.
+    # callback_data is capped at 64 bytes, so what travels is the listing's rowid.
     if interest is not None:
         return {"inline_keyboard": [[
             {"text": UNDO_LABEL[interest], "callback_data": f"{UNDO_BUTTON}:{listing_id}"},
@@ -371,15 +354,8 @@ def answer_callback(callback_id: str, text: str) -> None:
 
 def send_buttons(chat_id: str, text: str, thread_id: int,
                  buttons: dict[str, Any]) -> dict[str, Any]:
-    """Post the verdict keyboard as a comment inside a card's thread.
-
-    Where the card itself cannot hold the keyboard — see `hides_comments` — this is
-    where it goes: one level down, in the discussion group, which is a plain group
-    as far as reply markup is concerned.
-    """
-    # A discussion group is not a forum, so message_thread_id alone leaves the message
-    # loose in the group: what puts it under the card is replying to Telegram's copy of
-    # it, whose id is the thread's.
+    """Post the verdict keyboard as a comment inside a card's thread."""
+    # A group is no forum, so what puts this under the card is replying to its copy.
     return call("sendMessage", chat_id=chat_id, text=text,
                 reply_parameters={"message_id": thread_id},
                 reply_markup=buttons, link_preview_options={"is_disabled": True})
@@ -394,11 +370,7 @@ def edit_buttons(chat_id: str, message_id: int, buttons: dict[str, Any]) -> None
 def send_listing(chat_id: str, text: str, image_url: str | None = None,
                  thread_id: int | None = None,
                  buttons: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Post the card, as a photo when the listing has one and the caption fits.
-
-    Returns Telegram's own record of the message: its ids are what a later edit is
-    addressed to, and what a command commented under the card is traced back through.
-    """
+    """Post the card, as a photo when the listing has one and the caption fits."""
     # Only ever sent when replying inside a comment thread; Telegram rejects a null.
     thread = {"message_thread_id": thread_id} if thread_id else {}
     thread |= _markup(chat_id, buttons)
@@ -416,13 +388,9 @@ def send_listing(chat_id: str, text: str, image_url: str | None = None,
 def edit_listing(chat_id: str, message_id: int, text: str, is_photo: bool = False,
                  buttons: dict[str, Any] | None = None) -> None:
     """Re-render a card already posted, in place."""
-    # An edit that omits reply_markup drops the keyboard, so the buttons have to be
-    # sent again every time — there is no such thing as editing only the text. That
-    # also means redrawing a channel card, where `_markup` withholds them, is what
-    # gives a card posted with a keyboard its «Comentarios» button back.
+    # An edit that omits reply_markup drops the keyboard, so the buttons ride every edit.
     markup = _markup(chat_id, buttons)
-    # A photo card holds its text in the caption, which is a different edit method
-    # and a different field; only a text card has a link preview to suppress.
+    # A photo card holds its text in the caption, a different method and a different field.
     if is_photo:
         call("editMessageCaption", chat_id=chat_id, message_id=message_id,
              caption=text, parse_mode="HTML", **markup)
@@ -431,10 +399,7 @@ def edit_listing(chat_id: str, message_id: int, text: str, is_photo: bool = Fals
          parse_mode="HTML", link_preview_options={"is_disabled": True}, **markup)
 
 
-# The config menu never goes to a channel -- it is only ever answered to a person the
-# whitelist recognises, and a channel post has no person to recognise -- so these three
-# attach their keyboard directly rather than through `_markup`, which exists to protect
-# a channel card's «Comentarios» button.
+# The config menu is only ever answered to a person, so these three skip `_markup`.
 
 
 def send_menu(chat_id: str, text: str, buttons: dict[str, Any] | None,
@@ -459,13 +424,7 @@ def edit_menu(chat_id: str, message_id: int, text: str, buttons: dict[str, Any])
 
 def ask_value(chat_id: str, text: str, thread_id: int | None = None) -> dict[str, Any]:
     """Ask for a value no keyboard can offer, as a reply the answer will quote back."""
-    # force_reply is what makes the answer carry reply_to_message, which is where the
-    # setting being edited is read back from -- there is no pending-edit state anywhere.
-    #
-    # Not `selective`: it targets only somebody @mentioned in the text or, where the
-    # bot's message is itself a reply, whoever it answers. This message is neither -- it
-    # is posted from a button press, which carries no message of the presser's to reply
-    # to -- so selective would target nobody and the reply box would open for no one.
+    # Not `selective`: posted from a button press, it has nobody to target, so nobody replies.
     where: dict[str, Any] = {"message_thread_id": thread_id} if thread_id else {}
     return call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
                 reply_markup={"force_reply": True},
@@ -479,8 +438,7 @@ def reply(chat_id: str, text: str, thread_id: int | None = None,
     if thread_id:
         where["message_thread_id"] = thread_id
     if reply_to:
-        # allow_sending_without_reply: the answer still matters if the command was
-        # deleted between arriving and being handled.
+        # allow_sending_without_reply: the answer still matters if the command was deleted.
         where["reply_parameters"] = {"message_id": reply_to,
                                      "allow_sending_without_reply": True}
     return call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML", **where)
