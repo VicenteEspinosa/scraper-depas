@@ -23,8 +23,11 @@ jobs:
       - name: Install
         run: uv sync --locked --dev
 
-      - name: Lint
-        run: uv run ruff check
-
       - name: Run tests
         run: uv run pytest -q
+
+      # always(): a red test suite and a lint complaint are separate answers, and
+      # one job should not hide the other behind the step that failed first.
+      - name: Lint
+        if: always()
+        run: uv run ruff check
