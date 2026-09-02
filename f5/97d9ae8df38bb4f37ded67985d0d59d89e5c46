@@ -1,0 +1,33 @@
+depas/cli.py
+  s_4e320d37a52223::t_782d839a6ad971 158,175,223,234,248,260,330,401,447,475,599
+depas/portals/houm.py
+  s_4e320d37a52223::t_782d839a6ad971 38
+depas/portals/portalinmobiliario.py
+  s_4e320d37a52223::t_782d839a6ad971 15
+depas/metro.py
+  s_4e320d37a52223::t_782d839a6ad971 3,133
+depas/portals/assetplan.py
+  s_4e320d37a52223::t_782d839a6ad971 62
+depas/communes.py
+  s_4e320d37a52223::t_782d839a6ad971 5,7-8
+depas/portals/toctoc.py
+  s_4e320d37a52223::t_782d839a6ad971 49
+depas/detail.py
+  s_4e320d37a52223::t_782d839a6ad971 10,27,64,74,77,80,82,102,125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "f597d9ae8df38bb4f37ded67985d0d59d89e5c46",
+  "prompts": {},
+  "sessions": {
+    "s_4e320d37a52223": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5004ed69-a66b-40ab-8779-2e505d2a9500",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
