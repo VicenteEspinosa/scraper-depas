@@ -1,0 +1,25 @@
+depas/preferences.py
+  s_4e320d37a52223::t_698926d1d88587 1,14,59,121,127,135,154,283,289,301,314,327,335,340,345,442,464,468,474,479,503,515,526
+depas/grade.py
+  s_4e320d37a52223::t_25671751f465a4 1,8,20,22,25,27,43,50-51,99,123,130,165,167,173,181,200,217,223
+depas/traits.py
+  s_4e320d37a52223::t_f93356fd86bd48 1,11,14,48
+depas/config.py
+  s_4e320d37a52223::t_698926d1d88587 1,7,10,13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e48ab9c472bc7d310653b25c8bd4f5727d3d4943",
+  "prompts": {},
+  "sessions": {
+    "s_4e320d37a52223": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5004ed69-a66b-40ab-8779-2e505d2a9500",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
