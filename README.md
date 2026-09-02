@@ -280,6 +280,15 @@ The three `seed.env` leaves out — `TELEGRAM_CHAT_ID`, `DEPAS_LOCATIONS` and
 a public repo — are set on the box with `depas config set`. A fresh install has no chat
 until you do, and says so: posting an alert without one raises rather than guessing.
 
+`DEPAS_ADMINS` is the one identifying value the seed does carry, because a clone with
+no admin in it can only be configured over SSH. It is the author's id: change it.
+
+Since the seed runs **once per database**, adding a line to `seed.env` does nothing to a
+deployment that already has one — `preferences_seeded` in the `settings` table is what
+stops it, and the deploy never re-runs it. Apply such a change with `depas config set`,
+not with `config import-env --force`, which re-imports everything and overwrites
+whatever was edited from the chat since.
+
 | Setting | Meaning |
 | --- | --- |
 | `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME` | Monthly CLP you would collect subletting. Default 0 — net then equals total, rather than inventing a market rate. |
@@ -295,6 +304,7 @@ until you do, and says so: posting an alert without one raises rather than guess
 | `DEPAS_CURRENT_HOME` | Your own apartment as one JSON object, which `/compare` sets a listing against and which `DEPAS_CURRENT_COST` falls back to. Requires `price_clp`, `common_expenses`, `area_m2`, `lat`, `lon`. |
 | `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. Environment only — it says where the settings live, so it cannot be one of them. |
 | `TELEGRAM_BOT_TOKEN` | From @BotFather. Environment only: a credential does not belong in the table beside the data. |
+| `DEPAS_ADMINS` | Numeric Telegram user ids allowed to change the settings from a chat, comma-separated. Empty is nobody, and being in the alert chat is not enough — a discussion group is joinable. Ids rather than usernames, because a username can be given away and reclaimed. **The seed carries the author's id**, so replace it with yours if you are hosting your own; `@userinfobot` tells you what it is. |
 | `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread, which is also where `/like` and `/dislike` are read from; a group takes the cards but leaves them undiscussable, so verdicts have to be replies. Switching between the two is only this value. |
 
 ## Schema

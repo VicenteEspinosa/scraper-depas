@@ -99,6 +99,39 @@ def test_a_half_filled_home_is_refused(connection):
         set_preference(connection, "DEPAS_CURRENT_HOME", '{"price_clp": 800000}')
 
 
+# -- who may configure the bot from a chat ---------------------------------------
+
+
+def test_nobody_configures_the_bot_from_a_chat_until_somebody_is_named(connection):
+    """The default has to be closed: an unset whitelist cannot mean everybody."""
+    prefs = Preferences.load(connection)
+
+    assert prefs.admins() == []
+    assert not prefs.is_admin(467291452)
+
+
+def test_an_admin_is_recognised_and_nobody_else_is(connection):
+    set_preference(connection, "DEPAS_ADMINS", "467291452, 87654321")
+    prefs = Preferences.load(connection)
+
+    assert prefs.is_admin(467291452)
+    assert prefs.is_admin(87654321)
+    assert not prefs.is_admin(11111111)
+
+
+def test_a_message_with_no_author_is_never_an_admin(connection):
+    """A channel post is signed by the channel, so there is no person to authorise."""
+    set_preference(connection, "DEPAS_ADMINS", "467291452")
+
+    assert not Preferences.load(connection).is_admin(None)
+
+
+def test_a_username_is_refused_where_an_id_is_wanted(connection):
+    """A username can be given away and reclaimed; a whitelist keyed on one changes hands."""
+    with pytest.raises(ValueError, match="not a username"):
+        set_preference(connection, "DEPAS_ADMINS", "@VicenteEspinosa")
+
+
 def test_an_unknown_setting_is_refused_with_a_suggestion():
     """A misremembered name is the common case, so the error says what was probably meant."""
     with pytest.raises(ValueError, match="DEPAS_COST_TARGET"):
