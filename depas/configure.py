@@ -1,20 +1,4 @@
-"""The settings menu the bot answers `/config` with: every knob, edited from a chat.
-
-The registry in `depas.preferences` already knows what a setting is called, how its
-text is parsed and what it means. This module adds the one thing a keyboard needs and
-a parser cannot say: how you would rather type it. A weight is six presets, a commune
-is a checklist of the forty-three that exist, a metro line is a tier, and only the
-handful that are genuinely open -- an address, somebody's user id -- are typed at all.
-
-Deriving the editor from `Setting.parse` rather than from a table of settings is what
-keeps the promise the registry makes: adding a knob is adding a `Setting`, and it
-arrives in the menu with a keyboard already. `LABELS` and `MENU` are copy and running
-order, checked by a test against the registry so a new setting cannot go unreachable.
-
-Everything a press writes goes through `store_preference`, so the chat and the CLI
-share one validated write path -- a value the parsers refuse is refused here too, with
-the same message, while somebody is still looking at it.
-"""
+"""The settings menu `/config` opens: every knob, edited from a chat (docs/DESIGN.md)."""
 import json
 import re
 import sqlite3
@@ -32,15 +16,11 @@ from depas.telegram import answer_callback, ask_value, edit_menu, escape, send_m
 from depas.traits import DISPOSITIONS, EXCLUDE, IGNORE, PENALISE
 
 COMMAND = "/config"
-# What Telegram sends when somebody opens a private chat with the bot and presses the
-# START button it shows them. It is the first thing a new admin ever sends, so it opens
-# the menu too rather than going unanswered.
+# The first thing a new admin ever sends, so it opens the menu rather than going unanswered.
 START = "/start"
-# Every callback this module owns starts here, so `bot` can route a press without
-# knowing anything about the menu behind it.
+# Every callback this module owns starts here, so `bot` can route a press.
 PREFIX = "k:"
-# Telegram caps callback_data at 64 bytes and silently rejects the whole keyboard past
-# it, so a button whose data would not fit is dropped rather than sent.
+# Telegram caps callback_data at 64 bytes and silently rejects the whole keyboard past it.
 DATA_LIMIT = 64
 
 DENIED = "no estás en DEPAS_ADMINS"
@@ -54,10 +34,7 @@ STALE = "ese menú quedó viejo; abre /config otra vez"
 
 # ── the menu, as copy ───────────────────────────────────────────────────────────
 
-# What a setting is called in the menu. The emoji is read left to right: what the
-# setting is about, then -- for the three numbers that look alike and mean opposite
-# things -- whether it is a ceiling (🔺), a floor (🔻) or something to aim at (🎯).
-# A weight carries only the first: «Peso ·» already says which of the three it is.
+# The emoji reads left to right: what it is about, then ceiling 🔺 / floor 🔻 / target 🎯.
 LABELS = {
     "TELEGRAM_CHAT_ID": "📢 Dónde publicar",
     "DEPAS_ADMINS": "👥 Quién configura",
@@ -99,10 +76,7 @@ LABELS = {
     "DEPAS_TRAITS_WEIGHT": "✨ Peso · características",
 }
 
-# Group key, its heading, and the settings it holds in the order they are shown. Every
-# setting appears exactly once, which is what lets an editor know where its «Volver»
-# goes -- and the weights are all in «Pesos» rather than each beside the parameter it
-# scales, because a weight only means anything against the other eleven.
+# Group key, heading and the settings it holds, in order; each appears exactly once.
 MENU: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("search", "🔍 Búsqueda", ("DEPAS_COMMUNES", "DEPAS_BEDROOMS_MIN", "DEPAS_GRADE_MIN")),
     ("cost", "💰 Costo", ("DEPAS_COST_MAX", "DEPAS_COST_TARGET", "DEPAS_PARKING_INCOME",
@@ -122,9 +96,7 @@ GROUPS = {key: (heading, names) for key, heading, names in MENU}
 
 
 # ── what kind of keyboard a setting gets ────────────────────────────────────────
-# Keyed on the parser's own name rather than on the setting's, so a new knob inherits
-# an editor from the way its text is read. A parser with no kind here is a mistake the
-# tests catch, not a setting that quietly falls back to a text box.
+# Keyed on the parser's name, so a new knob inherits an editor from how its text is read.
 
 NUMBER, WEIGHT, CHOICE, DAY, PLACES, PEOPLE, HOME, COMMUNES, TIERS, PICK = (
     "number", "weight", "choice", "day", "places", "people", "home", "communes",
@@ -133,39 +105,30 @@ KIND = {"_whole": NUMBER, "_clp": NUMBER, "_number": WEIGHT, "_disposition": CHO
         "_day": DAY, "_locations": PLACES, "_admins": PEOPLE, "_home": HOME,
         "_communes": COMMUNES, "_tiers": TIERS, "_text": PICK}
 
-# Settings counted in pesos, which step by an amount you would actually move a budget
-# by rather than by one peso.
+# Counted in pesos, so they step by an amount you would actually move a budget by.
 MONEY = frozenset({"DEPAS_COST_MAX", "DEPAS_COST_TARGET", "DEPAS_CURRENT_COST",
                    "DEPAS_PARKING_INCOME", "DEPAS_STORAGE_INCOME"})
 MONEY_STEPS, PLAIN_STEPS = (25_000, 100_000), (1, 5)
-# What a bare number is counted in, so a value read off a button says what it measures.
-# Pesos are not here: they are already rendered with their sign.
+# What a bare number is counted in; pesos are absent, already rendered with their sign.
 UNITS = {"DEPAS_WALK_MAX": " min", "DEPAS_WALK_TARGET": " min",
          "DEPAS_COMMUTE_MAX": " min", "DEPAS_COMMUTE_TARGET": " min",
          "DEPAS_AREA_MIN": " m²", "DEPAS_AREA_TARGET": " m²",
          "DEPAS_AGE_TARGET": " años", "DEPAS_FLOOR_TARGET": "º",
          "DEPAS_BEDROOMS_MIN": "D", "DEPAS_AMENITIES_TARGET": " de 9",
          "DEPAS_GRADE_MIN": " pts"}
-# What a weight is ever set to in practice: off, half, standard, and the two ways of
-# saying "this matters more than the rest".
+# What a weight is ever set to in practice.
 WEIGHT_PRESETS = ("0", "0.5", "1", "1.5", "2", "3")
-# How many months ahead the entrega picker offers, which is as far as a portal ever
-# publishes a date.
+# As far ahead as a portal ever publishes an entrega date.
 MONTHS_OFFERED = 6
-# The checklist offers the Provincia de Santiago and nothing else: the other eleven RM
-# communes the portal indexes are an hour out and would double a list you scroll past
-# every time. They are still settable -- typed, like every other open set.
+# The checklist offers the Provincia de Santiago only; the rest of the RM is typed.
 COMMUNES_PER_PAGE = 16
-# Three tiers is what a preference between metro lines is ever worth spelling out; a
-# line in none of them ranks below all of them, which is what the parser already means.
+# Three tiers is what a preference between metro lines is ever worth spelling out.
 TIERS_OFFERED = 3
-# Every value the code can ever put in `security_type`, so the picker offers it even
-# on a database that has not seen one yet.
+# Offered by the picker even on a database that has not seen one yet.
 KNOWN_SECURITY = ("24 horas",)
 
 DISPOSITION_LABELS = {EXCLUDE: "🚫 Excluir", PENALISE: "👎 Castigar", IGNORE: "🙈 Ignorar"}
-# The fields of DEPAS_CURRENT_HOME that a stepper can edit, with their steps. lat/lon
-# are not here: they are set by typing an address, which is geocoded on the way in.
+# lat/lon are absent: they are set by typing an address, geocoded on the way in.
 HOME_FIELDS = (
     ("price_clp", "💵 Arriendo", MONEY_STEPS),
     ("common_expenses", "🧾 Gastos comunes", MONEY_STEPS),
@@ -177,9 +140,7 @@ HOME_FIELDS = (
     ("parking_spaces", "🚗 Estacionamientos", PLAIN_STEPS),
     ("storage_units", "📦 Bodegas", PLAIN_STEPS),
 )
-# Held apart from the setting while it is incomplete: DEPAS_CURRENT_HOME only accepts a
-# JSON object that already has every required field, so a home built one press at a
-# time has nowhere valid to live until the address has been typed.
+# Where a home still missing required fields waits, since the setting refuses one.
 DRAFT_KEY = "config_home_draft"
 
 
@@ -323,10 +284,7 @@ def _day_screen(name: str, prefs: Preferences, group: str) -> tuple[str, dict]:
 def _communes_screen(name: str, prefs: Preferences, group: str,
                      page: int = 0) -> tuple[str, dict]:
     chosen = prefs.value(name) or []
-    # Whatever is already chosen is offered too, wherever it is: a commune typed in has
-    # to be visible, or the checklist would be a place you could not untick it. First,
-    # not last -- an unusual choice belongs where you would look for it, not on a page
-    # of its own behind the thirty-two you did not pick.
+    # A commune typed in is offered too, and first: a checklist must be able to untick it.
     province = [commune.value for commune in sorted(SANTIAGO_PROVINCE)]
     every = [slug for slug in chosen if slug not in province] + province
     pages = (len(every) + COMMUNES_PER_PAGE - 1) // COMMUNES_PER_PAGE
@@ -353,12 +311,8 @@ def _pretty(slug: str) -> str:
 
 
 def _tiers_screen(name: str, prefs: Preferences, group: str) -> tuple[str, dict]:
-    """One row per metro line, its tier ticked -- the whole setting without typing.
-
-    A press does not send the line it moved: it sends the string the setting would then
-    hold, rebuilt here. That keeps every write going through the same parser as a value
-    typed into the CLI, and keeps one action doing the writing.
-    """
+    """One row per metro line, its tier ticked -- the whole setting without typing."""
+    # A press sends the whole setting's text, so every write goes through the same parser.
     tiers = [list(tier) for tier in (prefs.value(name) or [])]
     tiers += [[] for _ in range(TIERS_OFFERED - len(tiers))]
     lines = sorted({line for calling in STATION_LINES.values() for line in calling})
@@ -403,8 +357,7 @@ def _people_screen(name: str, prefs: Preferences, group: str) -> tuple[str, dict
     rows = [[_button(f"❌ {admin}", "d", _short(name), index)]
             for index, admin in enumerate(admins)]
     rows.append([_button("➕ Agregar id", "w", _short(name), "agregar")])
-    # No 🗑️: emptying this list is the one edit that cannot be undone from the chat,
-    # because there would be nobody left the chat would take an edit from.
+    # No 🗑️: emptying this is the one edit the chat could never undo.
     rows.append(_footer(name, group, clearable=False, writable=False))
     return _text(name, prefs), _keyboard(*rows)
 
@@ -488,12 +441,7 @@ def _home_commune_screen(connection: sqlite3.Connection, prefs: Preferences,
 
 
 def _options(connection: sqlite3.Connection, name: str, prefs: Preferences) -> list[str]:
-    """What a free-text setting can be set to, taken from the data rather than guessed.
-
-    A conserjería is only worth offering if some listing could actually carry it, and a
-    chat is only worth offering if the bot has posted in it -- which is exactly what a
-    dropdown built out of the database says and a hardcoded list cannot.
-    """
+    """What a free-text setting can be set to, taken from the data rather than guessed."""
     if name == "DEPAS_SECURITY_WANTED":
         seen = [row["security_type"] for row in connection.execute(
             "SELECT DISTINCT security_type FROM listings WHERE security_type IS NOT NULL "
@@ -571,9 +519,7 @@ def setting_screen(connection: sqlite3.Connection, name: str,
 
 
 # ── asking for a value that cannot be a button ──────────────────────────────────
-# An address, somebody's user id: open sets, so they are typed. The prompt names the
-# setting and the action on its first line and the reply quotes it back, which is how a
-# typed answer finds its way home without a pending-edit table to go stale.
+# The prompt names the setting on its first line and the reply quotes it back.
 
 REPLACE, ADD, ADDRESS, COMMUNE = "reemplazar", "agregar", "direccion", "comuna"
 PROMPT_HEAD = re.compile(r"^⚙️ ([A-Z_]+) · (\w+)$")
@@ -616,8 +562,7 @@ def open_menu(connection: sqlite3.Connection, message: dict, prefs: Preferences)
         send_menu(chat, NO_AUTHOR, None, thread, message["message_id"])
         return
     if not prefs.is_admin(user_id):
-        # Telling somebody their own id is the whole bootstrap: it is what they paste
-        # into `depas config set DEPAS_ADMINS`, or send to whoever already is one.
+        # Telling somebody their own id is the whole bootstrap: it is what they paste in.
         send_menu(chat, NO_ADMINS.format(user_id=user_id), None, thread,
                   message["message_id"])
         return
@@ -637,18 +582,13 @@ def _write(connection: sqlite3.Connection, name: str, raw: str) -> str:
     try:
         store_preference(connection, name, raw)
     except ValueError as error:
-        # A parser quotes back what was typed, and this string is shown both as a plain
-        # toast and inside a screen. Escaped here, so every caller can treat it as HTML.
+        # Escaped here, so every caller can treat it as HTML.
         return f"⚠️ {escape(str(error))}"
     return "✅ guardado"
 
 
 def press(connection: sqlite3.Connection, callback: dict, prefs: Preferences) -> None:
-    """One press on the config keyboard, authorised against the whitelist every time.
-
-    Checked per press rather than only when the menu is opened: the menu is a message,
-    and in a group anybody can reach the buttons on somebody else's.
-    """
+    """One press on the config keyboard, authorised against the whitelist every time."""
     data = (callback.get("data") or "").removeprefix(PREFIX)
     if not prefs.is_admin(_author(callback)):
         answer_callback(callback["id"], DENIED)
@@ -657,8 +597,7 @@ def press(connection: sqlite3.Connection, callback: dict, prefs: Preferences) ->
     try:
         toast = _act(connection, callback, action, rest)
     except (KeyError, ValueError, StopIteration, IndexError):
-        # A keyboard from before a deploy that renamed or regrouped something. Saying so
-        # beats a traceback per press and a menu that never redraws.
+        # A keyboard from before a deploy renamed something; saying so beats a traceback.
         answer_callback(callback["id"], STALE)
         return
     answer_callback(callback["id"], toast)
@@ -730,8 +669,7 @@ def _toggle(connection: sqlite3.Connection, callback: dict, rest: str) -> str:
 
 
 LAST_ADMIN = "no puedo dejar la lista vacía: nadie podría volver a configurar desde el chat"
-# The list settings, and what joins their entries. Being in here is what makes an
-# editor append what is typed rather than replace everything with it.
+# The list settings and what joins them; being here makes an editor append, not replace.
 SEPARATOR = {"DEPAS_LOCATIONS": "; ", "DEPAS_ADMINS": ",", "DEPAS_COMMUNES": ","}
 
 
@@ -779,12 +717,7 @@ def _set_home_field(connection: sqlite3.Connection, callback: dict, rest: str) -
 
 
 def _keep_home(connection: sqlite3.Connection, home: dict) -> str:
-    """Promote the draft to the setting once it has everything /compare needs.
-
-    Held back until then because the setting refuses a half-filled home -- correctly, it
-    is what the comparison reads -- and a menu that writes field by field would otherwise
-    have nowhere to put the first one.
-    """
+    """Promote the draft to the setting once it has everything /compare needs."""
     missing = [field for field in HOME_REQUIRED if home.get(field) is None]
     if missing:
         _keep_draft(connection, home)
@@ -797,11 +730,7 @@ def _keep_home(connection: sqlite3.Connection, home: dict) -> str:
 
 def answer_prompt(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
                   prefs: Preferences) -> bool:
-    """Take a typed value if this message is a reply to one of our prompts.
-
-    Returns whether it was: a message that is not an answer to a prompt has to fall
-    through to everything else the bot reads a message for.
-    """
+    """Take a typed value if this message is a reply to one of our prompts."""
     replied = message.get("reply_to_message") or {}
     head = PROMPT_HEAD.match((replied.get("text") or "").split("\n")[0])
     if not head:
@@ -817,8 +746,7 @@ def answer_prompt(connection: sqlite3.Connection, fetcher: Fetcher, message: dic
     try:
         toast = _typed(connection, fetcher, name, action, typed, prefs)
     except (ValueError, RuntimeError) as error:
-        # Everything a parser or the geocoder refuses, said where it was typed rather
-        # than as a toast that has nothing to hang off.
+        # Said where it was typed rather than as a toast that has nothing to hang off.
         send_menu(chat, f"⚠️ {escape(str(error))}", None, thread, message["message_id"])
         return True
     text, keyboard = setting_screen(connection, name, Preferences.load(connection))
@@ -830,8 +758,7 @@ def _typed(connection: sqlite3.Connection, fetcher: Fetcher, name: str, action: 
            typed: str, prefs: Preferences) -> str:
     """Apply one typed value: replacing the setting, appending to it, or geocoding it."""
     if action == COMMUNE:
-        # Validated by the commune parser rather than by a second list of slugs: one
-        # place knows what a commune is called, and it is already the one that says so.
+        # Validated by the commune parser, so one place knows what a commune is called.
         setting("DEPAS_COMMUNES").parse("La comuna", typed)
         home = _home_draft(connection, prefs) | {"commune": typed.strip()}
         return _keep_home(connection, home)
@@ -843,12 +770,10 @@ def _typed(connection: sqlite3.Connection, fetcher: Fetcher, name: str, action: 
         separator = SEPARATOR[name]
         existing = [entry.strip() for entry in (prefs.raw(name) or "").split(separator.strip())]
         added = [entry.strip() for entry in typed.split(separator.strip())]
-        # Deduplicated: typing a commune already ticked would otherwise double it, and a
-        # list setting means the same thing either way -- so it should read the same too.
+        # Deduplicated: typing a commune already ticked would otherwise double it.
         typed = separator.join(dict.fromkeys(entry for entry in existing + added if entry))
     if name == "DEPAS_LOCATIONS":
-        # An address is a way of typing coordinates, resolved once on the way in so the
-        # table keeps what routing actually wants. Same call the CLI makes.
+        # An address is a way of typing coordinates, resolved once on the way in.
         typed, matched = resolve_locations(fetcher, typed)
         if matched:
             return "📍 " + escape(" · ".join(matched)) + "\n" + _write(connection, name, typed)

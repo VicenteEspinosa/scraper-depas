@@ -12,8 +12,7 @@ from depas.models import Listing, Query
 
 NAME = "portalinmobiliario"
 BASE = "https://www.portalinmobiliario.com"
-# Portal Inmobiliario is MercadoLibre's property vertical: same item ids, same
-# page markup, so a mercadolibre.cl link parses with exactly these selectors.
+# MercadoLibre's property vertical: same item ids and markup, so its links parse too.
 LISTING_HOSTS = ("portalinmobiliario.com", "mercadolibre.cl")
 LISTING_URL = re.compile(
     r"https?://[\w.-]*(?:portalinmobiliario\.com|mercadolibre\.cl)/\S*?MLC-\d+\S*"

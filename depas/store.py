@@ -17,9 +17,7 @@ from depas.traits import EXCLUDE
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
 
-# Only what a search card actually carries. Detail-page columns (gastos comunes,
-# coordinates, specs) are owned by save_detail — listing them here would blank
-# them on the next re-scrape, because the card has nothing to put in their place.
+# Only what a search card carries; the detail-page columns are owned by save_detail.
 FIELDS = (
     "url", "title", "price", "currency", "is_project", "price_clp",
     "bedrooms", "bathrooms", "area_m2", "commune", "address", "image_url",
@@ -33,8 +31,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA busy_timeout=5000")
     migrate(connection)
-    # The configuration lives in the database now, so a box upgrading into this keeps
-    # whatever its .env said: the table is filled from the environment exactly once.
+    # Filled from the environment exactly once, so a box upgrading into this keeps its .env.
     seed_from_env(connection)
     # The view is derived, not state: rebuilt every connect so it tracks the code.
     connection.executescript(RANKED_VIEW)
@@ -100,25 +97,16 @@ SELECT *,
 FROM listings;
 """
 
-# A listing turned down with /dislike is out for good: never announced again, and
-# kept out of the pool the others are ranked against, so a flat nobody would take
-# stops moving the percentiles the rest are graded on. Not a preference, unlike the
-# traits below: there is no reading of a /dislike that means "rank it lower".
+# A /dislike is out for good: never announced again, and out of the pool. Not a preference.
 NOT_REJECTED = "COALESCE(interest, 0) >= 0"
 
-# Enriched, an actual unit rather than a project, and not turned down. An unenriched
-# listing would be graded on two components and beat everything.
+# Enriched, an actual unit, and not turned down: an unenriched one would beat everything.
 KEPT = ("detail_fetched_at IS NOT NULL AND is_project = 0 "
         f"AND {NOT_REJECTED}")
 
 
 def pool_query(prefs: Preferences) -> str:
-    """Every listing worth ranking or alerting on, minus the traits you rule out.
-
-    An excluded trait leaves the pool rather than merely scoring badly, so percentiles
-    are measured against apartments you would actually take -- which is why this is a
-    function of the preferences and not a constant.
-    """
+    """Every listing worth ranking or alerting on, minus the traits you rule out."""
     excluded = [f"({trait.keeps})" for trait in prefs.traits(EXCLUDE)]
     return f"SELECT * FROM listings_ranked WHERE {' AND '.join([KEPT, *excluded])}"
 
@@ -142,13 +130,7 @@ def refresh_zone_benchmarks(connection: sqlite3.Connection) -> int:
 
 def refresh_commutes(connection: sqlite3.Connection, fetcher: Fetcher,
                      prefs: Preferences, limit: int) -> int:
-    """Route the located listings still missing travel times, newest first, up to `limit`.
-
-    Coordinates never move, so an answer is kept for the life of the listing; only a
-    change to the configured locations makes a stored one stale. Routing is a call to
-    somebody else's server per listing per location, which is why this is capped rather
-    than a full recompute.
-    """
+    """Route the located listings still missing travel times, newest first, up to `limit`."""
     places = prefs.locations()
     wanted = {place.name for place in places}
     if not wanted:
@@ -170,12 +152,7 @@ def refresh_commutes(connection: sqlite3.Connection, fetcher: Fetcher,
 
 
 def sync_lease_income(connection: sqlite3.Connection, prefs: Preferences) -> None:
-    """Mirror the sublet income into `settings` so the ranked view can read it from SQL.
-
-    `net_monthly_clp` is a column of a view, so the figures it subtracts have to be
-    reachable from SQL. Called on connect and again whenever either one is edited,
-    because a long-running bot would otherwise keep grading on the startup value.
-    """
+    """Mirror the sublet income into `settings` so the ranked view can read it from SQL."""
     for kind in ("parking", "storage"):
         connection.execute(
             "UPDATE settings SET value = ? WHERE key = ?",
@@ -185,12 +162,7 @@ def sync_lease_income(connection: sqlite3.Connection, prefs: Preferences) -> Non
 
 
 def store_preference(connection: sqlite3.Connection, name: str, raw: str) -> object | None:
-    """Write one setting and push whatever the ranked view reads from SQL back into it.
-
-    The one write path every surface should use -- the CLI today, the chat commands
-    next -- because `net_monthly_clp` is a view column: editing the sublet income and
-    not re-mirroring it leaves the grading running on the value from startup.
-    """
+    """Write one setting and push whatever the ranked view reads from SQL back into it."""
     value = set_preference(connection, name, raw)
     sync_lease_income(connection, Preferences.load(connection))
     return value
@@ -282,11 +254,7 @@ def set_interest(connection: sqlite3.Connection, portal: str, external_id: str,
 
 def remember_card(connection: sqlite3.Connection, chat_id: object, message_id: int,
                   portal: str, external_id: str, is_photo: bool = False) -> None:
-    """Record a card we posted, so a command left under it can find its listing.
-
-    Ids come from Telegram's own record of the message rather than from whatever
-    TELEGRAM_CHAT_ID holds, which may be an @username the forwards never mention.
-    """
+    """Record a card we posted, so a command left under it can find its listing."""
     connection.execute(
         "INSERT INTO card_messages "
         "(chat_id, message_id, portal, external_id, is_photo, posted_at) "

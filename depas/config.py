@@ -1,27 +1,16 @@
-"""Bootstrap: the .env file, and the few constants that are not anybody's preference.
-
-Everything tunable moved to `depas.preferences`, which reads it out of the database.
-What is left here is what has to exist before a database can be opened -- where the
-environment comes from -- plus the constants that are rules rather than settings.
-"""
+"""Bootstrap: the .env file, and the few constants that are not anybody's preference."""
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 ENV_FILE = Path(".env")
-# The starting set a fresh database is seeded from, checked in so a clone that has
-# never been configured still scrapes something sensible. .env overrides it, and once
-# the table exists neither file is consulted again.
+# The starting set a fresh database is seeded from; .env overrides it, then neither is read.
 SEED_FILE = Path("seed.env")
 
-# Most publishers simply omit gastos comunes, and treating that as zero makes a
-# listing look cheaper than any building it could actually be in. Assume a typical
-# Santiago figure instead, and say so wherever the number is shown.
+# Most publishers omit gastos comunes, and zero would make a listing look impossibly cheap.
 DEFAULT_COMMON_EXPENSES = 120_000
 
-# Under 25 years is the standing rule, so age is the one target that applies whether
-# or not anything is configured: clearing DEPAS_AGE_TARGET must not quietly turn the
-# preference off. Set it to move the line; zero the weight to ignore it.
+# The one target that applies unconfigured: clearing DEPAS_AGE_TARGET must not turn it off.
 DEFAULT_TARGET_AGE = 25
 
 # Everything a comparison cannot fake: what your place costs, how big it is, where it is.

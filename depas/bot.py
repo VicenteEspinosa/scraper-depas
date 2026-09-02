@@ -42,8 +42,7 @@ from depas.telegram import (
 from depas.uf import normalize, stored_uf
 
 POLL_TIMEOUT = 30
-# Telegram and the portals both blip. A blip should cost one poll, not the process:
-# the container restarts on exit, so crashing is how a hiccup became a restart loop.
+# A blip should cost one poll, not the process: the container restarts on exit.
 ERROR_BACKOFF_SECONDS = 5
 OFFSET_KEY = "telegram_offset"
 
@@ -115,8 +114,7 @@ NO_HOME = ("no sé dónde vives: configura DEPAS_CURRENT_HOME con el JSON de tu 
            "actual (`depas config get DEPAS_CURRENT_HOME` explica el formato) y "
            "vuelve a intentarlo.")
 GONE = "ese aviso ya no está en la base"
-# The id every card prints in its header, which is how a card posted before the
-# bot started recording them can still be traced back to its listing.
+# The id every card prints in its header, which is how an old card finds its listing.
 CARD_ID = re.compile(r"\[(\d+)\]")
 
 
@@ -139,11 +137,7 @@ def _forwarded_from(message: dict) -> tuple[object, int] | None:
 
 
 def _remember_forward(connection: sqlite3.Connection, message: dict) -> None:
-    """Pair a card auto-forwarded into the discussion group with the post it copies.
-
-    Telegram publishes that pairing in this update and nowhere else: the copy's own
-    message id is the message_thread_id every comment on the card will carry.
-    """
+    """Pair a card auto-forwarded into the discussion group with the post it copies."""
     origin = _forwarded_from(message)
     if origin is not None:
         link_thread(connection, *origin, message["chat"]["id"], message["message_id"])
@@ -155,12 +149,7 @@ PRESS_PROMPT = "¿Qué te parece? (o comenta /compare para verlo contra tu depto
 
 def _offer_buttons(connection: sqlite3.Connection, card_chat: object, card_message: int,
                    forward: dict) -> None:
-    """Open the card's thread with the verdict keyboard, since the card cannot hold it.
-
-    A keyboard on a channel post takes the slot the «Comentarios» button lives in,
-    which would leave no way to reach this very thread — so the buttons ride the
-    first comment in it instead. See `hides_comments` in depas.telegram.
-    """
+    """Open the card's thread with the verdict keyboard, since the card cannot hold it."""
     card = card_for_message(connection, card_chat, card_message)
     if card is None:
         return  # not a card we posted: there is nothing to rate
@@ -174,15 +163,13 @@ def _offer_buttons(connection: sqlite3.Connection, card_chat: object, card_messa
         send_buttons(str(forward["chat"]["id"]), PRESS_PROMPT, forward["message_id"],
                      verdict_buttons(listing["id"], listing["interest"]))
     except RuntimeError as error:
-        # The thread is linked either way, and that is what the typed commands need;
-        # the keyboard is the shortcut, not the feature.
+        # The thread is linked either way; the keyboard is the shortcut, not the feature.
         print(f"could not post the buttons in thread {forward['message_id']}: {error}")
 
 
 def _from_card_text(connection: sqlite3.Connection, text: str) -> dict | None:
     """The listing a card is about, read back from the [id] its header prints."""
-    # The header only, not the whole card: a bracketed number anywhere in a title
-    # or a description would otherwise rate some unrelated listing.
+    # The header only: a bracketed number in a title would rate some unrelated listing.
     found = CARD_ID.search(text.split("\n")[0])
     if not found:
         return None
@@ -193,12 +180,7 @@ def _from_card_text(connection: sqlite3.Connection, text: str) -> dict | None:
 
 
 def _card(connection: sqlite3.Connection, message: dict) -> dict | None:
-    """The card a command refers to: its listing, and the message to edit if we posted it.
-
-    A comment in a channel's Comments names the thread it hangs off; a reply in a
-    plain group only names the message it answers. Reading the [id] out of that
-    message covers what neither does: cards posted before this was recorded.
-    """
+    """The card a command refers to: its listing, and the message to edit if we posted it."""
     chat = str(message["chat"]["id"])
     thread = message.get("message_thread_id")
     row = card_for_thread(connection, chat, thread) if thread else None
@@ -222,14 +204,12 @@ def refresh_card(connection: sqlite3.Connection, card: dict, prefs: Preferences)
         return False  # a card outliving its listing must not take the bot down with it
     grade = Scale(prefs).grade(dict(row))
     try:
-        # The keyboard is offered on every redraw and withheld where it would hide
-        # the card's comments, which is decided per chat in depas.telegram.
+        # Offered on every redraw and withheld per chat where it would hide the comments.
         edit_listing(card["chat_id"], card["message_id"],
                      format_listing(dict(row), grade, prefs), bool(card["is_photo"]),
                      verdict_buttons(row["id"], row["interest"]))
     except RuntimeError as error:
-        # Redrawing the card is a nicety: a card too old to edit must not cost the
-        # verdict, which is already stored and already filtering the alerts.
+        # Redrawing is a nicety: a card too old to edit must not cost the stored verdict.
         print(f"could not redraw card {card['message_id']}: {error}")
         return False
     return True
@@ -283,14 +263,7 @@ TOAST = {LIKE: "⭐ anotado como interesante", DISLIKE: "🚫 descartado, no vue
 
 
 def _pressed_card(connection: sqlite3.Connection, message: dict, listing: dict) -> dict:
-    """The card to redraw after a press: the one pressed, or the card it hangs under.
-
-    A press usually lands on the keyboard posted inside a card's thread rather than
-    on the card itself, and the thread names which card that is. Failing both — a
-    press on the discussion group's copy of a channel post, which belongs to the
-    channel rather than to us — the newest card recorded for the listing is the one
-    we can edit.
-    """
+    """The card to redraw after a press: the one pressed, or the card it hangs under."""
     card = card_for_message(connection, message["chat"]["id"], message["message_id"]) \
         if message else None
     if card is None and message.get("message_thread_id"):
@@ -325,8 +298,7 @@ def _handle_callback(connection: sqlite3.Connection, callback: dict,
     author = callback.get("from") or {}
     set_interest(connection, listing["portal"], listing["external_id"], interest,
                  author.get("username") or author.get("first_name"))
-    # Acknowledged before the redraw: Telegram gives the answer about ten seconds
-    # before the press times out in the client, and an edit can be slower than that.
+    # Acknowledged before the redraw: a press times out in about ten seconds.
     answer_callback(callback["id"], TOAST[interest])
     pressed = callback.get("message") or {}
     card = _pressed_card(connection, pressed, dict(listing))
@@ -335,11 +307,7 @@ def _handle_callback(connection: sqlite3.Connection, callback: dict,
 
 
 def _tick(pressed: dict, card: dict, listing_id: int, interest: int) -> None:
-    """Show the verdict on the keyboard that was pressed, when it is not the card itself.
-
-    The buttons under a channel card live on a comment in its thread, so the message
-    holding them is usually not the message the redraw above re-rendered.
-    """
+    """Show the verdict on the keyboard that was pressed, when it is not the card itself."""
     if not pressed:
         return  # a press old enough that Telegram no longer sends the message
     if (str(pressed["chat"]["id"]), pressed["message_id"]) \
@@ -349,15 +317,13 @@ def _tick(pressed: dict, card: dict, listing_id: int, interest: int) -> None:
         edit_buttons(str(pressed["chat"]["id"]), pressed["message_id"],
                      verdict_buttons(listing_id, interest))
     except RuntimeError as error:
-        # The discussion group's copy of a channel card carries the channel's own
-        # keyboard, which is not the bot's to re-render. The verdict is already in.
+        # The group's copy carries the channel's own keyboard, which is not ours to edit.
         print(f"could not tick the keyboard on {pressed['message_id']}: {error}")
 
 
 def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
             prefs: Preferences) -> None:
-    # A channel card is copied into the discussion group by Telegram itself. That
-    # copy is bookkeeping, never a request: answering it would post the card twice.
+    # Telegram's own copy of a channel card is bookkeeping, never a request.
     if message.get("is_automatic_forward"):
         _remember_forward(connection, message)
         return
@@ -373,8 +339,7 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
     if command in (configure.COMMAND, configure.START):
         configure.open_menu(connection, message, prefs)
         return
-    # Read before the links below: an answer to a settings prompt is an address or a
-    # number, and whatever it is, it was not posted to be graded.
+    # Read before the links below: an answer to a prompt was not posted to be graded.
     if configure.answer_prompt(connection, fetcher, message, prefs):
         return
 
@@ -404,8 +369,7 @@ def run() -> None:
                 print(f"getUpdates failed, polling again: {error}")
                 time.sleep(ERROR_BACKOFF_SECONDS)
                 continue
-            # Read once per poll rather than once at startup: a setting edited while
-            # the bot is running has to take effect without a restart.
+            # Read once per poll, so a setting edited while the bot runs needs no restart.
             prefs = Preferences.load(connection)
             for update in updates:
                 message = update.get("message") or update.get("channel_post")
@@ -418,8 +382,7 @@ def run() -> None:
                         _handle_callback(connection, callback, prefs)
                 except (RuntimeError, RequestException) as error:
                     print(f"could not answer update {update['update_id']}: {error}")
-                # Advances even when the reply failed: an update that cannot be
-                # answered must not be redelivered on every restart forever.
+                # Advances even when the reply failed, or a bad update comes back forever.
                 _remember_offset(connection, update["update_id"] + 1)
     finally:
         fetcher.close()

@@ -1,7 +1,6 @@
 import math
 
-# Santiago Metro stations from OpenStreetMap (network="Metro de Santiago"), each with
-# the lines calling at it — two for an interchange, so a station is judged on its best.
+# Santiago Metro stations from OpenStreetMap, each with the lines calling at it.
 STATIONS: tuple[tuple[str, float, float, tuple[str, ...]], ...] = (
     ("Alcántara", -33.41545, -70.58999, ("1",)),
     ("Baquedano", -33.43722, -70.63341, ("1", "5")),
@@ -131,8 +130,7 @@ STATIONS: tuple[tuple[str, float, float, tuple[str, ...]], ...] = (
     ("Ñuñoa", -33.45419, -70.60497, ("3", "6")),
 )
 
-# Medians measured against 24 listings where the portal published its own routed walk,
-# so this fallback lands close to the real figure when the portal publishes nothing.
+# Medians measured against 24 listings where the portal published its own routed walk.
 DETOUR_FACTOR = 1.37
 WALK_SPEED_M_PER_MIN = 77.0
 

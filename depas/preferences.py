@@ -1,23 +1,4 @@
-"""Every tunable the bot has, declared once and read from the database.
-
-Settings used to be read straight out of `os.environ` wherever they happened to be
-needed, which meant the environment was the configuration: changing a preference was
-editing a file on the box and restarting. They live in the `preferences` table now,
-and this module is the single place that knows what a setting is called, how its text
-is parsed, what it means and what it falls back to when nobody has said.
-
-Three readers share that one declaration: the .env file the table is seeded from, the
-`depas config` commands that edit it, and the chat commands that will. Adding a knob is
-adding a `Setting` below.
-
-Nothing here reaches for a global: a `Preferences` is a snapshot somebody hands you,
-which is what lets one process eventually hold several of them at once.
-
-Two languages, on purpose and along one line: `help` is copy, shown to whoever is
-editing a setting from the chat, so it reads the way the bot's replies do. Everything
-raised is an error, which surfaces in a log or a traceback, so it reads the way the
-rest of the codebase does.
-"""
+"""Every tunable the bot has, declared once and read from the database (docs/DESIGN.md)."""
 import difflib
 import json
 import sqlite3
@@ -30,10 +11,7 @@ from depas.config import DEFAULT_TARGET_AGE, HOME_REQUIRED, Location, defaults, 
 from depas.traits import DISPOSITIONS, PENALISE, TRAITS
 
 # ── how a setting's text becomes a value ────────────────────────────────────────
-# Every parser takes the raw string and either returns the value or raises ValueError
-# with a message worth showing to whoever typed it -- in .env, in the CLI or in the
-# chat. The message names the setting, because by the time it surfaces the reader has
-# no idea which one was being read.
+# A parser either returns the value or raises ValueError naming the setting it read.
 
 
 def _whole(name: str, raw: str) -> int:
@@ -78,12 +56,7 @@ def _communes(name: str, raw: str) -> list[str]:
 
 
 def _admins(name: str, raw: str) -> list[int]:
-    """Telegram user ids allowed to configure the bot from a chat.
-
-    Ids rather than @usernames on purpose: a username can be changed, and once freed it
-    can be claimed by somebody else, so a whitelist keyed on one is a whitelist that
-    quietly changes hands.
-    """
+    """Telegram user ids allowed to configure the bot from a chat."""
     entries = [entry.strip().lstrip("@") for entry in raw.split(",") if entry.strip()]
     wrong = [entry for entry in entries if not entry.isdigit()]
     if wrong:
@@ -145,17 +118,13 @@ def _home(name: str, raw: str) -> dict:
 
 @dataclass(frozen=True, slots=True)
 class Setting:
-    """One tunable: what it is called, how its text is read, and what it means.
-
-    `default` is the raw text an unset setting behaves as, or None when unset means
-    the feature is simply off -- most of them, because a target nobody set must not
-    invent an opinion.
-    """
+    """One tunable: what it is called, how its text is read, and what it means."""
 
     name: str
     parse: Callable[[str, str], object]
     help: str
     example: str = ""
+    # None where unset means the feature is off: a target nobody set invents no opinion.
     default: str | None = None
 
     def value(self, raw: str | None) -> object | None:
@@ -163,9 +132,7 @@ class Setting:
         return None if text is None else self.parse(self.name, text)
 
 
-# Every component that carries a weight, named for what it measures rather than for a
-# category: `walk` is minutes to the metro and `area` is square metres, which is what
-# DEPAS_WALK_* and DEPAS_AREA_* configure.
+# Every weighted component, named for what it measures: `walk` is minutes, `area` is m2.
 WEIGHTED = ("value", "cost", "walk", "area", "amenities", "security", "floor",
             "metro", "commute", "age", "availability", "traits")
 
@@ -184,13 +151,7 @@ def _weight(component: str) -> Setting:
                    example="1", default="1")
 
 
-# Named DEPAS_<PARAMETER>_<SLOT>, so every knob for one parameter sorts together and
-# the slot says what it does to a listing:
-#   MIN / MAX  a hard bound -- outside it there is no alert at all
-#   TARGET     an ideal -- being short of it costs score and nothing else
-#   WEIGHT     how much that component moves the final grade
-#   WANTED     a value to match, scored on equality
-#   TIERS      a ranked preference, best first
+# Named DEPAS_<PARAMETER>_<SLOT>, so every knob for one parameter sorts together.
 SETTINGS: tuple[Setting, ...] = (
     Setting("TELEGRAM_CHAT_ID", _text,
             "Dónde se publican las alertas: un canal (cada tarjeta con sus comentarios) "
@@ -319,21 +280,13 @@ SETTINGS: tuple[Setting, ...] = (
 
 BY_NAME: Mapping[str, Setting] = {setting.name: setting for setting in SETTINGS}
 
-# Read before a database can be opened, or too sensitive to sit in it, so these stay
-# in the environment and are not settings. Named here so a check over .env can tell
-# them apart from a key somebody misspelled.
+# Not settings: read before a database can be opened, or too sensitive to sit in one.
 BOOTSTRAP = frozenset({"DEPAS_DB_PATH", "TELEGRAM_BOT_TOKEN"})
 CONFIGURABLE_PREFIXES = ("DEPAS_", "TELEGRAM_")
 
 
 def check_environment() -> tuple[int, list[str]]:
-    """Parse every setting .env declares, reporting what a seed would refuse or ignore.
-
-    Worth its own pass because a value only reaches the table through a parser: a .env
-    that no longer validates stops the process at `connect`, which on a box that
-    restarts its containers is a crash loop rather than an error somebody reads. Run
-    this before restarting anything, and the deploy fails instead of the bot.
-    """
+    """Parse every setting .env declares, reporting what a seed would refuse or ignore."""
     found = environment()
     problems, checked = [], 0
     for declared in SETTINGS:
@@ -345,8 +298,7 @@ def check_environment() -> tuple[int, list[str]]:
             declared.parse(declared.name, raw)
         except ValueError as error:
             problems.append(str(error))
-    # The quieter failure: a misspelled or renamed key is not refused, it is skipped,
-    # and the setting it was meant to be simply never turns on.
+    # The quieter failure: a misspelled key is skipped, so the setting never turns on.
     problems += [f"{name} is not a setting, so it would be ignored"
                  for name in sorted(found)
                  if name.startswith(CONFIGURABLE_PREFIXES)
@@ -359,8 +311,7 @@ def setting(name: str) -> Setting:
     found = BY_NAME.get(name)
     if found is not None:
         return found
-    # A misremembered name is the common case, in the CLI and even more so in a chat,
-    # so the error is worth more than "unknown": it should say what was probably meant.
+    # A misremembered name is the common case, so the error says what was probably meant.
     near = difflib.get_close_matches(name.upper(), BY_NAME, n=3, cutoff=0.6)
     if not near:
         near = sorted(known for known in BY_NAME if name.upper() in known)[:3]
@@ -373,12 +324,7 @@ def setting(name: str) -> Setting:
 
 @dataclass(frozen=True, slots=True)
 class Bounds:
-    """One numeric parameter's three slots, already parsed.
-
-    `minimum` and `maximum` exclude a listing outright; `target` only costs it score.
-    Any of them being None means that slot was never configured, which is why the
-    scorers can take a Bounds without asking whether it is complete.
-    """
+    """One numeric parameter's three slots, already parsed; None is a slot nobody set."""
 
     minimum: int | None = None
     target: int | None = None
@@ -386,24 +332,17 @@ class Bounds:
 
 
 class Preferences:
-    """What one reader wants, as raw text per setting, parsed on demand and cached.
-
-    Deliberately a value rather than a lookup into somewhere global: everything that
-    grades, filters or renders takes one of these, so the day there are several
-    readers the only thing that changes is which snapshot gets passed in.
-    """
+    """What one reader wants, as raw text per setting, parsed on demand and cached."""
 
     __slots__ = ("_raw", "_parsed", "cost", "walk", "area", "commute", "age", "floor")
 
     def __init__(self, raw: Mapping[str, str]) -> None:
-        # Validated here rather than at first read: a typo in a setting nothing happens
-        # to touch this pass is still a typo, and saying so at load is saying so early.
+        # Validated at load rather than at first read: a typo nothing touches is a typo.
         self._raw = {name: text for name, text in raw.items() if text != ""}
         self._parsed: dict[str, object | None] = {}
         for name in self._raw:
             self.value(name)
-        # Built once, from the one query that filled `raw`: the scorers run per listing
-        # per component, so they read an attribute rather than re-parsing a name.
+        # Built once: the scorers run per listing per component and read an attribute.
         self.cost = self._bounds("COST")
         self.walk = self._bounds("WALK")
         self.area = self._bounds("AREA")
@@ -500,13 +439,7 @@ class Preferences:
         return self.value("DEPAS_ADMINS") or []
 
     def is_admin(self, user_id: int | None) -> bool:
-        """Whether one Telegram user may configure the bot from a chat -- nobody by default.
-
-        Deliberately not "anybody in the alert chat": a channel's discussion group is
-        joinable, so being able to reach the bot is not the same as being trusted with
-        what it looks for. A message with no author at all -- a channel post is signed by
-        the channel rather than by a person -- can never pass.
-        """
+        """Whether one Telegram user may configure the bot from a chat -- nobody by default."""
         return user_id is not None and user_id in self.admins()
 
     def current_home(self) -> dict | None:
@@ -528,31 +461,22 @@ class Preferences:
         return None if home is None else self.home_net_monthly_clp(home)
 
     def max_rent(self) -> int | None:
-        """Rent ceiling for the crawl, derived from the budget rather than configured.
-
-        Gastos comunes only add to the net cost and sublet income is the only thing that
-        subtracts, so rent above budget-plus-maximum-sublet can never come in under budget.
-        """
+        """Rent ceiling for the crawl, derived from the budget rather than configured."""
         budget = self.cost.maximum
         if budget is None:
             return None
+        # Gastos comunes only add and sublet income only subtracts, so this is the ceiling.
         return budget + 2 * self.lease_income("parking") + self.lease_income("storage")
 
 
 # ── writing ─────────────────────────────────────────────────────────────────────
 
-# Recorded in `settings`, which is the internal key/value scratch the code writes to
-# itself -- the Telegram offset, the mirrored sublet income -- as opposed to
-# `preferences`, which is what a person configures.
+# `settings` is the scratch the code writes to itself; `preferences` is what a person sets.
 SEEDED_KEY = "preferences_seeded"
 
 
 def set_preference(connection: sqlite3.Connection, name: str, raw: str) -> object | None:
-    """Store one setting after checking it parses, and return what it now means.
-
-    Validating before writing is the whole point of a registry: a value that would only
-    blow up on the next watch pass is refused here, while somebody is still looking.
-    """
+    """Store one setting after checking it parses, and return what it now means."""
     declared = setting(name)
     text = raw.strip()
     if text == "":
@@ -576,12 +500,7 @@ def clear_preference(connection: sqlite3.Connection, name: str) -> None:
 
 
 def seed_from_env(connection: sqlite3.Connection, force: bool = False) -> list[str]:
-    """Copy seed.env and the environment into the table once, so a box keeps its settings.
-
-    Only ever the first time: after that the database is the configuration and .env is
-    history, or a preference cleared from the chat would come back on the next restart.
-    `force` is the deliberate re-import behind `depas config import-env`.
-    """
+    """Copy seed.env and the environment into the table once, so a box keeps its settings."""
     already = connection.execute(
         "SELECT value FROM settings WHERE key = ?", (SEEDED_KEY,)).fetchone()
     if already and not force:
@@ -593,8 +512,7 @@ def seed_from_env(connection: sqlite3.Connection, force: bool = False) -> list[s
         text = found.get(declared.name, "").strip()
         if not text:
             continue
-        # Parsed before it is stored, so a typo in .env is still loud -- it just says so
-        # on the first connect rather than on the first read.
+        # Parsed before it is stored, so a typo in .env is loud on connect, not on read.
         declared.parse(declared.name, text)
         set_preference(connection, declared.name, text)
         seeded.append(declared.name)
@@ -605,8 +523,7 @@ def seed_from_env(connection: sqlite3.Connection, force: bool = False) -> list[s
     return seeded
 
 
-# Where a value came from, as a token rather than a phrase: the CLI and the chat
-# print it in their own words, and neither has to guess by comparing against defaults.
+# Where a value came from, as a token: the CLI and the chat each print it their own way.
 SET, DEFAULTED, UNSET = "set", "default", "unset"
 
 

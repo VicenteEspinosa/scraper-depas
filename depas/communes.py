@@ -2,11 +2,10 @@ from enum import StrEnum
 
 
 class Commune(StrEnum):
-    """Communes of the Región Metropolitana that Portal Inmobiliario indexes.
+    """Communes of the Región Metropolitana that Portal Inmobiliario indexes."""
 
-    Nine RM communes are omitted because the portal has no page for them: Pirque, Tiltil,
-    Calera de Tango, Paine, María Pinto, San Pedro, El Monte, Isla de Maipo and Peñaflor.
-    """
+    # The nine it has no page for are absent: Pirque, Tiltil, Calera de Tango, Paine,
+    # María Pinto, San Pedro, El Monte, Isla de Maipo and Peñaflor.
 
     # Provincia de Santiago
     CERRILLOS = "cerrillos"
