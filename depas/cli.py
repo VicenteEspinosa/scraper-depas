@@ -155,8 +155,7 @@ FILTERS = (
 def _build_query(args: argparse.Namespace,
                  prefs: Preferences) -> tuple[str, tuple[object, ...]]:
     """Assemble the ranked query from whichever filters were actually given."""
-    # The same pool the grading uses, so browsing and alerting agree on what is even
-    # a candidate, plus whatever the flags asked for on top.
+    # The same pool the grading uses, so browsing and alerting agree on what is a candidate.
     conditions = [KEPT, *(f"({trait.keeps})" for trait in prefs.traits(EXCLUDE))]
     parameters: list[object] = []
     for name, condition in FILTERS:
@@ -173,13 +172,7 @@ def _build_query(args: argparse.Namespace,
 
 ALERT_DELAY_SECONDS = 3
 
-# Every requirement is re-checked here, including the ones the scrape already
-# applied: enrichment overwrites card values (bedrooms among them) with the
-# detail page's, so a listing can stop qualifying after it was stored.
-# Floor is deliberately absent: it grades rather than excludes, because the
-# portals that publish the most listings never publish a floor number at all.
-# So is the entrega date, for its own reason: what counts is how close it lands
-# to the date you want, and a distance is a score rather than a bound.
+# Re-applied after enrichment, which overwrites card values and can disqualify a listing.
 ALERT_REQUIREMENTS = (
     ("DEPAS_COST_MAX", "net_monthly_clp <= ?"),
     ("DEPAS_BEDROOMS_MIN", "bedrooms >= ?"),
@@ -227,8 +220,7 @@ def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) ->
     graded = sorted(((row, scale.grade(dict(row))) for row in candidates),
                     key=lambda pair: pair[1].score, reverse=True)
     destination = prefs.chat_id()
-    # Cards only get comment threads in a channel, and the id alone cannot say which
-    # this is: channels and discussion groups share the -100 prefix.
+    # The id alone cannot say which: channels and discussion groups share the -100 prefix.
     print(f"alerts: posting to a {chat_type(destination)}")
     posted = 0
     for row, grade in graded:
@@ -239,8 +231,7 @@ def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) ->
             sent = send_listing(destination, format_listing(dict(row), grade, prefs),
                                 row["image_url"],
                                 buttons=verdict_buttons(row["id"], row["interest"]))
-            # Recorded so a /like or /dislike commented under the card knows which
-            # listing it is about, and so the card can be redrawn with the verdict.
+            # Recorded so a command left under the card finds its listing, and can redraw it.
             remember_card(connection, sent["chat"]["id"], sent["message_id"],
                           row["portal"], row["external_id"], "photo" in sent)
             posted += 1
@@ -254,8 +245,7 @@ def watch(args: argparse.Namespace) -> None:
     fetcher = Fetcher()
     connection = connect()
     try:
-        # Inside the try: the settings are read from the database now, so everything
-        # that decides what this pass even scrapes happens after both are open.
+        # Inside the try: what this pass scrapes is read from the database, so both are open.
         prefs = Preferences.load(connection)
         communes = [Commune(slug) for slug in prefs.communes()]
         if not communes:
@@ -267,8 +257,7 @@ def watch(args: argparse.Namespace) -> None:
             max_price=prefs.max_rent(),  # derived from the budget, not configured
             min_bedrooms=prefs.value("DEPAS_BEDROOMS_MIN"),
         )
-        # The ranked view prices listings per m2 straight from this, so cache it before
-        # anything reads the view.
+        # The ranked view prices per m2 straight from this, so cache it before reading it.
         stored_uf(connection, fetcher)
         for name, portal in PORTALS.items():
             try:
@@ -338,12 +327,7 @@ def resend(args: argparse.Namespace) -> None:
 
 
 def redraw(args: argparse.Namespace) -> None:
-    """Re-render cards already posted, newest first, with today's grades and today's rules.
-
-    Which is how a card posted with the keyboard that hid its «Comentarios» button
-    gets that button back: the redraw withholds the keyboard wherever it would cost
-    the comments, and an edit that omits reply_markup drops what is there.
-    """
+    """Re-render cards already posted, newest first, with today's grades and today's rules."""
     connection = connect()
     prefs = Preferences.load(connection)
     try:
@@ -414,9 +398,7 @@ def _print_table(rows: list[sqlite3.Row] | list[dict[str, object]]) -> None:
         print("  ".join(str(row[c]).ljust(w) for c, w in zip(columns, widths, strict=True)))
 
 
-# The settings live in the database, so these are how they are read and written from a
-# shell -- and the same calls the chat commands will make. Every write goes through
-# `store_preference`, which refuses a value that would otherwise only fail later.
+# Every write goes through `store_preference`, the one validated path the chat shares.
 VALUE_WIDTH = 46
 SOURCE_LABEL = {SET: "configured", DEFAULTED: "default"}
 
@@ -462,8 +444,7 @@ def config_get(args: argparse.Namespace) -> None:
 def config_set(args: argparse.Namespace) -> None:
     """Write one setting, refusing anything that does not parse."""
     written = " ".join(args.value)
-    # The only setting you can give in words: an address is geocoded here, once, so what
-    # gets stored is the coordinates every later read expects.
+    # The only setting you can give in words: an address is geocoded here, once.
     if args.name == "DEPAS_LOCATIONS":
         fetcher = Fetcher()
         try:
@@ -491,12 +472,7 @@ def config_unset(args: argparse.Namespace) -> None:
 
 
 def config_check(args: argparse.Namespace) -> None:
-    """Validate .env against the registry without opening the database.
-
-    Deliberately touches nothing: this is what a deploy runs after building the image
-    and before restarting anything, so a .env the new parsers refuse fails the deploy
-    while the old containers are still serving.
-    """
+    """Validate .env against the registry, touching nothing."""
     checked, problems = check_environment()
     for problem in problems:
         print(f"  {problem}")
@@ -620,9 +596,7 @@ def main() -> None:
     try:
         args.func(args)
     except ValueError as error:
-        # Under `config` a ValueError is always somebody's typo, and a traceback is the
-        # wrong way to say a commune does not exist. Everywhere else it is a bug, and
-        # the traceback is the point.
+        # Under `config` a ValueError is somebody's typo; everywhere else it is a bug.
         if not getattr(args, "refuses_politely", False):
             raise
         raise SystemExit(f"depas: {error}") from None

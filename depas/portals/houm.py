@@ -35,8 +35,7 @@ def fetch_standalone(fetcher: Fetcher, url: str) -> Listing | None:
         return None
     return _parse_result({**property_data, "id": int(identifier)}, None)
 
-# Houm stores commune names unaccented and title-cased, which is exactly what the
-# enum slugs already are once hyphens become spaces.
+# Houm's commune names are the enum slugs with hyphens turned to spaces, title-cased.
 def commune_name(commune: Commune) -> str:
     return commune.value.replace("-", " ").title()
 

@@ -59,8 +59,7 @@ def _search_commune(fetcher: Fetcher, commune: Commune) -> Iterator[Listing]:
                  "Accept": "application/json", "Referer": page_url},
     ).json()
 
-    # The API answers with the commune's whole inventory at once, so query.max_pages
-    # has nothing to page through.
+    # The API answers with the whole commune at once, so query.max_pages has nothing to do.
     for building in payload["data"]["buildings"]:
         for unit in _units(building):
             listing = _parse_unit(building, unit)

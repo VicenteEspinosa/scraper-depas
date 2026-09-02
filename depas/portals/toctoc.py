@@ -46,8 +46,7 @@ def _search_commune(fetcher: Fetcher, query: Query, commune: Commune | None) -> 
     if page is None:
         return
 
-    # The list page server-renders its whole first slice at once, so query.max_pages
-    # has nothing to page through.
+    # The list page server-renders its whole first slice, so query.max_pages does nothing.
     for item in page["propiedades"]["results"]:
         listing = _parse_result(item)
         if listing is not None:

@@ -7,9 +7,7 @@ from datetime import date
 NUMBER = re.compile(r"-?\d[\d.]*(?:,\d+)?")
 YES_NO = {"Sí": True, "No": False}
 
-# Publishers sometimes type "160" meaning 160.000. Real gastos comunes are never
-# this low, and a wrong figure quietly understates the net cost, so treat it as
-# undeclared rather than guess at the intended magnitude.
+# Publishers sometimes type "160" meaning 160.000; treat it as undeclared, not a guess.
 MIN_PLAUSIBLE_COMMON_EXPENSES = 10_000
 
 # Spec rows worth filtering on get their own column; everything else lands in `features`.
@@ -26,8 +24,7 @@ SPEC_COLUMNS: dict[str, tuple[str, str]] = {
     "Cantidad de pisos": ("building_floors", "INTEGER"),
     "Departamentos por piso": ("units_per_floor", "INTEGER"),
     "Antigüedad": ("age_years", "INTEGER"),
-    # Same column: some portals label the row with the year the building went up,
-    # which `listings_ranked` turns into an age. See `age` in the ranked view.
+    # Same column: some portals label the row with the year the building went up.
     "Año de construcción": ("age_years", "INTEGER"),
     "Gastos comunes": ("common_expenses", "INTEGER"),
     "Orientación": ("orientation", "TEXT"),
@@ -64,8 +61,7 @@ DETAIL_COLUMNS: dict[str, str] = {
 }
 
 
-# TocToc and Chilepropiedades publish no spec table worth the name, but their prose
-# names the same features outright. Only ever used for fields the portal left empty.
+# Only ever used for fields the portal left empty; some name them in prose instead.
 DESCRIPTION_HINTS = {
     "has_elevator": re.compile(r"ascensor", re.I),
     "has_concierge": re.compile(r"conserj\w*|porter[ií]a", re.I),
@@ -75,21 +71,15 @@ DESCRIPTION_HINTS = {
     "has_air_conditioning": re.compile(r"aire acondicionado", re.I),
     "has_terrace": re.compile(r"terraza", re.I),
 }
-# "piso 8" is the unit's floor; "piso flotante" is the flooring, and never matches
-# because a digit is required.
+# "piso 8" is the unit's floor; "piso flotante" never matches, a digit being required.
 FLOOR_IN_TEXT = re.compile(r"\bpiso\s+(\d{1,2})\b", re.I)
 SECURITY_IN_TEXT = re.compile(r"24\s*(?:horas|hrs)", re.I)
-# A denial only counts when it is right up against the feature ("sin ascensor",
-# "no tiene ascensor") — in "sin piscina y gimnasio" the gym is not being denied.
+# A denial only counts right up against the feature: "sin piscina y gimnasio" denies one.
 DENIAL = re.compile(r"\b(?:sin|no)\s+(?:\w+\s+)?$", re.I)
 
-# Amoblado is excluded outright, so it is worth reading off the prose of the portals
-# that publish no spec row for it. "Cocina amoblada" is fitted cabinets rather than
-# furniture, so a room named just before the word disowns it; the comma or full stop
-# that ends a clause is what stops the disowning from reaching across sentences.
+# "Cocina amoblada" is fitted cabinets, so a room named just before the word disowns it.
 FURNISHED_IN_TEXT = re.compile(r"\bamoblad[oa]s?\b|\bamueblad[oa]s?\b|\bamoblar\b", re.I)
-# Chilepropiedades publishes no availability row at all, and the other portals leave
-# it empty as often as not; the clause that announces it is where they all say so.
+# The clause that announces availability, which is where a portal without a row says so.
 AVAILABILITY_IN_TEXT = re.compile(r"(?:disponib|entrega)\w*[^.]{0,40}", re.I)
 ROOM_BEFORE = re.compile(
     r"\b(?:cocina|kitchenette|closets?|logia|ba[ñn]os?|terraza)s?\b[\w\s]{0,20}$", re.I)
@@ -109,11 +99,7 @@ DAY = re.compile(r"\b(\d{1,2})\b")
 
 
 def available_on(text: str) -> str | None:
-    """The day a listing frees up, however its portal words it ("Inmediata", "15 de agosto").
-
-    Portals leave this field free text, so it arrives as a keyword, a numeric date, a
-    timestamp, or a month with or without a day. A month alone reads as its first.
-    """
+    """The day a listing frees up, however its portal words it ("Inmediata", "15 de agosto")."""
     if IMMEDIATE.search(text):
         return date.today().isoformat()
     iso = ISO_DATE.search(text)
@@ -136,8 +122,7 @@ def available_on(text: str) -> str | None:
     if year_match:
         return _on(int(year_match.group(1)), month, day).isoformat()
     today = date.today()
-    # No year given: the occurrence nearest today. A "1 agosto" read on the 30th is the
-    # August that just went by, and a date already past simply means available now.
+    # No year given: the occurrence nearest today, which may be the month just gone.
     return min((_on(today.year, month, day), _on(today.year + 1, month, day)),
                key=lambda when: abs(when - today)).isoformat()
 
