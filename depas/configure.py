@@ -54,44 +54,48 @@ STALE = "ese menú quedó viejo; abre /config otra vez"
 
 # ── the menu, as copy ───────────────────────────────────────────────────────────
 
+# What a setting is called in the menu. The emoji is read left to right: what the
+# setting is about, then -- for the three numbers that look alike and mean opposite
+# things -- whether it is a ceiling (🔺), a floor (🔻) or something to aim at (🎯).
+# A weight carries only the first: «Peso ·» already says which of the three it is.
 LABELS = {
-    "TELEGRAM_CHAT_ID": "Dónde publicar",
-    "DEPAS_ADMINS": "Quién configura",
-    "DEPAS_COMMUNES": "Comunas",
-    "DEPAS_BEDROOMS_MIN": "Dormitorios mín.",
-    "DEPAS_AVAILABLE_BY": "Entrega hasta",
-    "DEPAS_GRADE_MIN": "Nota mínima",
-    "DEPAS_COST_MAX": "Techo de costo",
-    "DEPAS_COST_TARGET": "Costo objetivo",
-    "DEPAS_COST_WEIGHT": "Peso · costo",
-    "DEPAS_PARKING_INCOME": "Renta estac.",
-    "DEPAS_STORAGE_INCOME": "Renta bodega",
-    "DEPAS_CURRENT_COST": "Lo que pagas hoy",
-    "DEPAS_CURRENT_HOME": "Tu depto actual",
-    "DEPAS_VALUE_WEIGHT": "Peso · precio zona",
-    "DEPAS_WALK_MAX": "Caminata máx.",
-    "DEPAS_WALK_TARGET": "Caminata ideal",
-    "DEPAS_WALK_WEIGHT": "Peso · caminata",
-    "DEPAS_METRO_TIERS": "Líneas de metro",
-    "DEPAS_METRO_WEIGHT": "Peso · metro",
-    "DEPAS_LOCATIONS": "Lugares",
-    "DEPAS_COMMUTE_MAX": "Viaje máx.",
-    "DEPAS_COMMUTE_TARGET": "Viaje ideal",
-    "DEPAS_COMMUTE_WEIGHT": "Peso · viajes",
-    "DEPAS_AREA_MIN": "Metraje mín.",
-    "DEPAS_AREA_TARGET": "Metraje ideal",
-    "DEPAS_AREA_WEIGHT": "Peso · metraje",
-    "DEPAS_FLOOR_TARGET": "Piso ideal",
-    "DEPAS_FLOOR_WEIGHT": "Peso · piso",
-    "DEPAS_AGE_TARGET": "Antigüedad ideal",
-    "DEPAS_AGE_WEIGHT": "Peso · antigüedad",
-    "DEPAS_AMENITIES_TARGET": "Comodidades",
-    "DEPAS_AMENITIES_WEIGHT": "Peso · comodidades",
-    "DEPAS_SECURITY_WANTED": "Conserjería",
-    "DEPAS_SECURITY_WEIGHT": "Peso · conserjería",
-    "DEPAS_FURNISHED": "Amoblado",
-    "DEPAS_TOP_FLOOR": "Último piso",
-    "DEPAS_TRAITS_WEIGHT": "Peso · características",
+    "TELEGRAM_CHAT_ID": "📢 Dónde publicar",
+    "DEPAS_ADMINS": "👥 Quién configura",
+    "DEPAS_COMMUNES": "🗺️ Comunas",
+    "DEPAS_BEDROOMS_MIN": "🛏️🔻 Dormitorios mín.",
+    "DEPAS_AVAILABLE_BY": "📅🔺 Entrega hasta",
+    "DEPAS_GRADE_MIN": "🏅🔻 Nota mínima",
+    "DEPAS_COST_MAX": "💰🔺 Techo de costo",
+    "DEPAS_COST_TARGET": "💰🎯 Costo objetivo",
+    "DEPAS_COST_WEIGHT": "💰 Peso · costo",
+    "DEPAS_PARKING_INCOME": "🚗 Renta estac.",
+    "DEPAS_STORAGE_INCOME": "📦 Renta bodega",
+    "DEPAS_CURRENT_COST": "🧾 Lo que pagas hoy",
+    "DEPAS_CURRENT_HOME": "🏠 Tu depto actual",
+    "DEPAS_VALUE_WEIGHT": "📊 Peso · precio zona",
+    "DEPAS_WALK_MAX": "🚶🔺 Caminata máx.",
+    "DEPAS_WALK_TARGET": "🚶🎯 Caminata ideal",
+    "DEPAS_WALK_WEIGHT": "🚶 Peso · caminata",
+    "DEPAS_METRO_TIERS": "🚇 Líneas de metro",
+    "DEPAS_METRO_WEIGHT": "🚇 Peso · metro",
+    "DEPAS_LOCATIONS": "📍 Lugares",
+    "DEPAS_COMMUTE_MAX": "🧭🔺 Viaje máx.",
+    "DEPAS_COMMUTE_TARGET": "🧭🎯 Viaje ideal",
+    "DEPAS_COMMUTE_WEIGHT": "🧭 Peso · viajes",
+    "DEPAS_AREA_MIN": "📐🔻 Metraje mín.",
+    "DEPAS_AREA_TARGET": "📐🎯 Metraje ideal",
+    "DEPAS_AREA_WEIGHT": "📐 Peso · metraje",
+    "DEPAS_FLOOR_TARGET": "🛗🎯 Piso ideal",
+    "DEPAS_FLOOR_WEIGHT": "🛗 Peso · piso",
+    "DEPAS_AGE_TARGET": "🏗️🎯 Antigüedad ideal",
+    "DEPAS_AGE_WEIGHT": "🏗️ Peso · antigüedad",
+    "DEPAS_AMENITIES_TARGET": "🏊🎯 Comodidades",
+    "DEPAS_AMENITIES_WEIGHT": "🏊 Peso · comodidades",
+    "DEPAS_SECURITY_WANTED": "🛎️ Conserjería",
+    "DEPAS_SECURITY_WEIGHT": "🛎️ Peso · conserjería",
+    "DEPAS_FURNISHED": "🛋️ Amoblado",
+    "DEPAS_TOP_FLOOR": "🔝 Último piso",
+    "DEPAS_TRAITS_WEIGHT": "✨ Peso · características",
 }
 
 # Group key, its heading, and the settings it holds in the order they are shown. Every
@@ -163,15 +167,15 @@ DISPOSITION_LABELS = {EXCLUDE: "🚫 Excluir", PENALISE: "👎 Castigar", IGNORE
 # The fields of DEPAS_CURRENT_HOME that a stepper can edit, with their steps. lat/lon
 # are not here: they are set by typing an address, which is geocoded on the way in.
 HOME_FIELDS = (
-    ("price_clp", "Arriendo", MONEY_STEPS),
-    ("common_expenses", "Gastos comunes", MONEY_STEPS),
-    ("area_m2", "Metraje", PLAIN_STEPS),
-    ("bedrooms", "Dormitorios", PLAIN_STEPS),
-    ("bathrooms", "Baños", PLAIN_STEPS),
-    ("floor", "Piso", PLAIN_STEPS),
-    ("age_years", "Antigüedad", PLAIN_STEPS),
-    ("parking_spaces", "Estacionamientos", PLAIN_STEPS),
-    ("storage_units", "Bodegas", PLAIN_STEPS),
+    ("price_clp", "💵 Arriendo", MONEY_STEPS),
+    ("common_expenses", "🧾 Gastos comunes", MONEY_STEPS),
+    ("area_m2", "📐 Metraje", PLAIN_STEPS),
+    ("bedrooms", "🛏️ Dormitorios", PLAIN_STEPS),
+    ("bathrooms", "🚿 Baños", PLAIN_STEPS),
+    ("floor", "🛗 Piso", PLAIN_STEPS),
+    ("age_years", "🏗️ Antigüedad", PLAIN_STEPS),
+    ("parking_spaces", "🚗 Estacionamientos", PLAIN_STEPS),
+    ("storage_units", "📦 Bodegas", PLAIN_STEPS),
 )
 # Held apart from the setting while it is incomplete: DEPAS_CURRENT_HOME only accepts a
 # JSON object that already has every required field, so a home built one press at a
@@ -453,7 +457,7 @@ def _home_field_screen(connection: sqlite3.Connection, prefs: Preferences,
     row = [_button(("+" if delta > 0 else "−") + render(abs(delta)), "i", field,
                    max(current + delta, 0))
            for delta in (-large, -small, small, large)]
-    text = (f"🏠 <b>{label}</b> · tu depto\n\nAhora: "
+    text = (f"<b>{label}</b> · tu depto\n\nAhora: "
             f"{render(current) if home.get(field) is not None else '—'}")
     return text, _keyboard(row, [_button(BACK, "s", "CURRENT_HOME")])
 
@@ -520,7 +524,7 @@ def _text(name: str, prefs: Preferences) -> str:
     declared = setting(name)
     source = "" if prefs.is_set(name) else (
         " <i>(por defecto)</i>" if declared.default is not None else " <i>(sin definir)</i>")
-    return (f"⚙️ <b>{LABELS[name]}</b> · <code>{name}</code>\n\n{escape(declared.help)}"
+    return (f"<b>{LABELS[name]}</b> · <code>{name}</code>\n\n{escape(declared.help)}"
             f"\n\nAhora: <b>{escape(_shown(name, prefs))}</b>{source}")
 
 
