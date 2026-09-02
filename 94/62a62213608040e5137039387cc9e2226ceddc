@@ -1,0 +1,30 @@
+docs/DEPLOY.md
+  s_a3c90545adeae3::t_c1de39d53136ee 73-76
+README.md
+  s_a3c90545adeae3::t_c1de39d53136ee 357
+depas/grade.py
+  s_a3c90545adeae3::t_85829b8b7351c3 160-161,163,166-169
+  s_a3c90545adeae3::t_6b1d46d54b66bb 41-43,153,155-158,165
+seed.env
+  s_a3c90545adeae3::t_c1de39d53136ee 61-62
+tests/test_grade.py
+  s_a3c90545adeae3::t_86a25f85504321 298,303,311-332
+depas/preferences.py
+  s_a3c90545adeae3::t_c1de39d53136ee 269-272
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "9462a62213608040e5137039387cc9e2226ceddc",
+  "prompts": {},
+  "sessions": {
+    "s_a3c90545adeae3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ddd5e044-4adc-41e3-9940-6a1c83ec3c51",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
