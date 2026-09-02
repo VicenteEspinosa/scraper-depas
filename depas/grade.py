@@ -1,28 +1,11 @@
-"""What a listing is worth to you, measured against your preferences and nothing else.
-
-A grade used to be a percentile: a listing was ranked against every other listing in
-the pool, so `A 94` meant "beats 94% of what is listed right now" and moved whenever
-the market did. That is a good way to shop and a bad way to decide — the best of a bad
-week still graded A, and the same flat graded differently tomorrow.
-
-So the pool is gone. Every component scores against the numbers you configured, on one
-curve with three anchors: MET where the listing hits your target, BREACHED where it
-sits on the hard bound you set, and BEST a full span the other side of the target.
-Beating a target still earns score, which is the whole point — a 70 m2 flat where you
-asked for 50 should read better than one at exactly 50, not tie with it.
-
-Meeting a target is deliberately not full marks: it is worth 80 of a component's 100
-points, and the last fifth is only ever earned by beating it. So the score reads as
-"percent of what this could be worth to me", where 80 is everything you asked for.
-"""
+"""What a listing is worth to you, measured against your preferences (docs/DESIGN.md)."""
 import json
 from dataclasses import dataclass
 from datetime import date
 
 from depas.metro import STATION_LINES
 
-# The components are exactly the things that carry a DEPAS_*_WEIGHT, so the registry
-# owns the list and this reads it rather than keeping a second copy in step.
+# Exactly the components that carry a DEPAS_*_WEIGHT, so there is no second list to keep.
 from depas.preferences import WEIGHTED as COMPONENTS
 from depas.preferences import Preferences
 
@@ -34,17 +17,14 @@ AMENITIES = (
 LETTERS = ((80, "A"), (68, "B"), (56, "C"), (40, "D"))
 
 # The three anchors every component is scored between, in points.
-MET = 80.0         # exactly on your target: four fifths of what the component can give
+MET = 80.0         # exactly on your target
 BREACHED = 40.0    # on the hard bound, one span the wrong side of the target
-BEST = 100.0       # one span the right side of it, and the most a component can score
+BEST = 100.0       # one span the right side of it
 # Paying your zone's average UF/m2 is MET; this much off that average is a whole span.
 ZONE_SPAN = 0.20
-# Days past the move-in date you want that cost a whole span: a week late is already
-# everything you asked for and no more. Only the late side has a fixed span -- the early
-# one is measured against the window between today and that date.
+# Days past the date you want that cost a whole span; the early side has no fixed span.
 LATE_SPAN = 7
-# What meeting every target on complete data is worth on top, since the components
-# alone cannot say "and nothing at all was compromised".
+# What meeting every target on complete data is worth on top of the components.
 PERFECT_BONUS = 5.0
 
 
@@ -60,22 +40,15 @@ class Grade:
 
 
 def _points(overshoot: float) -> float:
-    """Score one component from how far past your target it sits, counted in spans.
-
-    Negative is better than asked for. The curve is steeper on the wrong side on
-    purpose: falling short of a target costs more than beating it pays.
-    """
+    """Score one component from how far past your target it sits, counted in spans."""
     if overshoot < 0:
         return min(MET - (BEST - MET) * overshoot, BEST)
     return max(MET - (MET - BREACHED) * overshoot, 0.0)
 
 
 def _from_target(value: float, target: int, limit: int | None) -> float:
-    """Score a lower-is-better number; the distance to the hard bound is one span.
-
-    Without a bound the target itself is the span, so twice the target scores nothing —
-    the only reading available when you have named an ideal and no ceiling.
-    """
+    """Score a lower-is-better number; the distance to the hard bound is one span."""
+    # With no bound the target itself is the span, so twice the target scores nothing.
     span = abs(limit - target) if limit is not None and limit != target else target
     return _points((value - target) / span)
 
@@ -123,12 +96,7 @@ def _amenities(row: dict, prefs: Preferences) -> float | None:
 
 
 def _security(row: dict, prefs: Preferences) -> float | None:
-    """Wanted security is a preference, not a cutoff: missing it costs score, not the alert.
-
-    Having it is BEST rather than MET, as it is for every component that can only be
-    matched: there is nothing better than the conserjería you asked for, so capping it
-    at the target would tax each listing 20 points it has no way to earn back.
-    """
+    """Wanted security is a preference, not a cutoff: missing it costs score, not the alert."""
     wanted = prefs.security_wanted()
     if wanted is None or row.get("security_type") is None:
         return None
@@ -152,21 +120,14 @@ def _age(row: dict, prefs: Preferences) -> float | None:
 
 
 def _availability(row: dict, prefs: Preferences) -> float | None:
-    """Scored on how close the entrega lands to the date you want, from either side.
-
-    The two sides are not the same shape. Everything free between today and your date is
-    a flat you could actually take, so the whole of that window is one span and anything
-    in it reads as met or better -- the closer to the date, the better. Past the date
-    there is nowhere to live, so a week is a whole span on its own.
-    """
+    """Scored on how close the entrega lands to the date you want, from either side."""
     configured, stated = prefs.value("DEPAS_AVAILABILITY_TARGET"), row.get("available_from")
     if configured is None or not stated:
         return None
     today, wanted = date.today(), date.fromisoformat(configured)
     # A date already reached is entrega inmediata, not however long ago it was written.
     frees_up = max(date.fromisoformat(stated), today)
-    # Early is measured against the whole window you are shopping in, which is always at
-    # least a day wide: an entrega before your date is one that is also after today.
+    # Early is measured against the whole window you are shopping in, never a fixed span.
     span = (wanted - today).days if frees_up < wanted else LATE_SPAN
     return _points(abs((frees_up - wanted).days) / span - 1)
 
@@ -201,19 +162,15 @@ def _levied(row: dict, prefs: Preferences, component: str) -> float:
 
 
 def _traits(row: dict, prefs: Preferences) -> float | None:
-    """BEST less what the penalised traits this listing carries are each worth.
-
-    None for a listing whose detail page was never read -- traits come off that page,
-    so it has answered nothing and must not be credited with answering no.
-    """
+    """BEST less what the penalised traits this listing carries are each worth."""
     penalised = [trait for trait in prefs.penalised_traits() if trait.component == "traits"]
+    # Traits come off the detail page: unread, a listing has answered nothing, not "no".
     if not penalised or not row.get("detail_fetched_at"):
         return None
     return max(BEST - _levied(row, prefs, "traits"), 0.0)
 
 
-# One shape for all of them, preferences included, so the dispatch below needs no
-# special case for the one that happens not to consult any.
+# One shape for all of them, so the dispatch below needs no special case.
 SCORERS = {"value": _value, "cost": _cost, "walk": _walk, "area": _area,
            "amenities": _amenities, "security": _security, "floor": _floor, "metro": _metro,
            "commute": _commute, "age": _age, "availability": _availability,
@@ -221,12 +178,7 @@ SCORERS = {"value": _value, "cost": _cost, "walk": _walk, "area": _area,
 
 
 def _applicable(prefs: Preferences) -> set[str]:
-    """Components you have given something to score against; the rest are simply off.
-
-    The pool used to answer this — a component nobody could score produced no values —
-    and now nothing but the preferences can, which is also the more honest reading:
-    an unset target is not missing data, it is an opinion you never had.
-    """
+    """Components you have given something to score against; the rest are simply off."""
     configured = {
         "value": True,
         "cost": prefs.cost.target is not None,
@@ -245,11 +197,7 @@ def _applicable(prefs: Preferences) -> set[str]:
 
 
 class Scale:
-    """Your preferences, ready to grade rows against. Deterministic: no listing sees another.
-
-    Still an object rather than a function because the weights and the set of live
-    components are worth reading once for a whole pass, not per listing.
-    """
+    """Your preferences, ready to grade rows against. Deterministic: no listing sees another."""
 
     def __init__(self, prefs: Preferences) -> None:
         self.prefs = prefs
@@ -266,16 +214,13 @@ class Scale:
         if not parts:
             return Grade(0, "?", {}, COMPONENTS, False)
         weight = sum(self.weights[name] for name in parts)
-        # The only thing that punishes silence: averaging just what is present would
-        # renormalise missing data away, letting a listing that answers four questions
-        # tie with one that answers all eleven.
+        # The only thing that punishes silence: averaging what scored would hide it.
         average = (sum(parts[name] * self.weights[name] for name in parts) / weight
                    if weight else BREACHED)
         coverage = len(parts) / len(self.applicable) if self.applicable else 1.0
         missing = tuple(name for name in self.applicable if name not in parts)
         meets_targets = all(scored >= MET for scored in parts.values())
-        # Only the listing that also answered everything gets the bonus: meeting every
-        # target on half the axes is a promise, not a proof.
+        # Only a listing that also answered everything gets the bonus.
         score = round(BREACHED + (average - BREACHED) * coverage
                       + (PERFECT_BONUS if meets_targets and not missing else 0.0))
         letter = next((letter for cutoff, letter in LETTERS if score >= cutoff), "E")
