@@ -76,6 +76,8 @@ Scraping is two-stage, because detail pages are expensive:
   takes the verdict commands below. Re-reads the settings on every poll, so a
   preference edited while it runs takes effect without a restart.
 - **`config`** — read and edit those settings; see [Configuration](#configuration).
+  The same settings are editable from Telegram with `/config`; see
+  [Changing the settings from the chat](#changing-the-settings-from-the-chat).
 
 ### Judging a listing from the chat
 
@@ -111,6 +113,60 @@ a channel, or as a reply to it in a plain group:
 
 A verdict is changed by undoing it and giving the other one — the card only ever
 shows the buttons that make sense for the state it is in.
+
+### Changing the settings from the chat
+
+`/config` opens the whole registry as a menu: eight groups, every setting inside one
+of them, and its current value on the button so you can see what you are about to
+change. Each press writes immediately and takes effect on the next pass — nothing is
+restarted, because the bot reloads the preferences every poll.
+
+**Nothing to register.** `/config` works as soon as the bot is running — and so does
+`/start`, which is what the START button in a fresh private chat sends, so a person who
+has just found the bot gets an answer rather than silence. `/setcommands` in @BotFather
+is optional and only buys autocomplete; privacy mode has to be off for the group, which
+it already does to see pasted links at all.
+
+**Who may.** `DEPAS_ADMINS` holds the Telegram user ids allowed to edit, and it is
+checked on the message *and on every press*: in a group anybody can reach the buttons
+on somebody else's message. Being in the alert chat is deliberately not enough — a
+channel's discussion group is joinable. `/config` from anybody else answers with their
+own id, which is what they paste into `depas config set DEPAS_ADMINS` on the box or
+send to somebody who is already an admin. Bootstrapping the first one is a shell
+command by design; anything the chat could bootstrap, whoever got there first could.
+
+It works in a private chat with the bot and in the discussion group. It cannot work in
+the channel itself, and says so: a channel post is signed by the channel rather than by
+a person, so there is nobody for the whitelist to match.
+
+**Only valid values are offered.** The editor for a setting is chosen by the parser the
+setting already declares, so what you get is what the value can be:
+
+| What it is | How you set it |
+| --- | --- |
+| A weight | Six presets, `0` through `3`, the one in use ticked. |
+| A number of pesos | `±$25.000` and `±$100.000`, never below zero. |
+| Minutes, m², floors, years | `±1` and `±5`, with the unit shown. |
+| Amoblado, último piso | The three things a trait can mean: excluir, castigar, ignorar. |
+| Comunas | A paged checklist of the 32 in the Provincia de Santiago, ticked. The other eleven RM communes the portal indexes are an hour out, so they are typed rather than scrolled past every time — and once chosen, one shows up first in the checklist so it can be unticked like any other. |
+| Líneas de metro | One row per line, its tier ticked — the `>` and `,` string is rebuilt for you. |
+| Entrega hasta | The first of each of the next six months. |
+| Conserjería, dónde publicar | The values that appear in the database, so nothing offered could fail to match. |
+| Tu depto actual | Field by field, saved only once it has everything `/compare` needs. |
+
+What is typed is what a keyboard should not carry: an address (geocoded on the way in,
+same as the CLI), somebody's user id, and the tail of a list too long to be worth
+scrolling — plus the escape hatch every editor keeps, an **✏️ Escribir** and a
+**🗑️ Borrar**. Typing into a list setting appends to it and de-duplicates, so it adds
+to the checklist rather than replacing it. A typed value answers a force-reply prompt
+that names the setting, which is how it finds its way home without any pending-edit
+state to go stale.
+
+Every write goes through the same path `depas config set` uses, so a value the parsers
+refuse is refused here too, with the same message, before it is stored.
+
+The one edit the menu will not make is emptying `DEPAS_ADMINS`: there would be nobody
+left it would take an edit from.
 
 ### Comparing a listing with where you live now
 
@@ -155,7 +211,7 @@ message from the card.
 Both the buttons and the typed commands need the bot to be a member of the
 discussion group — that is where comments land, and now where the keyboards live,
 not the channel — and its privacy mode must be off in @BotFather, which it already
-needs to be to see pasted links at all. Registering the two commands with
+needs to be to see pasted links at all. Registering the commands with
 `/setcommands` is optional and only buys autocomplete.
 
 Anyone who can see the chat can press a button — there is no per-user check, which
@@ -280,6 +336,15 @@ The three `seed.env` leaves out — `TELEGRAM_CHAT_ID`, `DEPAS_LOCATIONS` and
 a public repo — are set on the box with `depas config set`. A fresh install has no chat
 until you do, and says so: posting an alert without one raises rather than guessing.
 
+`DEPAS_ADMINS` is the one identifying value the seed does carry, because a clone with
+no admin in it can only be configured over SSH. It is the author's id: change it.
+
+Since the seed runs **once per database**, adding a line to `seed.env` does nothing to a
+deployment that already has one — `preferences_seeded` in the `settings` table is what
+stops it, and the deploy never re-runs it. Apply such a change with `depas config set`,
+not with `config import-env --force`, which re-imports everything and overwrites
+whatever was edited from the chat since.
+
 | Setting | Meaning |
 | --- | --- |
 | `DEPAS_PARKING_INCOME`, `DEPAS_STORAGE_INCOME` | Monthly CLP you would collect subletting. Default 0 — net then equals total, rather than inventing a market rate. |
@@ -295,6 +360,7 @@ until you do, and says so: posting an alert without one raises rather than guess
 | `DEPAS_CURRENT_HOME` | Your own apartment as one JSON object, which `/compare` sets a listing against and which `DEPAS_CURRENT_COST` falls back to. Requires `price_clp`, `common_expenses`, `area_m2`, `lat`, `lon`. |
 | `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. Environment only — it says where the settings live, so it cannot be one of them. |
 | `TELEGRAM_BOT_TOKEN` | From @BotFather. Environment only: a credential does not belong in the table beside the data. |
+| `DEPAS_ADMINS` | Numeric Telegram user ids allowed to change the settings from a chat, comma-separated. Empty is nobody, and being in the alert chat is not enough — a discussion group is joinable. Ids rather than usernames, because a username can be given away and reclaimed. **The seed carries the author's id**, so replace it with yours if you are hosting your own; `@userinfobot` tells you what it is. |
 | `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread, which is also where `/like` and `/dislike` are read from; a group takes the cards but leaves them undiscussable, so verdicts have to be replies. Switching between the two is only this value. |
 
 ## Schema

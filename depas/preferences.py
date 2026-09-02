@@ -78,6 +78,21 @@ def _communes(name: str, raw: str) -> list[str]:
     return slugs
 
 
+def _admins(name: str, raw: str) -> list[int]:
+    """Telegram user ids allowed to configure the bot from a chat.
+
+    Ids rather than @usernames on purpose: a username can be changed, and once freed it
+    can be claimed by somebody else, so a whitelist keyed on one is a whitelist that
+    quietly changes hands.
+    """
+    entries = [entry.strip().lstrip("@") for entry in raw.split(",") if entry.strip()]
+    wrong = [entry for entry in entries if not entry.isdigit()]
+    if wrong:
+        raise ValueError(f"{name} takes numeric Telegram user ids, got {', '.join(wrong)}; "
+                         "a user id is a positive number, not a username")
+    return [int(entry) for entry in entries]
+
+
 def _locations(name: str, raw: str) -> list[Location]:
     found = []
     for entry in raw.split(";"):
@@ -178,6 +193,11 @@ SETTINGS: tuple[Setting, ...] = (
             "Dónde se publican las alertas: un canal (cada tarjeta con sus comentarios) "
             "o un grupo. `depas chats` lista lo que el bot ve.",
             example="-1001234567890"),
+    Setting("DEPAS_ADMINS", _admins,
+            "Quiénes pueden cambiar la configuración desde el chat, como ids numéricos "
+            "de Telegram separados por coma. Vacío es nadie: los ajustes solo se editan "
+            "con `depas config` en la máquina.",
+            example="467291452"),
 
     # -- what is even looked at ---------------------------------------------------
     Setting("DEPAS_COMMUNES", _communes,
@@ -283,8 +303,9 @@ SETTINGS: tuple[Setting, ...] = (
             "se calcula solo.",
             example="930000"),
     Setting("DEPAS_CURRENT_HOME", _home,
-            "Tu propio depto como un objeto JSON, para que /compare pueda medir cualquier "
-            f"aviso contra él. Obligatorios: {', '.join(HOME_REQUIRED)}.",
+            "Tu propio depto, para que /compare pueda medir cualquier aviso contra él. "
+            "Desde el chat se arma campo por campo; en la CLI es un objeto JSON. "
+            f"Obligatorios: {', '.join(HOME_REQUIRED)}.",
             example='{"commune":"nunoa","price_clp":800000,"common_expenses":130000,'
                     '"area_m2":62,"lat":-33.45590,"lon":-70.59780}'),
 
@@ -467,6 +488,20 @@ class Preferences:
         if not found:
             raise ValueError("set TELEGRAM_CHAT_ID (run `depas chats` to find it)")
         return found
+
+    def admins(self) -> list[int]:
+        """Telegram user ids allowed to edit the settings from a chat."""
+        return self.value("DEPAS_ADMINS") or []
+
+    def is_admin(self, user_id: int | None) -> bool:
+        """Whether one Telegram user may configure the bot from a chat -- nobody by default.
+
+        Deliberately not "anybody in the alert chat": a channel's discussion group is
+        joinable, so being able to reach the bot is not the same as being trusted with
+        what it looks for. A message with no author at all -- a channel post is signed by
+        the channel rather than by a person -- can never pass.
+        """
+        return user_id is not None and user_id in self.admins()
 
     def current_home(self) -> dict | None:
         """Your own apartment, or None when you have not described it."""

@@ -144,14 +144,14 @@ def _clp(amount: float | None) -> str:
     return "—" if amount is None else f"${amount:,.0f}".replace(",", ".")
 
 
-def _escape(text: str) -> str:
+def escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _station(name: str) -> str:
     """A station with the lines calling at it, blank when the portal named one we do not know."""
     calling = STATION_LINES.get(name, ())
-    return f"{_escape(name)} (L{'/L'.join(calling)})" if calling else _escape(name)
+    return f"{escape(name)} (L{'/L'.join(calling)})" if calling else escape(name)
 
 
 def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
@@ -166,13 +166,13 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
     header = [f"{prefix}{emoji} <b>{grade.letter} {grade.score}</b> "
               + " ".join(mark for mark in marks if mark)]
     if commune:  # a listing whose portal never stated one would leave a dangling separator
-        header.append(f"<b>{_escape(commune)}</b>")
+        header.append(f"<b>{escape(commune)}</b>")
     if row.get("id"):
         header.append(f"<code>[{row['id']}]</code>")
     lines = [FLAWLESS_BANNER] if grade.score >= FLAWLESS_SCORE else []
     lines.append(" · ".join(header))
     if row.get("title"):
-        lines.append(f"<i>{_escape(row['title'])}</i>")
+        lines.append(f"<i>{escape(row['title'])}</i>")
 
     spec = [f"{row['bedrooms']}D" if row.get("bedrooms") else None,
             f"{row['bathrooms']}B" if row.get("bathrooms") else None,
@@ -184,7 +184,7 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
 
     lines.append(f"💰 <b>{_clp(row.get('net_monthly_clp'))}</b> neto al mes")
 
-    link = f'\n<a href="{_escape(row["url"])}">Ver aviso →</a>'
+    link = f'\n<a href="{escape(row["url"])}">Ver aviso →</a>'
     # A discarded listing keeps only what says which one it was; everything below is
     # there to decide with, and that decision has been made.
     if row.get("interest") == -1:
@@ -325,7 +325,7 @@ def format_comparison(row: dict[str, Any], grade: Any,
              f" → {GRADE_EMOJI.get(grade.letter, '⚪')} <b>{grade.letter} {grade.score}</b>"]
     if commune:
         home_commune = (home.get("commune") or "").replace("-", " ").title()
-        lines.append(f"📍 {_escape(home_commune) or '—'} → <b>{_escape(commune)}</b>")
+        lines.append(f"📍 {escape(home_commune) or '—'} → <b>{escape(commune)}</b>")
 
     for label, column, render, lower_is_better in COMPARED:
         before, after = home.get(column), row.get(column)
@@ -338,7 +338,7 @@ def format_comparison(row: dict[str, Any], grade: Any,
 
     lines += _commute_lines(home, row)
     lines += _amenity_lines(home, row)
-    lines.append(f'\n<a href="{_escape(row["url"])}">Ver aviso →</a>')
+    lines.append(f'\n<a href="{escape(row["url"])}">Ver aviso →</a>')
     return "\n".join(lines)
 
 
@@ -428,6 +428,47 @@ def edit_listing(chat_id: str, message_id: int, text: str, is_photo: bool = Fals
         return
     call("editMessageText", chat_id=chat_id, message_id=message_id, text=text,
          parse_mode="HTML", link_preview_options={"is_disabled": True}, **markup)
+
+
+# The config menu never goes to a channel -- it is only ever answered to a person the
+# whitelist recognises, and a channel post has no person to recognise -- so these three
+# attach their keyboard directly rather than through `_markup`, which exists to protect
+# a channel card's «Comentarios» button.
+
+
+def send_menu(chat_id: str, text: str, buttons: dict[str, Any] | None,
+              thread_id: int | None = None, reply_to: int | None = None) -> dict[str, Any]:
+    """Post one screen of the settings menu, or a plain answer where there is no keyboard."""
+    where: dict[str, Any] = {"reply_markup": buttons} if buttons else {}
+    if thread_id:
+        where["message_thread_id"] = thread_id
+    if reply_to:
+        where["reply_parameters"] = {"message_id": reply_to,
+                                     "allow_sending_without_reply": True}
+    return call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
+                link_preview_options={"is_disabled": True}, **where)
+
+
+def edit_menu(chat_id: str, message_id: int, text: str, buttons: dict[str, Any]) -> None:
+    """Move the menu to another screen in place, rather than posting one message a press."""
+    call("editMessageText", chat_id=chat_id, message_id=message_id, text=text,
+         parse_mode="HTML", link_preview_options={"is_disabled": True},
+         reply_markup=buttons)
+
+
+def ask_value(chat_id: str, text: str, thread_id: int | None = None) -> dict[str, Any]:
+    """Ask for a value no keyboard can offer, as a reply the answer will quote back."""
+    # force_reply is what makes the answer carry reply_to_message, which is where the
+    # setting being edited is read back from -- there is no pending-edit state anywhere.
+    #
+    # Not `selective`: it targets only somebody @mentioned in the text or, where the
+    # bot's message is itself a reply, whoever it answers. This message is neither -- it
+    # is posted from a button press, which carries no message of the presser's to reply
+    # to -- so selective would target nobody and the reply box would open for no one.
+    where: dict[str, Any] = {"message_thread_id": thread_id} if thread_id else {}
+    return call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
+                reply_markup={"force_reply": True},
+                link_preview_options={"is_disabled": True}, **where)
 
 
 def reply(chat_id: str, text: str, thread_id: int | None = None,
