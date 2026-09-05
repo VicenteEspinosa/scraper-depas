@@ -31,7 +31,8 @@ def connection(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def sent(monkeypatch):
+def sent(monkeypatch, answers):
+    """Every card the bot posts. Posting one now explains it too, so `answers` comes along."""
     posted = []
 
     def send(chat, text, image=None, thread=None, buttons=None):
@@ -536,7 +537,7 @@ def test_a_button_press_is_dispatched_by_the_poll_loop(poll, monkeypatch):
     assert handled == ["like:1"]
 
 
-def test_a_new_card_carries_the_buttons(connection, monkeypatch):
+def test_a_new_card_carries_the_buttons(connection, monkeypatch, answers):
     """A card posted with no keyboard would leave nothing to press."""
     posted = []
     monkeypatch.setattr("depas.bot.send_listing",
@@ -548,6 +549,14 @@ def test_a_new_card_carries_the_buttons(connection, monkeypatch):
 
     labels = [button["text"] for button in posted[0]["inline_keyboard"][0]]
     assert labels == ["⭐ Me interesa", "🚫 Descartar"]
+
+
+def test_a_pasted_link_is_explained_like_any_other_card(connection, sent, answers):
+    """Every card explains itself; a card answering a link has no thread to wait for."""
+    _handle(connection, None, {"chat": {"id": GROUP}, "message_id": 1,
+                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"}, prefs())
+
+    assert any(said.startswith("📊 ") for said in answers.said)
 
 
 class StopLoop(Exception):

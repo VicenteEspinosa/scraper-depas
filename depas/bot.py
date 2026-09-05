@@ -450,6 +450,12 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
                             verdict_buttons(row["id"], row.get("interest")))
         remember_card(connection, sent["chat"]["id"], sent["message_id"],
                       row["portal"], row["external_id"], "photo" in sent)
+        # A card is a card: this one carries its own keyboard, so the breakdown
+        # answers it directly rather than waiting for a thread that will never open.
+        post_breakdown(connection, {"chat_id": str(sent["chat"]["id"]),
+                                    "message_id": sent["message_id"],
+                                    "portal": row["portal"],
+                                    "external_id": row["external_id"]}, prefs)
 
 
 def run() -> None:
