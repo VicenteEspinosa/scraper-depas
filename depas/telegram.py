@@ -1,6 +1,6 @@
 import json
 from collections.abc import Callable
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 from curl_cffi import requests
@@ -137,6 +137,47 @@ def escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+# A move worth reading: under half a percent is rounding, or a portal correcting itself.
+PRICE_MOVE_FLOOR = 0.005
+DROP_MARK, RISE_MARK = "📉", "📈"
+
+
+def _days_ago(stamp: str) -> int:
+    """Whole days since an ISO stamp, floored at zero for a clock that ran backwards."""
+    return max((datetime.now(UTC) - datetime.fromisoformat(stamp)).days, 0)
+
+
+def _when(days: int) -> str:
+    return "hoy" if days == 0 else "ayer" if days == 1 else f"hace {days} días"
+
+
+def price_change(row: dict[str, Any]) -> tuple[float, float, str] | None:
+    """What the asking price did: the share it moved, what it was in CLP, and when.
+
+    A markdown is the strongest thing the portals know and never say — a card states the
+    price today and nothing else, so a flat marked down twice reads like one that has
+    never budged. `previous_price` is the figure it moved from; the rest is arithmetic."""
+    before, price = row.get("previous_price"), row.get("price")
+    if not before or not price or abs(price / before - 1) < PRICE_MOVE_FLOOR:
+        return None
+    # price_clp scales with price at one exchange rate, so today's UF prices both ends:
+    # what is compared is the move itself, not a month of UF drift on top of it.
+    was = (row.get("price_clp") or 0) * before / price
+    return price / before - 1, was, row.get("price_changed_at") or ""
+
+
+def _price_move(row: dict[str, Any]) -> str | None:
+    """One card line for a price that moved, naming the old figure so the move is checkable."""
+    change = price_change(row)
+    if change is None:
+        return None
+    share, was, changed_at = change
+    mark, verb = (DROP_MARK, "bajó") if share < 0 else (RISE_MARK, "subió")
+    moved = abs(was - (row.get("price_clp") or 0))
+    when = f" · {_when(_days_ago(changed_at))}" if changed_at else ""
+    return f"{mark} <b>{verb} {clp(moved)}</b> ({share:+.0%}){when} · antes {clp(was)}"
+
+
 def _station(name: str) -> str:
     """A station with the lines calling at it, blank when the portal named one we do not know."""
     calling = STATION_LINES.get(name, ())
@@ -191,6 +232,11 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
     if any(sublet):
         saved = (row.get("total_monthly_clp") or 0) - (row.get("net_monthly_clp") or 0)
         lines.append(f"    ↳ −{clp(saved)} arrendando {sublet[0]}🚗 {sublet[1]}📦")
+
+    # Right under the price it revises: a markdown is read as part of the figure, not trivia.
+    moved = _price_move(row)
+    if moved:
+        lines.append(moved)
 
     baseline = prefs.current_cost()
     net = row.get("net_monthly_clp")

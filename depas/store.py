@@ -93,7 +93,18 @@ SELECT *,
        price_clp + COALESCE(NULLIF(common_expenses, 0), {DEFAULT_COMMON_EXPENSES})
            - COALESCE(parking_spaces, 0) * (SELECT value FROM settings WHERE key = 'parking_income')
            - COALESCE(storage_units, 0)  * (SELECT value FROM settings WHERE key = 'storage_income')
-                                                AS net_monthly_clp
+                                                AS net_monthly_clp,
+       -- price_history gains a row every time the asking price moves, so the last one
+       -- reading differently is the figure this listing changed *from*. Same currency
+       -- only: a UF listing re-published in pesos is a different figure, not a discount.
+       (SELECT h.price FROM price_history h
+         WHERE h.portal = listings.portal AND h.external_id = listings.external_id
+           AND h.currency = listings.currency AND h.price <> listings.price
+         ORDER BY h.seen_at DESC LIMIT 1)       AS previous_price,
+       -- When the price it carries now was first seen, which is when it moved.
+       (SELECT MAX(h.seen_at) FROM price_history h
+         WHERE h.portal = listings.portal AND h.external_id = listings.external_id
+           AND h.price = listings.price)        AS price_changed_at
 FROM listings;
 """
 

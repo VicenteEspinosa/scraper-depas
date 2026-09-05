@@ -295,6 +295,15 @@ a keyboard in a group is reachable by anybody who can see the group, and a chann
 discussion group is joinable. In a group it says so rather than degrading, because the
 pinned list already answers the same question there.
 
+**A price that moved is the one thing the portals record and never show.** `save` has
+written a `price_history` row on every change since the first migration and nothing ever
+read one back. Two subqueries in the ranked view close that: the last history row
+reading differently is the figure the listing moved *from*, and the newest row carrying
+today's price is when it moved. Same currency only — a listing re-published in UF is a
+different figure, not a discount — and the old price in CLP is derived from today's
+`price_clp`, so what is compared is the move itself rather than a month of UF drift on
+top of it. Under half a percent is a portal restating itself, and is not shown at all.
+
 ## Commutes
 
 `depas/commute.py`.

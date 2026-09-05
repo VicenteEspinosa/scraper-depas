@@ -209,6 +209,22 @@ Nothing is stored between presses: the button carries the screen to render next,
 keyboard left open across a restart still works, and an index into a pool that has
 since shrunk lands on the last listing rather than raising.
 
+### When a price moves
+
+Every scrape already recorded what a listing used to cost; nothing ever showed it. A
+listing whose price has moved now says so, on its card, right under the figure it
+revises:
+
+```
+📉 bajó $70.000 (-10%) · hace 3 días · antes $700.000
+```
+
+The old figure is named so the claim can be checked, and a rise is shown exactly the
+same way — a landlord who put the rent up is as worth knowing about. Under half a
+percent is a portal restating itself rather than news, and a listing re-published in
+another currency is a different figure, not a discount. The pinned list carries the
+same move as a badge too.
+
 ### Changing the settings from the chat
 
 `/config` opens the whole registry as a menu: eight groups, every setting inside one

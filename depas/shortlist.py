@@ -7,12 +7,15 @@ from depas.grade import Scale
 from depas.preferences import Preferences
 from depas.store import LIKE, remember_shortlist, stored_shortlist
 from depas.telegram import (
+    DROP_MARK,
     GRADE_EMOJI,
+    RISE_MARK,
     clp,
     edit_text,
     escape,
     message_link,
     pin,
+    price_change,
     reply,
 )
 
@@ -48,11 +51,14 @@ def _card_link(connection: sqlite3.Connection, row: dict, chat_id: str) -> str |
 def _entry(connection: sqlite3.Connection, row: dict, grade: object, chat_id: str) -> str:
     """One line: what it is, what it costs, and the two ways back to it."""
     commune = (row.get("commune") or "").replace("-", " ").title()
+    change = price_change(row)
     head = " · ".join(part for part in (
         f"{GRADE_EMOJI.get(grade.letter, '⚪')} <b>{grade.letter} {grade.score}</b>",
         escape(commune) or None,
         clp(row.get("net_monthly_clp")),
         f"{row['area']:.0f} m²" if row.get("area") else None,
+        # A flat you starred that has just been marked down is the one to call about today.
+        f"{DROP_MARK if change[0] < 0 else RISE_MARK} {change[0]:+.0%}" if change else None,
     ) if part)
     # The card is where the buttons and the breakdown are, so it leads; the aviso is the
     # portal. A listing pasted into the chat was never announced and only has the second.
