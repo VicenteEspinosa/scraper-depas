@@ -9,6 +9,7 @@ from depas.browse import (
     PREFIX,
     PRIVATE_ONLY,
     RATE,
+    STALE_KEYBOARD,
     STARRED,
     open_browser,
     press,
@@ -156,6 +157,15 @@ def test_every_button_fits_what_telegram_will_carry(connection, posted):
     keyboard = posted["sent"][0][1]
     assert all(len(button["callback_data"].encode()) <= DATA_LIMIT
                for row in keyboard["inline_keyboard"] for button in row)
+
+
+@pytest.mark.parametrize("data", ["g", "g:0", "g:0:9", "g:x:0", f"{RATE}:0:0:1:nope"])
+def test_a_keyboard_we_no_longer_speak_says_so(connection, posted, data):
+    """A deploy can change the encoding under an open keyboard; a press must not traceback."""
+    assert _press(connection, data) is None
+
+    assert posted["toasts"] == [STALE_KEYBOARD]
+    assert posted["edited"] == []
 
 
 def test_a_press_is_authorised_every_time(connection, posted):

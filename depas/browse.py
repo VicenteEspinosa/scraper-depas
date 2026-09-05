@@ -36,6 +36,7 @@ EMPTY = {POOL: ("No hay nada enriquecido para mostrar todavía. Corre <code>depa
                 "o espera a la próxima pasada."),
          STARRED: "Todavía no marcaste ninguno. Aprieta ⭐ en cualquier tarjeta."}
 STALE = "ese aviso ya no está en el pool"
+STALE_KEYBOARD = "ese menú quedó viejo; manda /top otra vez"
 
 
 def _listings(connection: sqlite3.Connection, prefs: Preferences,
@@ -109,7 +110,26 @@ def open_browser(connection: sqlite3.Connection, message: dict, prefs: Preferenc
     send_menu(chat, text, keyboard, None, message["message_id"])
 
 
+TOAST = {LIKE_BUTTON: "⭐ anotado", DISLIKE_BUTTON: "🚫 descartado",
+         UNDO_BUTTON: "↩️ deshecho"}
+INTEREST = {LIKE_BUTTON: 1, DISLIKE_BUTTON: -1, UNDO_BUTTON: None}
+
+
 NO_KEYBOARD: dict[str, object] = {"inline_keyboard": []}
+
+
+def _parsed(data: str) -> tuple[str, int, int, int, str] | None:
+    """What a button carries, or None for a keyboard whose encoding we no longer speak."""
+    action, *rest = data.removeprefix(PREFIX).split(":")
+    try:
+        index, view = int(rest[0]), int(rest[1])
+        # Navigation carries no listing; only RATE has anything to do before rendering.
+        listing_id, button = (int(rest[2]), rest[3]) if action == RATE else (0, "")
+    except (IndexError, ValueError):
+        return None
+    if view not in VIEWS or (action == RATE and button not in INTEREST):
+        return None
+    return action, index, view, listing_id, button
 
 
 def press(connection: sqlite3.Connection, callback: dict,
@@ -121,14 +141,18 @@ def press(connection: sqlite3.Connection, callback: dict,
     if not prefs.is_admin(_author(callback)):
         answer_callback(callback["id"], DENIED)
         return None
-    action, *rest = (callback.get("data") or "").removeprefix(PREFIX).split(":")
-    index, view = int(rest[0]), int(rest[1])
+    parsed = _parsed(callback.get("data") or "")
+    if parsed is None:
+        # A keyboard from before a deploy changed the encoding; saying so beats a traceback.
+        answer_callback(callback["id"], STALE_KEYBOARD)
+        return None
+    action, index, view, listing_id, button = parsed
 
     rated, toast = None, ""
     if action == RATE:
         author = callback.get("from") or {}
-        rated, toast = int(rest[2]), _rate(connection, int(rest[2]), rest[3],
-                                           author.get("username") or author.get("first_name"))
+        rated, toast = listing_id, _rate(connection, listing_id, button,
+                                         author.get("username") or author.get("first_name"))
     # Acknowledged before the redraw: a press times out in about ten seconds.
     answer_callback(callback["id"], toast)
 
@@ -138,11 +162,6 @@ def press(connection: sqlite3.Connection, callback: dict,
         edit_menu(str(message["chat"]["id"]), message["message_id"], text,
                   keyboard or NO_KEYBOARD)
     return rated
-
-
-TOAST = {LIKE_BUTTON: "⭐ anotado", DISLIKE_BUTTON: "🚫 descartado",
-         UNDO_BUTTON: "↩️ deshecho"}
-INTEREST = {LIKE_BUTTON: 1, DISLIKE_BUTTON: -1, UNDO_BUTTON: None}
 
 
 def _rate(connection: sqlite3.Connection, listing_id: int, button: str,
