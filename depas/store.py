@@ -265,6 +265,17 @@ def remember_card(connection: sqlite3.Connection, chat_id: object, message_id: i
     connection.commit()
 
 
+def remember_breakdown(connection: sqlite3.Connection, chat_id: object, message_id: int,
+                       detail_chat_id: object, detail_message_id: int) -> None:
+    """Record the breakdown posted under a card, so a redraw can re-render it in place."""
+    connection.execute(
+        "UPDATE card_messages SET detail_chat_id = ?, detail_message_id = ? "
+        "WHERE chat_id = ? AND message_id = ?",
+        (str(detail_chat_id), detail_message_id, str(chat_id), message_id),
+    )
+    connection.commit()
+
+
 def link_thread(connection: sqlite3.Connection, chat_id: object, message_id: int,
                 thread_chat_id: object, thread_id: int) -> bool:
     """Pair a channel card with the discussion-group copy its comments hang off."""
