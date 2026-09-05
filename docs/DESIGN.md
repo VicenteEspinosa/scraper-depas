@@ -274,7 +274,16 @@ them — because the star is the thing that had to be recorded and the pinned co
 is a convenience. Pinning is the same: the message is remembered *before* it is pinned,
 so a bot without pin rights in a channel still keeps a working list.
 
-**The browser stores nothing between presses.** `/top` addresses a screen rather than
+**The browser is text, so that it can be one message.** A card is sent as a photo when
+the listing has one, and Telegram will not convert a text message into a photo message
+or back — so a screen that carried the photo would have no way to render a listing whose
+portal published none, short of deleting the message and posting a new one, which is a
+browser that walks down the chat. Editing the media in place is possible for a message
+that is already a photo, but it re-uploads on every press and caps the card at a
+caption's 1024 characters rather than a message's 4096. The photo is one tap away on the
+card; the browser's job is scanning.
+
+**It stores nothing between presses.** `/top` addresses a screen rather than
 describing one: the button carries where to render next, so there is no session to go
 stale, a keyboard left open across a restart still works, and an index into a pool that
 has since shrunk clamps to the last listing instead of raising. It is the same

@@ -188,9 +188,15 @@ re-posts or re-renders it.
 
 `/top`, in a private chat with the bot, pages through the same pool the alerts draw
 from, ranked the same way, in **one message that edits itself** — not a screenful of
-cards per browse. Each screen is the card the listing would have been posted as,
-under three rows of buttons: where to go (`◀️ 7/34 ▶️`), the two verdicts, and a
-switch between the whole pool and just what you starred.
+cards per browse. Each screen is the **text** of the card the listing would have been
+posted as, under three rows of buttons: where to go (`◀️ 7/34 ▶️`), the two verdicts,
+and a switch between the whole pool and just what you starred.
+
+No photo, and that is what makes it one message. Telegram will not turn a text message
+into a photo message or back, so a browser that showed photos would break on the first
+listing whose portal published none — and every screen would cost a re-upload and drop
+the card's 4096 characters to a caption's 1024. The photo is one tap away on the card
+itself, which the pinned list links to; the browser is for scanning the pool.
 
 A verdict given here writes the same column a card's button writes, so it marks the
 listing, redraws the card it was announced on, and rewrites the pinned list.
