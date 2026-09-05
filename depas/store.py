@@ -265,6 +265,17 @@ def remember_card(connection: sqlite3.Connection, chat_id: object, message_id: i
     connection.commit()
 
 
+def remember_breakdown(connection: sqlite3.Connection, chat_id: object, message_id: int,
+                       detail_chat_id: object, detail_message_id: int) -> None:
+    """Record the breakdown posted under a card, so a redraw can re-render it in place."""
+    connection.execute(
+        "UPDATE card_messages SET detail_chat_id = ?, detail_message_id = ? "
+        "WHERE chat_id = ? AND message_id = ?",
+        (str(detail_chat_id), detail_message_id, str(chat_id), message_id),
+    )
+    connection.commit()
+
+
 def link_thread(connection: sqlite3.Connection, chat_id: object, message_id: int,
                 thread_chat_id: object, thread_id: int) -> bool:
     """Pair a channel card with the discussion-group copy its comments hang off."""
@@ -293,6 +304,32 @@ def card_for_message(connection: sqlite3.Connection, chat_id: object,
         "SELECT * FROM card_messages WHERE chat_id = ? AND message_id = ?",
         (str(chat_id), message_id),
     ).fetchone()
+
+
+# The pinned ⭐ list, kept in `settings` beside the poll offset: two integers, no table.
+SHORTLIST_CHAT, SHORTLIST_MESSAGE = "shortlist_chat_id", "shortlist_message_id"
+
+
+def remember_shortlist(connection: sqlite3.Connection, chat_id: object,
+                       message_id: int) -> None:
+    """Record the message the ⭐ list lives in, so the next verdict edits it rather than posts."""
+    connection.executemany(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        ((SHORTLIST_CHAT, int(chat_id)), (SHORTLIST_MESSAGE, message_id)),
+    )
+    connection.commit()
+
+
+def stored_shortlist(connection: sqlite3.Connection) -> tuple[str, int] | None:
+    """Where the pinned ⭐ list is, or None until one has been posted."""
+    found = dict(connection.execute(
+        "SELECT key, value FROM settings WHERE key IN (?, ?)",
+        (SHORTLIST_CHAT, SHORTLIST_MESSAGE),
+    ).fetchall())
+    if SHORTLIST_CHAT not in found or SHORTLIST_MESSAGE not in found:
+        return None
+    return str(found[SHORTLIST_CHAT]), found[SHORTLIST_MESSAGE]
 
 
 def clear_notified(connection: sqlite3.Connection, hours: int) -> int:

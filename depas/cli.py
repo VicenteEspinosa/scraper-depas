@@ -3,7 +3,8 @@ import sqlite3
 import time
 from collections.abc import Iterator
 
-from depas.bot import refresh_card
+from depas import shortlist
+from depas.bot import post_breakdown, refresh_card
 from depas.bot import run as run_bot
 from depas.communes import SANTIAGO_PROVINCE, Commune
 from depas.commute import as_text as commute_text
@@ -39,7 +40,14 @@ from depas.store import (
     store_preference,
     sync_lease_income,
 )
-from depas.telegram import chat_type, chats, format_listing, send_listing, verdict_buttons
+from depas.telegram import (
+    chat_type,
+    chats,
+    format_listing,
+    hides_comments,
+    send_listing,
+    verdict_buttons,
+)
 from depas.traits import EXCLUDE
 from depas.uf import normalize, stored_uf
 
@@ -203,6 +211,24 @@ def _requirement_clauses(prefs: Preferences) -> tuple[list[str], list[object]]:
     return conditions, parameters
 
 
+def _post_card(connection: sqlite3.Connection, prefs: Preferences, destination: str,
+               row: dict, text: str) -> None:
+    """Post one card, record it, and explain its grade underneath where nothing else will."""
+    sent = send_listing(destination, text, row["image_url"],
+                        buttons=verdict_buttons(row["id"], row["interest"]))
+    # Recorded so a command left under the card finds its listing, and can redraw it.
+    remember_card(connection, sent["chat"]["id"], sent["message_id"],
+                  row["portal"], row["external_id"], "photo" in sent)
+    # Where the card gets a Comments thread the bot posts the breakdown into it instead,
+    # under the keyboard, once Telegram's copy of the card tells it where the thread is.
+    if hides_comments(destination):
+        return
+    card = {"chat_id": str(sent["chat"]["id"]), "message_id": sent["message_id"],
+            "portal": row["portal"], "external_id": row["external_id"]}
+    post_breakdown(connection, card, prefs)
+    time.sleep(ALERT_DELAY_SECONDS)  # a second message spends a second slice of the rate limit
+
+
 def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) -> int:
     """Post enriched, un-announced listings that clear DEPAS_GRADE_MIN."""
     conditions, parameters = _requirement_clauses(prefs)
@@ -228,12 +254,8 @@ def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) ->
             break
         # Below the bar still gets stamped, so it is never reconsidered later.
         if grade.score >= minimum:
-            sent = send_listing(destination, format_listing(dict(row), grade, prefs),
-                                row["image_url"],
-                                buttons=verdict_buttons(row["id"], row["interest"]))
-            # Recorded so a command left under the card finds its listing, and can redraw it.
-            remember_card(connection, sent["chat"]["id"], sent["message_id"],
-                          row["portal"], row["external_id"], "photo" in sent)
+            _post_card(connection, prefs, destination, dict(row),
+                       format_listing(dict(row), grade, prefs))
             posted += 1
             time.sleep(ALERT_DELAY_SECONDS)  # Telegram rate-limits how fast a chat is posted to
         mark_notified(connection, row["portal"], row["external_id"])
@@ -278,6 +300,8 @@ def watch(args: argparse.Namespace) -> None:
         print(f"commutes: {routed} routed")
         print(f"zone benchmarks: {refresh_zone_benchmarks(connection)} communes")
         print(f"alerts: {_announce(connection, prefs, args.max_alerts)} posted")
+        # Grades move with the pool, so the pinned list is restated once a pass.
+        print(f"lista: {'actualizada' if shortlist.sync(connection, prefs) else 'sin cambios'}")
     finally:
         fetcher.close()
         connection.close()
@@ -305,12 +329,9 @@ def test_alert(args: argparse.Namespace) -> None:
             raise ValueError("nothing enriched to post; run `depas enrich` first")
         scale = Scale(prefs)
         row, grade = max(((row, scale.grade(row)) for row in pool), key=lambda pair: pair[1].score)
-        sent = send_listing(prefs.chat_id(), format_listing(row, grade, prefs, is_test=True),
-                            row["image_url"],
-                            buttons=verdict_buttons(row["id"], row["interest"]))
-        # Recorded like any other card, so /like and /dislike can be tried on it.
-        remember_card(connection, sent["chat"]["id"], sent["message_id"],
-                      row["portal"], row["external_id"], "photo" in sent)
+        # Posted like any other card, so /like, /dislike and the breakdown can be tried on it.
+        _post_card(connection, prefs, prefs.chat_id(), row,
+                   format_listing(row, grade, prefs, is_test=True))
         print(f"test alert posted: {grade.letter} {grade.score} {row['url']}")
     finally:
         connection.close()
@@ -340,6 +361,18 @@ def redraw(args: argparse.Namespace) -> None:
                 redrawn += 1
             time.sleep(ALERT_DELAY_SECONDS)  # Telegram rate-limits edits like anything else
         print(f"redraw: {redrawn} of {len(cards)} cards re-rendered")
+    finally:
+        connection.close()
+
+
+def pinned_list(args: argparse.Namespace) -> None:
+    """Re-post or re-render the pinned ⭐ list, which verdicts otherwise keep current."""
+    connection = connect()
+    try:
+        prefs = Preferences.load(connection)
+        starred = shortlist.starred(connection, prefs)
+        print(f"lista: {len(starred)} marcados · "
+              f"{'actualizada' if shortlist.sync(connection, prefs) else 'sin publicar'}")
     finally:
         connection.close()
 
@@ -576,6 +609,10 @@ def main() -> None:
     importer.add_argument("--force", action="store_true",
                           help="overwrite settings already stored with what .env says")
     importer.set_defaults(func=config_import_env)
+
+    pinner = subparsers.add_parser(
+        "shortlist", help="re-post or re-render the pinned list of what you starred")
+    pinner.set_defaults(func=pinned_list)
 
     viewer = subparsers.add_parser("show", help="best price per m2, or your own SQL")
     viewer.add_argument("sql", nargs="?")

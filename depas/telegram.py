@@ -8,6 +8,7 @@ from curl_cffi import requests
 from depas.commute import as_text as commute_text
 from depas.config import DEFAULT_COMMON_EXPENSES, secret
 from depas.detail import MONTH_NAMES
+from depas.grade import BEST as BEST_SCORE
 from depas.metro import STATION_LINES
 from depas.preferences import Preferences
 
@@ -127,7 +128,8 @@ def _availability(available_from: str) -> str:
     return f"disponible desde el {when.day} de {MONTH_NAMES[when.month - 1]}"
 
 
-def _clp(amount: float | None) -> str:
+def clp(amount: float | None) -> str:
+    """A CLP figure the way Chile writes it, and an em dash for one nobody stated."""
     return "—" if amount is None else f"${amount:,.0f}".replace(",", ".")
 
 
@@ -169,7 +171,7 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
             f"{row['age']:.0f} años" if row.get("age") is not None else None]
     lines.append("🏠 " + " · ".join(part for part in spec if part))
 
-    lines.append(f"💰 <b>{_clp(row.get('net_monthly_clp'))}</b> neto al mes")
+    lines.append(f"💰 <b>{clp(row.get('net_monthly_clp'))}</b> neto al mes")
 
     link = f'\n<a href="{escape(row["url"])}">Ver aviso →</a>'
     # A discarded listing keeps only what says which one it was; the decision is made.
@@ -178,17 +180,17 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
         return "\n".join(lines)
 
     gastos = row.get("common_expenses")
-    breakdown = f"    ↳ {_clp(row.get('price_clp'))} arriendo"
+    breakdown = f"    ↳ {clp(row.get('price_clp'))} arriendo"
     # The net figure above already includes the estimate, so the card admits which it used.
     lines.append(
-        f"{breakdown} + {_clp(gastos)} gastos comunes" if gastos
-        else f"{breakdown} + {_clp(DEFAULT_COMMON_EXPENSES)} gastos comunes "
+        f"{breakdown} + {clp(gastos)} gastos comunes" if gastos
+        else f"{breakdown} + {clp(DEFAULT_COMMON_EXPENSES)} gastos comunes "
              "(estimado por defecto, no publicado)"
     )
     sublet = (row.get("parking_spaces") or 0, row.get("storage_units") or 0)
     if any(sublet):
         saved = (row.get("total_monthly_clp") or 0) - (row.get("net_monthly_clp") or 0)
-        lines.append(f"    ↳ −{_clp(saved)} arrendando {sublet[0]}🚗 {sublet[1]}📦")
+        lines.append(f"    ↳ −{clp(saved)} arrendando {sublet[0]}🚗 {sublet[1]}📦")
 
     baseline = prefs.current_cost()
     net = row.get("net_monthly_clp")
@@ -198,7 +200,7 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
             lines.append("⚖️ lo mismo que pagas hoy")
         else:
             mark, word = ("🔺", "más caro") if difference > 0 else ("🔻", "más barato")
-            lines.append(f"⚖️ {mark} {_clp(abs(difference))} {word} que hoy")
+            lines.append(f"⚖️ {mark} {clp(abs(difference))} {word} que hoy")
 
     station = row.get("nearest_station")
     if station:
@@ -233,6 +235,55 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
     return "\n".join(lines)
 
 
+# What each graded component measures, in the vocabulary the settings menu already uses.
+COMPONENT_LABELS = {
+    "value": "precio zona", "cost": "costo", "walk": "caminata", "area": "metraje",
+    "amenities": "comodidades", "security": "conserjería", "floor": "piso",
+    "metro": "metro", "commute": "viajes", "age": "antigüedad",
+    "availability": "entrega", "traits": "características",
+}
+# Why a component went unscored, so an absent row reads as silence rather than a zero.
+UNSCORED = "el aviso no lo dice, o no lo has configurado"
+BAR_CELLS = 10
+FULL_CELL, EMPTY_CELL = "█", "·"
+WEAKEST_MARK = "← lo más flojo"
+
+
+def _bar(score: int) -> str:
+    """One component's score as a fixed-width bar, so a column of them is scannable."""
+    filled = max(0, min(BAR_CELLS, round(score / (BEST_SCORE / BAR_CELLS))))
+    return FULL_CELL * filled + EMPTY_CELL * (BAR_CELLS - filled)
+
+
+def format_breakdown(grade: Any, prefs: Preferences) -> str:
+    """Render the twelve components behind a grade, worst last, as the card's own audit."""
+    weights = prefs.weights()
+    scored = sorted(grade.parts.items(), key=lambda part: part[1], reverse=True)
+    width = max((len(COMPONENT_LABELS[name]) for name, _ in scored), default=0)
+
+    rows = []
+    for index, (name, score) in enumerate(scored):
+        weight = weights.get(name, 1)
+        # A weight of 1 is the default and says nothing; anything else explains the grade.
+        heavier = f" ×{weight:g}" if weight != 1 else ""
+        # Only worth pointing at when there is something above it to be flojo against.
+        weakest = f"  {WEAKEST_MARK}" if index and index == len(scored) - 1 else ""
+        label = COMPONENT_LABELS[name].ljust(width)
+        rows.append(f"{label}  {_bar(score)} {score:>3}{heavier}{weakest}")
+
+    total = len(grade.parts) + len(grade.missing)
+    table = escape("\n".join(rows))
+    lines = [f"📊 <b>{grade.letter} {grade.score}</b> · "
+             f"{len(grade.parts)} de {total} componentes",
+             f"<pre>{table}</pre>"]
+    if grade.missing:
+        absent = " · ".join(COMPONENT_LABELS[name] for name in grade.missing)
+        lines.append(f"❓ sin puntaje: {escape(absent)}\n<i>{UNSCORED}</i>")
+    if grade.meets_targets:
+        lines.append(f"{MEETS_TARGETS_MARK} cumple todos los objetivos que pudo medir")
+    return "\n".join(lines)
+
+
 def _m2(value: float) -> str:
     return f"{value:.0f} m²"
 
@@ -255,9 +306,9 @@ def _count(value: float) -> str:
 
 # Every figure both a listing and your own place carry, and which way is better.
 COMPARED = (
-    ("💰 neto al mes", "net_monthly_clp", _clp, True),
-    ("🏷️ arriendo", "price_clp", _clp, True),
-    ("🧾 gastos comunes", "common_expenses", _clp, True),
+    ("💰 neto al mes", "net_monthly_clp", clp, True),
+    ("🏷️ arriendo", "price_clp", clp, True),
+    ("🧾 gastos comunes", "common_expenses", clp, True),
     ("📐 superficie", "area", _m2, False),
     ("🛏️ dormitorios", "bedrooms", _count, False),
     ("🚿 baños", "bathrooms", _count, False),
@@ -420,6 +471,27 @@ def edit_menu(chat_id: str, message_id: int, text: str, buttons: dict[str, Any])
     call("editMessageText", chat_id=chat_id, message_id=message_id, text=text,
          parse_mode="HTML", link_preview_options={"is_disabled": True},
          reply_markup=buttons)
+
+
+def message_link(chat_id: object, message_id: int) -> str | None:
+    """A deep link straight to one message, which only a channel or supergroup can give."""
+    # Their ids are the internal one behind a -100 prefix, and t.me/c wants it back off.
+    internal = str(chat_id).removeprefix("-100")
+    if internal == str(chat_id) or not internal.isdigit():
+        return None  # a private chat or a plain group: nothing to link to
+    return f"https://t.me/c/{internal}/{message_id}"
+
+
+def pin(chat_id: str, message_id: int) -> None:
+    """Pin one message, silently: a list that re-pins itself must not notify every time."""
+    call("pinChatMessage", chat_id=chat_id, message_id=message_id,
+         disable_notification=True)
+
+
+def edit_text(chat_id: str, message_id: int, text: str) -> None:
+    """Re-render a plain message in place: one that never carried a keyboard to preserve."""
+    call("editMessageText", chat_id=chat_id, message_id=message_id, text=text,
+         parse_mode="HTML", link_preview_options={"is_disabled": True})
 
 
 def ask_value(chat_id: str, text: str, thread_id: int | None = None) -> dict[str, Any]:

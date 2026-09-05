@@ -4,7 +4,7 @@ import time
 
 from curl_cffi.requests.exceptions import RequestException
 
-from depas import configure
+from depas import browse, configure, shortlist
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.home import row as home_row
@@ -19,6 +19,7 @@ from depas.store import (
     card_for_thread,
     connect,
     link_thread,
+    remember_breakdown,
     remember_card,
     save,
     save_detail,
@@ -32,6 +33,8 @@ from depas.telegram import (
     call,
     edit_buttons,
     edit_listing,
+    edit_text,
+    format_breakdown,
     format_comparison,
     format_listing,
     reply,
@@ -136,20 +139,21 @@ def _forwarded_from(message: dict) -> tuple[object, int] | None:
     return None
 
 
-def _remember_forward(connection: sqlite3.Connection, message: dict) -> None:
+def _remember_forward(connection: sqlite3.Connection, message: dict,
+                      prefs: Preferences) -> None:
     """Pair a card auto-forwarded into the discussion group with the post it copies."""
     origin = _forwarded_from(message)
     if origin is not None:
         link_thread(connection, *origin, message["chat"]["id"], message["message_id"])
-        _offer_buttons(connection, *origin, message)
+        _offer_buttons(connection, *origin, message, prefs)
 
 
 PRESS_PROMPT = "¿Qué te parece? (o comenta /compare para verlo contra tu depto)"
 
 
 def _offer_buttons(connection: sqlite3.Connection, card_chat: object, card_message: int,
-                   forward: dict) -> None:
-    """Open the card's thread with the verdict keyboard, since the card cannot hold it."""
+                   forward: dict, prefs: Preferences) -> None:
+    """Open the card's thread with the verdict keyboard, then the grade it is judging."""
     card = card_for_message(connection, card_chat, card_message)
     if card is None:
         return  # not a card we posted: there is nothing to rate
@@ -165,6 +169,8 @@ def _offer_buttons(connection: sqlite3.Connection, card_chat: object, card_messa
     except RuntimeError as error:
         # The thread is linked either way; the keyboard is the shortcut, not the feature.
         print(f"could not post the buttons in thread {forward['message_id']}: {error}")
+    # After the keyboard, so the thread opens on the verdict and explains itself below it.
+    post_breakdown(connection, dict(card), prefs)
 
 
 def _from_card_text(connection: sqlite3.Connection, text: str) -> dict | None:
@@ -212,6 +218,71 @@ def refresh_card(connection: sqlite3.Connection, card: dict, prefs: Preferences)
         # Redrawing is a nicety: a card too old to edit must not cost the stored verdict.
         print(f"could not redraw card {card['message_id']}: {error}")
         return False
+    finally:
+        # Its own failures are already swallowed, and a card redrawn is a grade restated.
+        refresh_breakdown(connection, card, prefs)
+    return True
+
+
+# A discarded card keeps only what says which listing it was, and so does its breakdown.
+DISCARDED_BREAKDOWN = "🚫 descartado"
+
+
+def _breakdown_anchor(card: dict) -> tuple[str, int]:
+    """Where a breakdown hangs: the card's Comments thread, or the card itself."""
+    # The same anchor the verdict keyboard uses, so the two always sit together.
+    if card.get("thread_chat_id") and card.get("thread_id"):
+        return str(card["thread_chat_id"]), int(card["thread_id"])
+    return str(card["chat_id"]), int(card["message_id"])
+
+
+def _breakdown_text(row: dict, prefs: Preferences) -> str:
+    return (DISCARDED_BREAKDOWN if row.get("interest") == DISLIKE
+            else format_breakdown(Scale(prefs).grade(row), prefs))
+
+
+def _ranked(connection: sqlite3.Connection, card: dict) -> dict | None:
+    """The card's listing as the ranked view sees it, or None once it is gone."""
+    row = connection.execute(
+        "SELECT * FROM listings_ranked WHERE portal = ? AND external_id = ?",
+        (card["portal"], card["external_id"]),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def post_breakdown(connection: sqlite3.Connection, card: dict, prefs: Preferences) -> bool:
+    """Post the components behind a card's grade under it, beneath the verdict buttons."""
+    if card.get("detail_message_id"):
+        return False  # already explained; a second one would only be scrolled past
+    row = _ranked(connection, card)
+    if row is None:
+        return False
+    chat, anchor = _breakdown_anchor(card)
+    try:
+        sent = reply(chat, _breakdown_text(row, prefs), reply_to=anchor)
+    except RuntimeError as error:
+        # The breakdown is the footnote, not the alert: a card still stands without it.
+        print(f"could not post the breakdown under {card['message_id']}: {error}")
+        return False
+    remember_breakdown(connection, card["chat_id"], card["message_id"],
+                       sent["chat"]["id"], sent["message_id"])
+    return True
+
+
+def refresh_breakdown(connection: sqlite3.Connection, card: dict, prefs: Preferences) -> bool:
+    """Re-render a breakdown already posted, so a verdict and today's rules show on it."""
+    if not card.get("detail_message_id"):
+        return False
+    row = _ranked(connection, card)
+    if row is None:
+        return False
+    try:
+        edit_text(str(card["detail_chat_id"]), int(card["detail_message_id"]),
+                       _breakdown_text(row, prefs))
+    except RuntimeError as error:
+        # Telegram refuses an edit that changes nothing, which is not a failure worth raising.
+        print(f"could not redraw the breakdown {card['detail_message_id']}: {error}")
+        return False
     return True
 
 
@@ -228,7 +299,24 @@ def _rate(connection: sqlite3.Connection, message: dict, interest: int,
     set_interest(connection, card["portal"], card["external_id"], interest,
                  author.get("username") or author.get("first_name"))
     refresh_card(connection, card, prefs)
+    shortlist.sync(connection, prefs)
     reply(chat, VERDICT[interest], thread, message["message_id"])
+
+
+def _after_verdict(connection: sqlite3.Connection, listing_id: int,
+                   prefs: Preferences) -> None:
+    """Everything a verdict changes beyond the row: the card it was announced on, and the list."""
+    listing = connection.execute(
+        "SELECT portal, external_id FROM listings WHERE rowid = ?", (listing_id,)
+    ).fetchone()
+    if listing is not None:
+        card = connection.execute(
+            "SELECT * FROM card_messages WHERE portal = ? AND external_id = ? "
+            "ORDER BY posted_at DESC LIMIT 1", (listing["portal"], listing["external_id"])
+        ).fetchone()
+        if card is not None:
+            refresh_card(connection, dict(card), prefs)
+    shortlist.sync(connection, prefs)
 
 
 def _compare(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
@@ -283,6 +371,11 @@ def _handle_callback(connection: sqlite3.Connection, callback: dict,
     if (callback.get("data") or "").startswith(configure.PREFIX):
         configure.press(connection, callback, prefs)
         return
+    if (callback.get("data") or "").startswith(browse.PREFIX):
+        rated = browse.press(connection, callback, prefs)
+        if rated is not None:
+            _after_verdict(connection, rated, prefs)
+        return
     action, _, listing_id = (callback.get("data") or "").partition(":")
     if action not in BUTTONS or not listing_id.isdigit():
         answer_callback(callback["id"], "botón no reconocido")
@@ -303,6 +396,7 @@ def _handle_callback(connection: sqlite3.Connection, callback: dict,
     pressed = callback.get("message") or {}
     card = _pressed_card(connection, pressed, dict(listing))
     refresh_card(connection, card, prefs)
+    shortlist.sync(connection, prefs)
     _tick(pressed, card, int(listing_id), interest)
 
 
@@ -325,7 +419,7 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
             prefs: Preferences) -> None:
     # Telegram's own copy of a channel card is bookkeeping, never a request.
     if message.get("is_automatic_forward"):
-        _remember_forward(connection, message)
+        _remember_forward(connection, message, prefs)
         return
 
     text = message.get("text") or message.get("caption") or ""
@@ -338,6 +432,9 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
         return
     if command in (configure.COMMAND, configure.START):
         configure.open_menu(connection, message, prefs)
+        return
+    if command == browse.COMMAND:
+        browse.open_browser(connection, message, prefs)
         return
     # Read before the links below: an answer to a prompt was not posted to be graded.
     if configure.answer_prompt(connection, fetcher, message, prefs):
@@ -353,6 +450,12 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
                             verdict_buttons(row["id"], row.get("interest")))
         remember_card(connection, sent["chat"]["id"], sent["message_id"],
                       row["portal"], row["external_id"], "photo" in sent)
+        # A card is a card: this one carries its own keyboard, so the breakdown
+        # answers it directly rather than waiting for a thread that will never open.
+        post_breakdown(connection, {"chat_id": str(sent["chat"]["id"]),
+                                    "message_id": sent["message_id"],
+                                    "portal": row["portal"],
+                                    "external_id": row["external_id"]}, prefs)
 
 
 def run() -> None:

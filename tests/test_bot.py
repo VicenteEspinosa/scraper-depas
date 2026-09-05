@@ -4,6 +4,7 @@ import pytest
 from curl_cffi.requests.exceptions import RequestException
 
 from depas.bot import (
+    DISCARDED_BREAKDOWN,
     GONE,
     NO_CARD,
     _handle,
@@ -30,7 +31,8 @@ def connection(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def sent(monkeypatch):
+def sent(monkeypatch, answers):
+    """Every card the bot posts. Posting one now explains it too, so `answers` comes along."""
     posted = []
 
     def send(chat, text, image=None, thread=None, buttons=None):
@@ -45,15 +47,22 @@ def sent(monkeypatch):
 @pytest.fixture
 def answers(monkeypatch):
     """Every plain reply the bot posts, every card it redraws, every keyboard it ticks."""
-    said, edited, ticked = [], [], []
-    monkeypatch.setattr("depas.bot.reply",
-                        lambda chat, text, thread=None, reply_to=None: said.append(text))
+    said, edited, ticked, explained = [], [], [], []
+
+    def answer(chat, text, thread=None, reply_to=None):
+        said.append(text)
+        # What Telegram hands back, which is what a breakdown is remembered by.
+        return {"chat": {"id": int(chat)}, "message_id": BREAKDOWN}
+
+    monkeypatch.setattr("depas.bot.reply", answer)
     monkeypatch.setattr("depas.bot.edit_listing",
                         lambda chat, message, text, is_photo=False, buttons=None:
                         edited.append((chat, message, text, buttons)))
     monkeypatch.setattr("depas.bot.edit_buttons",
                         lambda chat, message, buttons: ticked.append((chat, message, buttons)))
-    return SimpleNamespace(said=said, edited=edited, ticked=ticked)
+    monkeypatch.setattr("depas.bot.edit_text",
+                        lambda chat, message, text: explained.append((chat, message, text)))
+    return SimpleNamespace(said=said, edited=edited, ticked=ticked, explained=explained)
 
 
 @pytest.fixture
@@ -223,11 +232,11 @@ def test_a_houm_page_that_is_not_a_listing_is_ignored():
 
 
 
-CHANNEL, CARD, GROUP, THREAD, KEYBOARD = -1001, 77, -1002, 88, 950
+CHANNEL, CARD, GROUP, THREAD, KEYBOARD, BREAKDOWN = -1001, 77, -1002, 88, 950, 960
 
 
 @pytest.fixture
-def announced(connection, offered):
+def announced(connection, offered, answers):
     """A card posted to the channel and copied by Telegram into its discussion group."""
     remember_card(connection, CHANNEL, CARD, "portalinmobiliario", "MLC-1")
     _handle(connection, None, {
@@ -235,6 +244,8 @@ def announced(connection, offered):
         "forward_origin": {"type": "channel", "chat": {"id": CHANNEL}, "message_id": CARD},
         "text": "🟢 B 80 ✔️",
     }, prefs())
+    # Opening the thread posts the breakdown; that is this fixture's doing, not the test's.
+    answers.said.clear()
     return connection
 
 
@@ -403,6 +414,50 @@ def test_the_thread_opens_with_the_verdict_keyboard(announced, offered):
         == ["⭐ Me interesa", "🚫 Descartar"]
 
 
+def test_the_breakdown_follows_the_keyboard_into_the_thread(connection, offered, answers):
+    """The verdict is the point of the thread, so the buttons go in first and the
+    grade explains itself underneath them."""
+    remember_card(connection, CHANNEL, CARD, "portalinmobiliario", "MLC-1")
+    _handle(connection, None, {
+        "chat": {"id": GROUP}, "message_id": THREAD, "is_automatic_forward": True,
+        "forward_origin": {"type": "channel", "chat": {"id": CHANNEL}, "message_id": CARD},
+    }, prefs())
+
+    assert offered and answers.said[0].startswith("📊 ")
+
+
+def test_the_breakdown_is_remembered_so_it_is_posted_once(announced, answers):
+    """Telegram can deliver the same forward twice; a card gets one breakdown regardless."""
+    card = announced.execute("SELECT * FROM card_messages").fetchone()
+    assert (card["detail_chat_id"], card["detail_message_id"]) == (str(GROUP), BREAKDOWN)
+
+    _handle(announced, None, {
+        "chat": {"id": GROUP}, "message_id": THREAD, "is_automatic_forward": True,
+        "forward_origin": {"type": "channel", "chat": {"id": CHANNEL}, "message_id": CARD},
+    }, prefs())
+
+    assert answers.said == []
+
+
+def test_a_discarded_listing_loses_its_breakdown(announced, answers):
+    """The decision is made: what is left says which listing it was, and nothing more."""
+    _handle(announced, None, _comment("/dislike"), prefs())
+
+    chat, message, text = answers.explained[-1]
+    assert (chat, message) == (str(GROUP), BREAKDOWN)
+    assert text == DISCARDED_BREAKDOWN
+
+
+def test_undoing_a_verdict_brings_the_breakdown_back(announced, answers, pressed):
+    """Undo puts the card back exactly as it was, and the breakdown is part of the card."""
+    listing_id = _listing_id(announced)
+    _handle_callback(announced, _press(announced, f"dislike:{listing_id}"), prefs())
+
+    _handle_callback(announced, _press(announced, f"undo:{listing_id}"), prefs())
+
+    assert answers.explained[-1][2].startswith("📊 ")
+
+
 def test_a_forward_of_something_we_never_posted_gets_no_keyboard(connection, offered):
     """Every channel post is copied into the group; only our cards have a verdict."""
     _handle(connection, None, {
@@ -482,7 +537,7 @@ def test_a_button_press_is_dispatched_by_the_poll_loop(poll, monkeypatch):
     assert handled == ["like:1"]
 
 
-def test_a_new_card_carries_the_buttons(connection, monkeypatch):
+def test_a_new_card_carries_the_buttons(connection, monkeypatch, answers):
     """A card posted with no keyboard would leave nothing to press."""
     posted = []
     monkeypatch.setattr("depas.bot.send_listing",
@@ -494,6 +549,14 @@ def test_a_new_card_carries_the_buttons(connection, monkeypatch):
 
     labels = [button["text"] for button in posted[0]["inline_keyboard"][0]]
     assert labels == ["⭐ Me interesa", "🚫 Descartar"]
+
+
+def test_a_pasted_link_is_explained_like_any_other_card(connection, sent, answers):
+    """Every card explains itself; a card answering a link has no thread to wait for."""
+    _handle(connection, None, {"chat": {"id": GROUP}, "message_id": 1,
+                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"}, prefs())
+
+    assert any(said.startswith("📊 ") for said in answers.said)
 
 
 class StopLoop(Exception):

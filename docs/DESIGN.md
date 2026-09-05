@@ -238,6 +238,63 @@ preferences once per poll, so a setting edited from the chat takes effect withou
 restart, and it advances the offset even when answering failed — an update that cannot
 be answered must not be redelivered on every restart forever.
 
+## Seeing the pool
+
+`depas/shortlist.py`, `depas/browse.py`, and `format_breakdown` in `depas/telegram.py`.
+
+Everything the project could show you was pushed at you, and everything you could ask it
+needed a shell on the box. Three surfaces close that, and all three are built out of
+what was already there rather than beside it: the grade's own `parts`, the pool query
+the alerts use, and the cards `card_messages` already remembers.
+
+**The breakdown is posted, not asked for.** A `/porque` command would have been cheaper,
+and nobody would type it — the moment you want to know why a grade is what it is, is the
+moment you are looking at the card. So every card gets one, in the same place the
+verdict keyboard goes and after it, because the verdict is what the thread is for. It is
+remembered on `card_messages` beside the card, which is what lets a redraw re-render it:
+an explanation that outlives the grade it explains is worse than none.
+
+It is sorted worst last rather than by weight or by the order the components are
+declared in. A ranked list is read from the top, so the row worth acting on has to be
+where the eye stops, not where it starts.
+
+**The pinned list is one message, never a second one.** A shortlist posted again on every
+verdict would be a chat full of shortlists, each of them wrong the moment the next
+verdict lands. So the message id lives in `settings` beside the poll offset, and every
+verdict edits that message. It re-grades on every write rather than storing what it
+rendered, so a weight edited from `/config` moves the pinned list too.
+
+Telegram rejects a message past 4096 characters rather than truncating it, which would
+turn a long shortlist into no shortlist at all. Entries are budgeted against the longest
+footer they could need, so adding one is never what loses the message, and the overflow
+is counted rather than dropped.
+
+None of it may cost a verdict. `sync` is total — it catches its own failures and logs
+them — because the star is the thing that had to be recorded and the pinned copy of it
+is a convenience. Pinning is the same: the message is remembered *before* it is pinned,
+so a bot without pin rights in a channel still keeps a working list.
+
+**The browser is text, so that it can be one message.** A card is sent as a photo when
+the listing has one, and Telegram will not convert a text message into a photo message
+or back — so a screen that carried the photo would have no way to render a listing whose
+portal published none, short of deleting the message and posting a new one, which is a
+browser that walks down the chat. Editing the media in place is possible for a message
+that is already a photo, but it re-uploads on every press and caps the card at a
+caption's 1024 characters rather than a message's 4096. The photo is one tap away on the
+card; the browser's job is scanning.
+
+**It stores nothing between presses.** `/top` addresses a screen rather than
+describing one: the button carries where to render next, so there is no session to go
+stale, a keyboard left open across a restart still works, and an index into a pool that
+has since shrunk clamps to the last listing instead of raising. It is the same
+`pool_query` the alerts draw from, deliberately — a browser that disagreed with the
+alerts about what counts as a candidate would be a second opinion nobody asked for.
+
+It is private-chat-only and behind `DEPAS_ADMINS`, for the reason the settings menu is:
+a keyboard in a group is reachable by anybody who can see the group, and a channel's
+discussion group is joinable. In a group it says so rather than degrading, because the
+pinned list already answers the same question there.
+
 ## Commutes
 
 `depas/commute.py`.

@@ -6,7 +6,7 @@ import pytest
 from depas.cli import _announce
 from depas.models import Listing
 from depas.store import DISLIKE, clear_notified, connect, save, save_detail, set_interest
-from depas.telegram import format_listing
+from depas.telegram import format_breakdown, format_listing
 from tests.support import prefs
 
 
@@ -33,6 +33,9 @@ def sent(monkeypatch):
 
     monkeypatch.setattr("depas.cli.send_listing", send)
     monkeypatch.setattr("depas.cli.chat_type", lambda chat: "channel")
+    # A channel with a discussion group: the breakdown is the bot's to post into the
+    # thread, once Telegram's copy of the card says where the thread is.
+    monkeypatch.setattr("depas.cli.hides_comments", lambda chat: True)
     monkeypatch.setattr("depas.cli.time.sleep", lambda _: None)  # no real rate-limit wait
     return posted
 
@@ -63,6 +66,58 @@ def test_listings_below_the_minimum_grade_are_never_reconsidered(connection, sen
     assert connection.execute(
         "SELECT COUNT(*) FROM listings WHERE notified_at IS NULL"
     ).fetchone()[0] == 0
+
+
+BREAKDOWN_ROW = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000,
+                 "price_clp": 500_000, "common_expenses": 100_000, "url": "https://x/1",
+                 "walk_minutes": 4, "age": 10, "floor": 8, "has_elevator": 1}
+
+
+def test_the_breakdown_names_every_component_it_could_score(connection, monkeypatch):
+    """The grade is a weighted average of parts; the card's footnote is those parts."""
+    from depas.grade import Scale
+    monkeypatch.setenv("DEPAS_COST_TARGET", "700000")
+    monkeypatch.setenv("DEPAS_WALK_TARGET", "8")
+
+    grade = Scale(prefs()).grade(BREAKDOWN_ROW)
+    breakdown = format_breakdown(grade, prefs())
+
+    assert "costo" in breakdown and "caminata" in breakdown
+    assert f"{grade.letter} {grade.score}" in breakdown
+
+
+def test_the_breakdown_marks_the_weakest_component_last(connection, monkeypatch):
+    """Sorted worst-last, so the row worth acting on is the one the eye stops at."""
+    from depas.grade import Scale
+    monkeypatch.setenv("DEPAS_COST_TARGET", "400000")  # badly missed, unlike the walk
+    monkeypatch.setenv("DEPAS_WALK_TARGET", "8")
+    monkeypatch.setenv("DEPAS_AMENITIES_TARGET", "0")  # off, so cost is the worst on purpose
+
+    breakdown = format_breakdown(Scale(prefs()).grade(BREAKDOWN_ROW), prefs())
+
+    marked = [line for line in breakdown.splitlines() if "← lo más flojo" in line]
+    assert len(marked) == 1 and marked[0].startswith("costo")
+
+
+def test_the_breakdown_says_what_went_unscored(connection, monkeypatch):
+    """Silence is not a zero: a component nothing answered is named, not scored."""
+    from depas.grade import Scale
+    monkeypatch.setenv("DEPAS_COST_TARGET", "700000")
+    monkeypatch.setenv("DEPAS_AVAILABILITY_TARGET", "2026-01-01")
+
+    breakdown = format_breakdown(Scale(prefs()).grade(BREAKDOWN_ROW), prefs())
+
+    assert "sin puntaje" in breakdown and "entrega" in breakdown
+
+
+def test_the_breakdown_escapes_nothing_a_person_typed_into_it(connection, monkeypatch):
+    """Every label is ours, but the table still goes into HTML: a stray < would break it."""
+    from depas.grade import Scale
+    monkeypatch.setenv("DEPAS_COST_TARGET", "700000")
+
+    breakdown = format_breakdown(Scale(prefs()).grade(BREAKDOWN_ROW), prefs())
+
+    assert breakdown.count("<pre>") == breakdown.count("</pre>") == 1
 
 
 def test_the_card_escapes_html_and_keeps_the_link(connection):

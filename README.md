@@ -73,9 +73,12 @@ Scraping is two-stage, because detail pages are expensive:
   and today's rules. Also the repair for cards posted with a keyboard the channel
   could not afford (see below): the redraw takes it off and the «Comentarios»
   button comes back.
-- **`bot`** — long-polls Telegram: grades any portal link pasted in the chat, and
-  takes the verdict commands below. Re-reads the settings on every poll, so a
-  preference edited while it runs takes effect without a restart.
+- **`shortlist`** — re-post or re-render the pinned list of what you starred, the
+  way `redraw` is the repair for a card. Verdicts keep it current on their own.
+- **`bot`** — long-polls Telegram: grades any portal link pasted in the chat, takes
+  the verdict commands below, and serves `/top`, the browser over the whole pool.
+  Re-reads the settings on every poll, so a preference edited while it runs takes
+  effect without a restart.
 - **`config`** — read and edit those settings; see [Configuration](#configuration).
   The same settings are editable from Telegram with `/config`; see
   [Changing the settings from the chat](#changing-the-settings-from-the-chat).
@@ -102,6 +105,9 @@ that carries its own buttons there cannot be commented on at all
 ([bugs.telegram.org/c/41803](https://bugs.telegram.org/c/41803)). Cards posted
 before that was understood are repaired by `depas redraw`.
 
+The thread opens in that order too: the keyboard first, because the verdict is what
+the thread is for, and the breakdown of the grade underneath it.
+
 The same two verdicts are also commands, for cards whose keyboard is out of reach
 or was never posted. Comment on the card — in its Comments thread if alerts go to
 a channel, or as a reply to it in a plain group:
@@ -114,6 +120,94 @@ a channel, or as a reply to it in a plain group:
 
 A verdict is changed by undoing it and giving the other one — the card only ever
 shows the buttons that make sense for the state it is in.
+
+### Why a card got the grade it got
+
+Every card explains itself, without being asked. Underneath it — under the buttons,
+where there are buttons in a thread — comes the grade broken into the components it
+was built from, each as a bar out of 100, sorted worst last so the row worth acting
+on is the one the eye stops at:
+
+```
+📊 A 80 · 9 de 11 componentes
+
+caminata     ██████████ 100
+conserjería  ██████████ 100
+metro        ██████████ 100
+piso         ██████████  96
+costo        ██████████  95
+antigüedad   █████████·  92
+precio zona  █████████·  91
+comodidades  ████████··  80
+metraje      ████······  45  ← lo más flojo
+
+❓ sin puntaje: viajes · entrega
+```
+
+A component you weighted at anything but 1 says so (`×3`), because that is what
+turned an average into this grade. A component nothing could answer is **named
+rather than scored** — the same rule the `*` on a card follows: silence is not a
+zero, and it is not a pass either.
+
+Which is also the point of it. `metraje 45` is not a verdict on the flat, it is a
+sentence about `DEPAS_AREA_TARGET` — so the breakdown is as much a way to find the
+setting that is wrong as it is a way to read the listing.
+
+A discarded card cuts its breakdown down with it, and ↩️ deshacer brings both back
+whole. `depas redraw` re-renders it too, so a card and its explanation never end up
+a week apart.
+
+### The pinned list of what you starred
+
+⭐ used to record a verdict and show you nothing: the shortlist it built was
+queryable in SQL and invisible in the chat. It is now one **pinned message**,
+rewritten by every verdict, every undo and every `watch` pass:
+
+```
+⭐ Tu lista · 3 deptos · 04/09 21:56
+
+🟢 A 87 · Providencia · $690.000 · 43 m²
+    tarjeta · aviso · [41]
+```
+
+Each line carries the grade **as it is graded today**, not as it was graded when the
+card went out, plus two ways back: **tarjeta** is a deep link to the card itself,
+where its buttons and its breakdown are, and **aviso** is the portal. A listing you
+pasted into the chat never had a card of ours and gets the second alone; the `[id]`
+is printed either way, so an old card still answers a command.
+
+Telegram rejects a message past 4096 characters rather than trimming it, so the trim
+is done here — what does not fit is counted (`…y 4 más`), never dropped silently.
+
+Nothing about the list can cost a verdict: it fails to a log line and the verdict
+still lands. Pinning needs rights the bot may not have in a channel, and without them
+the list is still posted and still kept current — just not pinned. `depas shortlist`
+re-posts or re-renders it.
+
+### Browsing the whole pool
+
+`/top`, in a private chat with the bot, pages through the same pool the alerts draw
+from, ranked the same way, in **one message that edits itself** — not a screenful of
+cards per browse. Each screen is the **text** of the card the listing would have been
+posted as, under three rows of buttons: where to go (`◀️ 7/34 ▶️`), the two verdicts,
+and a switch between the whole pool and just what you starred.
+
+No photo, and that is what makes it one message. Telegram will not turn a text message
+into a photo message or back, so a browser that showed photos would break on the first
+listing whose portal published none — and every screen would cost a re-upload and drop
+the card's 4096 characters to a caption's 1024. The photo is one tap away on the card
+itself, which the pinned list links to; the browser is for scanning the pool.
+
+A verdict given here writes the same column a card's button writes, so it marks the
+listing, redraws the card it was announced on, and rewrites the pinned list.
+
+Private chat only, and behind `DEPAS_ADMINS` — the same whitelist `/config` uses,
+checked on the message **and on every press**. In a group it says so and points at
+the pinned list, which answers the same question there without a public keyboard.
+
+Nothing is stored between presses: the button carries the screen to render next, so a
+keyboard left open across a restart still works, and an index into a pool that has
+since shrunk lands on the last listing rather than raising.
 
 ### Changing the settings from the chat
 
@@ -237,6 +331,8 @@ depas/
   uf.py          UF → CLP, so mixed-currency listings compare
   communes.py    the 43 RM communes the portal indexes
   telegram.py    Bot API client
+  shortlist.py   the ⭐ set as one pinned message, rewritten by every verdict
+  browse.py      /top: the pool paged through in one self-editing message
   portals/       one module per site; a registry maps name → search()
 ```
 
