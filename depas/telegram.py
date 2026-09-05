@@ -128,7 +128,8 @@ def _availability(available_from: str) -> str:
     return f"disponible desde el {when.day} de {MONTH_NAMES[when.month - 1]}"
 
 
-def _clp(amount: float | None) -> str:
+def clp(amount: float | None) -> str:
+    """A CLP figure the way Chile writes it, and an em dash for one nobody stated."""
     return "—" if amount is None else f"${amount:,.0f}".replace(",", ".")
 
 
@@ -170,7 +171,7 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
             f"{row['age']:.0f} años" if row.get("age") is not None else None]
     lines.append("🏠 " + " · ".join(part for part in spec if part))
 
-    lines.append(f"💰 <b>{_clp(row.get('net_monthly_clp'))}</b> neto al mes")
+    lines.append(f"💰 <b>{clp(row.get('net_monthly_clp'))}</b> neto al mes")
 
     link = f'\n<a href="{escape(row["url"])}">Ver aviso →</a>'
     # A discarded listing keeps only what says which one it was; the decision is made.
@@ -179,17 +180,17 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
         return "\n".join(lines)
 
     gastos = row.get("common_expenses")
-    breakdown = f"    ↳ {_clp(row.get('price_clp'))} arriendo"
+    breakdown = f"    ↳ {clp(row.get('price_clp'))} arriendo"
     # The net figure above already includes the estimate, so the card admits which it used.
     lines.append(
-        f"{breakdown} + {_clp(gastos)} gastos comunes" if gastos
-        else f"{breakdown} + {_clp(DEFAULT_COMMON_EXPENSES)} gastos comunes "
+        f"{breakdown} + {clp(gastos)} gastos comunes" if gastos
+        else f"{breakdown} + {clp(DEFAULT_COMMON_EXPENSES)} gastos comunes "
              "(estimado por defecto, no publicado)"
     )
     sublet = (row.get("parking_spaces") or 0, row.get("storage_units") or 0)
     if any(sublet):
         saved = (row.get("total_monthly_clp") or 0) - (row.get("net_monthly_clp") or 0)
-        lines.append(f"    ↳ −{_clp(saved)} arrendando {sublet[0]}🚗 {sublet[1]}📦")
+        lines.append(f"    ↳ −{clp(saved)} arrendando {sublet[0]}🚗 {sublet[1]}📦")
 
     baseline = prefs.current_cost()
     net = row.get("net_monthly_clp")
@@ -199,7 +200,7 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
             lines.append("⚖️ lo mismo que pagas hoy")
         else:
             mark, word = ("🔺", "más caro") if difference > 0 else ("🔻", "más barato")
-            lines.append(f"⚖️ {mark} {_clp(abs(difference))} {word} que hoy")
+            lines.append(f"⚖️ {mark} {clp(abs(difference))} {word} que hoy")
 
     station = row.get("nearest_station")
     if station:
@@ -305,9 +306,9 @@ def _count(value: float) -> str:
 
 # Every figure both a listing and your own place carry, and which way is better.
 COMPARED = (
-    ("💰 neto al mes", "net_monthly_clp", _clp, True),
-    ("🏷️ arriendo", "price_clp", _clp, True),
-    ("🧾 gastos comunes", "common_expenses", _clp, True),
+    ("💰 neto al mes", "net_monthly_clp", clp, True),
+    ("🏷️ arriendo", "price_clp", clp, True),
+    ("🧾 gastos comunes", "common_expenses", clp, True),
     ("📐 superficie", "area", _m2, False),
     ("🛏️ dormitorios", "bedrooms", _count, False),
     ("🚿 baños", "bathrooms", _count, False),
@@ -470,6 +471,21 @@ def edit_menu(chat_id: str, message_id: int, text: str, buttons: dict[str, Any])
     call("editMessageText", chat_id=chat_id, message_id=message_id, text=text,
          parse_mode="HTML", link_preview_options={"is_disabled": True},
          reply_markup=buttons)
+
+
+def message_link(chat_id: object, message_id: int) -> str | None:
+    """A deep link straight to one message, which only a channel or supergroup can give."""
+    # Their ids are the internal one behind a -100 prefix, and t.me/c wants it back off.
+    internal = str(chat_id).removeprefix("-100")
+    if internal == str(chat_id) or not internal.isdigit():
+        return None  # a private chat or a plain group: nothing to link to
+    return f"https://t.me/c/{internal}/{message_id}"
+
+
+def pin(chat_id: str, message_id: int) -> None:
+    """Pin one message, silently: a list that re-pins itself must not notify every time."""
+    call("pinChatMessage", chat_id=chat_id, message_id=message_id,
+         disable_notification=True)
 
 
 def edit_text(chat_id: str, message_id: int, text: str) -> None:

@@ -4,7 +4,7 @@ import time
 
 from curl_cffi.requests.exceptions import RequestException
 
-from depas import configure
+from depas import configure, shortlist
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.home import row as home_row
@@ -299,6 +299,7 @@ def _rate(connection: sqlite3.Connection, message: dict, interest: int,
     set_interest(connection, card["portal"], card["external_id"], interest,
                  author.get("username") or author.get("first_name"))
     refresh_card(connection, card, prefs)
+    shortlist.sync(connection, prefs)
     reply(chat, VERDICT[interest], thread, message["message_id"])
 
 
@@ -374,6 +375,7 @@ def _handle_callback(connection: sqlite3.Connection, callback: dict,
     pressed = callback.get("message") or {}
     card = _pressed_card(connection, pressed, dict(listing))
     refresh_card(connection, card, prefs)
+    shortlist.sync(connection, prefs)
     _tick(pressed, card, int(listing_id), interest)
 
 
