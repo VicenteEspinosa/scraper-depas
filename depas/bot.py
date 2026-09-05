@@ -4,7 +4,7 @@ import time
 
 from curl_cffi.requests.exceptions import RequestException
 
-from depas import configure, shortlist
+from depas import browse, configure, shortlist
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.home import row as home_row
@@ -303,6 +303,22 @@ def _rate(connection: sqlite3.Connection, message: dict, interest: int,
     reply(chat, VERDICT[interest], thread, message["message_id"])
 
 
+def _after_verdict(connection: sqlite3.Connection, listing_id: int,
+                   prefs: Preferences) -> None:
+    """Everything a verdict changes beyond the row: the card it was announced on, and the list."""
+    listing = connection.execute(
+        "SELECT portal, external_id FROM listings WHERE rowid = ?", (listing_id,)
+    ).fetchone()
+    if listing is not None:
+        card = connection.execute(
+            "SELECT * FROM card_messages WHERE portal = ? AND external_id = ? "
+            "ORDER BY posted_at DESC LIMIT 1", (listing["portal"], listing["external_id"])
+        ).fetchone()
+        if card is not None:
+            refresh_card(connection, dict(card), prefs)
+    shortlist.sync(connection, prefs)
+
+
 def _compare(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
              prefs: Preferences) -> None:
     """Answer /compare with this card's listing set against the place you live in now."""
@@ -354,6 +370,11 @@ def _handle_callback(connection: sqlite3.Connection, callback: dict,
     """A button pressed on a card: the same verdict, with nothing typed and no reply posted."""
     if (callback.get("data") or "").startswith(configure.PREFIX):
         configure.press(connection, callback, prefs)
+        return
+    if (callback.get("data") or "").startswith(browse.PREFIX):
+        rated = browse.press(connection, callback, prefs)
+        if rated is not None:
+            _after_verdict(connection, rated, prefs)
         return
     action, _, listing_id = (callback.get("data") or "").partition(":")
     if action not in BUTTONS or not listing_id.isdigit():
@@ -411,6 +432,9 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
         return
     if command in (configure.COMMAND, configure.START):
         configure.open_menu(connection, message, prefs)
+        return
+    if command == browse.COMMAND:
+        browse.open_browser(connection, message, prefs)
         return
     # Read before the links below: an answer to a prompt was not posted to be graded.
     if configure.answer_prompt(connection, fetcher, message, prefs):
