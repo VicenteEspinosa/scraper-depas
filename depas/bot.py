@@ -4,7 +4,7 @@ import time
 
 from curl_cffi.requests.exceptions import RequestException
 
-from depas import browse, configure, shortlist
+from depas import browse, configure, shortlist, summary
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.home import row as home_row
@@ -435,6 +435,9 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
         return
     if command == browse.COMMAND:
         browse.open_browser(connection, message, prefs)
+        return
+    if command == summary.COMMAND:
+        summary.answer(connection, message, prefs)
         return
     # Read before the links below: an answer to a prompt was not posted to be graded.
     if configure.answer_prompt(connection, fetcher, message, prefs):

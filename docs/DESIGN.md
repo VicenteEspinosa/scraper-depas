@@ -240,12 +240,14 @@ be answered must not be redelivered on every restart forever.
 
 ## Seeing the pool
 
-`depas/shortlist.py`, `depas/browse.py`, and `format_breakdown` in `depas/telegram.py`.
+`depas/shortlist.py`, `depas/browse.py`, `depas/summary.py`, and `format_breakdown` in
+`depas/telegram.py`.
 
 Everything the project could show you was pushed at you, and everything you could ask it
-needed a shell on the box. Three surfaces close that, and all three are built out of
+needed a shell on the box. Four surfaces close that, and all of them are built out of
 what was already there rather than beside it: the grade's own `parts`, the pool query
-the alerts use, and the cards `card_messages` already remembers.
+the alerts use, the cards `card_messages` already remembers, and the `price_history`
+every scrape has been writing since `001`.
 
 **The breakdown is posted, not asked for.** A `/porque` command would have been cheaper,
 and nobody would type it — the moment you want to know why a grade is what it is, is the
@@ -309,6 +311,15 @@ with the rest of the screen and nothing about it is stored. A missing figure sor
 in either direction, which is the same rule the grade follows for a component nobody
 answered: unknown is not a zero. `first_seen` is a string, which is why the sort splits
 what is known from what is not and reverses the first rather than negating a key.
+
+**The summary is the question before *which one*.** `/resumen` is the pool's shape —
+grades as bars, the band a budget is up against, a row per commune, what has arrived and
+what has moved — because none of it can be read off any single card, and reading 34 of
+them is not how the question gets answered. It is bounded by construction (six grades,
+eight communes, three headlines), so unlike the pinned list it needs no budget against
+Telegram's 4096. It carries no keyboard, which is the whole reason it is allowed
+anywhere `/top` is not: there is nothing in it for a stranger in the discussion group to
+press, and the alert chat is where somebody asks what they have.
 
 **A price that moved is the one thing the portals record and never show.** `save` has
 written a `price_history` row on every change since the first migration and nothing ever

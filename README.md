@@ -76,7 +76,8 @@ Scraping is two-stage, because detail pages are expensive:
 - **`shortlist`** — re-post or re-render the pinned list of what you starred, the
   way `redraw` is the repair for a card. Verdicts keep it current on their own.
 - **`bot`** — long-polls Telegram: grades any portal link pasted in the chat, takes
-  the verdict commands below, and serves `/top`, the browser over the whole pool.
+  the verdict commands below, and serves `/top`, the browser over the whole pool, and
+  `/resumen`, the shape of that pool in one message.
   Re-reads the settings on every poll, so a preference edited while it runs takes
   effect without a restart.
 - **`config`** — read and edit those settings; see [Configuration](#configuration).
@@ -230,6 +231,46 @@ Nothing is stored between presses: the button carries the whole screen to render
 across a restart still works, and an index into a pool that has since shrunk lands on
 the last listing rather than raising.
 
+### The pool at a glance
+
+`/top` and the pinned list both answer *which one*. `/resumen` answers the question
+that comes before it — **what have I actually got?** — in one message, from the same
+pool:
+
+```
+📊 Tu pool · 34 deptos · 05/09 15:33
+
+🟢 A  ██········   2
+🟢 B  ██████····  11
+🟡 C  ██████████  17
+🟠 D  ██········   4
+
+💰 Neto al mes
+    más barato · $620.000
+    mediana · $815.000
+    más caro · $1.010.000
+    9 de 34 bajo tu objetivo de $800.000
+
+📍 Por comuna
+providencia   14  A 87   $820.000
+ñuñoa         11  B 79   $730.000
+las condes     9  B 70   $790.000
+
+🆕 6 de los últimos 7 días · 📉 3 bajaron de precio · ⭐ 4 marcados · 🚫 11 descartados
+
+🏆 Los mejores
+🟢 A 87 · Providencia · $690.000 · 43 m²
+```
+
+Each of those lines is a decision the pool can answer and no single card can. The
+grades as bars say whether this is a good week or a bad market; the band says what a
+budget is actually up against; the commune rows say where to look next. The three
+figures at the bottom are how much of it is still yours to judge.
+
+Unlike `/top` it carries **no keyboard**, so there is nothing in it a stranger in a
+discussion group could press — and it works wherever it is asked, including the chat
+the alerts land in, which is where the question gets asked.
+
 ### When a price moves
 
 Every scrape already recorded what a listing used to cost; nothing ever showed it. A
@@ -244,7 +285,7 @@ The old figure is named so the claim can be checked, and a rise is shown exactly
 same way — a landlord who put the rent up is as worth knowing about. Under half a
 percent is a portal restating itself rather than news, and a listing re-published in
 another currency is a different figure, not a discount. The pinned list carries the
-same move as a badge too.
+same move as a badge, `/resumen` counts them, and the browser's list marks them.
 
 ### Changing the settings from the chat
 
@@ -369,7 +410,8 @@ depas/
   communes.py    the 43 RM communes the portal indexes
   telegram.py    Bot API client
   shortlist.py   the ⭐ set as one pinned message, rewritten by every verdict
-  browse.py      /top: the pool paged through in one self-editing message
+  browse.py      /top: the pool scanned and paged in one self-editing message
+  summary.py     /resumen: the shape of the whole pool, in one message
   portals/       one module per site; a registry maps name → search()
 ```
 

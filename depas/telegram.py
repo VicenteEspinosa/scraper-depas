@@ -295,9 +295,9 @@ FULL_CELL, EMPTY_CELL = "█", "·"
 WEAKEST_MARK = "← lo más flojo"
 
 
-def _bar(score: int) -> str:
-    """One component's score as a fixed-width bar, so a column of them is scannable."""
-    filled = max(0, min(BAR_CELLS, round(score / (BEST_SCORE / BAR_CELLS))))
+def bar(value: float, of: float) -> str:
+    """A number as a fixed-width bar, so a column of them is read as one shape."""
+    filled = max(0, min(BAR_CELLS, round(BAR_CELLS * value / of))) if of else 0
     return FULL_CELL * filled + EMPTY_CELL * (BAR_CELLS - filled)
 
 
@@ -315,7 +315,7 @@ def format_breakdown(grade: Any, prefs: Preferences) -> str:
         # Only worth pointing at when there is something above it to be flojo against.
         weakest = f"  {WEAKEST_MARK}" if index and index == len(scored) - 1 else ""
         label = COMPONENT_LABELS[name].ljust(width)
-        rows.append(f"{label}  {_bar(score)} {score:>3}{heavier}{weakest}")
+        rows.append(f"{label}  {bar(score, BEST_SCORE)} {score:>3}{heavier}{weakest}")
 
     total = len(grade.parts) + len(grade.missing)
     table = escape("\n".join(rows))

@@ -4,6 +4,7 @@ import re
 import sqlite3
 from datetime import date
 
+from depas import browse, summary
 from depas.communes import SANTIAGO_PROVINCE
 from depas.commute import resolve_locations
 from depas.config import HOME_REQUIRED
@@ -476,11 +477,19 @@ def _text(name: str, prefs: Preferences) -> str:
             f"\n\nAhora: <b>{escape(_shown(name, prefs))}</b>{source}")
 
 
+# /start lands here, so this is the only screen a person who has just found the bot
+# sees: without a line naming them, the two ways of looking at the pool are unfindable.
+# Taken from the modules that own them rather than retyped, so a rename reaches this copy.
+ELSEWHERE = (f"{browse.COMMAND} recorre el pool depto por depto · "
+             f"{summary.COMMAND} lo muestra entero de una vez.")
+
+
 def main_screen() -> tuple[str, dict]:
     rows = [[_button(heading, "g", key) for key, heading, _ in MENU[first:first + 2]]
             for first in range(0, len(MENU), 2)]
     text = ("⚙️ <b>Configuración</b>\n\nLo que el bot busca y cómo lo puntúa. Cada cambio "
-            "se guarda al momento y rige desde la próxima pasada, sin reiniciar nada.")
+            "se guarda al momento y rige desde la próxima pasada, sin reiniciar nada."
+            f"\n\n<i>{ELSEWHERE}</i>")
     return text, _keyboard(*rows)
 
 
