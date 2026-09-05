@@ -295,6 +295,21 @@ a keyboard in a group is reachable by anybody who can see the group, and a chann
 discussion group is joinable. In a group it says so rather than degrading, because the
 pinned list already answers the same question there.
 
+**It opens on the list, not on the best card.** One listing per screen is a flip-book:
+you cannot compare what you cannot see at once, and the pool is the thing being chosen
+from. So the list is ten rows of a `<pre>` table — the only way Telegram lines columns
+up — with a jump button per row, because a link cannot survive inside one. Two columns
+of marks rather than one, `*` for a verdict and `↓ ↑` for a price, since in the ⭐ view a
+star says nothing and a markdown is the whole point. No emoji inside the table: they
+render double-width on some clients and would misalign exactly the rows that carry news.
+
+**Ordering is a dimension, not a setting.** The same twenty flats are a different
+shortlist read cheapest-first than read by grade, so it rides in the `callback_data`
+with the rest of the screen and nothing about it is stored. A missing figure sorts last
+in either direction, which is the same rule the grade follows for a component nobody
+answered: unknown is not a zero. `first_seen` is a string, which is why the sort splits
+what is known from what is not and reverses the first rather than negating a key.
+
 **A price that moved is the one thing the portals record and never show.** `save` has
 written a `price_history` row on every change since the first migration and nothing ever
 read one back. Two subqueries in the ranked view close that: the last history row

@@ -186,11 +186,31 @@ re-posts or re-renders it.
 
 ### Browsing the whole pool
 
-`/top`, in a private chat with the bot, pages through the same pool the alerts draw
-from, ranked the same way, in **one message that edits itself** — not a screenful of
-cards per browse. Each screen is the **text** of the card the listing would have been
-posted as, under three rows of buttons: where to go (`◀️ 7/34 ▶️`), the two verdicts,
-and a switch between the whole pool and just what you starred.
+`/top`, in a private chat with the bot, walks the same pool the alerts draw from, in
+**one message that edits itself** — not a screenful of cards per browse. It opens on
+the **list**, because the first question is what there is, not what the best one of
+them says:
+
+```
+📋 todos · 1-10 de 34 · por nota
+
+ 1. A 87  Providencia    $690.000   43m²   3′ *
+ 2. B 79  Providencia    $723.938   42m²   3′
+ 3. B 77  Ñuñoa          $698.000   51m²   6′  ↓
+ 4. C 64  Providencia    $770.000   52m²   3′
+```
+
+Ten at a time, in columns that line up, with **a button per line**: pressing `3` opens
+that listing as the card it would have been posted as. `*` is one you starred, `↓` and
+`↑` a price that has moved. From the card, `◀️ ▶️` moves one listing at a time and
+`Ver 📋 lista` goes back to scanning.
+
+**Ordering is the whole point of a pool.** The same twenty flats are a different
+shortlist read cheapest-first than read by grade, so `↕️ Orden` cycles through five —
+`nota`, `precio`, `metraje`, `metro`, `nuevos` — and applies to the list and the cards
+alike. A figure the portal never published sorts **last** rather than first or worst:
+unknown is not a zero. Re-ordering starts over at the top, because position 7 of one
+ranking is nowhere in the next.
 
 No photo, and that is what makes it one message. Telegram will not turn a text message
 into a photo message or back, so a browser that showed photos would break on the first
@@ -205,9 +225,10 @@ Private chat only, and behind `DEPAS_ADMINS` — the same whitelist `/config` us
 checked on the message **and on every press**. In a group it says so and points at
 the pinned list, which answers the same question there without a public keyboard.
 
-Nothing is stored between presses: the button carries the screen to render next, so a
-keyboard left open across a restart still works, and an index into a pool that has
-since shrunk lands on the last listing rather than raising.
+Nothing is stored between presses: the button carries the whole screen to render next
+— where you are, which view, which ordering, list or card — so a keyboard left open
+across a restart still works, and an index into a pool that has since shrunk lands on
+the last listing rather than raising.
 
 ### When a price moves
 
