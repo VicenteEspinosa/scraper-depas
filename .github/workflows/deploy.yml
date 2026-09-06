@@ -50,6 +50,10 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           TZ: ${{ vars.TZ }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          # Free megabytes the box must have before the deploy writes anything. Here
+          # rather than only in the script so the number is visible where the deploy is
+          # read, and can be raised without a commit to `scripts/`.
+          MIN_FREE_MB: "2048"
         run: |
           # Values are expanded exactly once here, then base64'd, so a literal $
           # inside a token survives the remote shell verbatim.
@@ -63,5 +67,6 @@ jobs:
           echo "::add-mask::$ENV_B64"
 
           ssh -o BatchMode=yes "$SSH_USER@$SSH_HOST" \
-            "DEPLOY_PATH='$DEPLOY_PATH' GITHUB_SHA='$GITHUB_SHA' ENV_B64='$ENV_B64' bash -s" \
+            "DEPLOY_PATH='$DEPLOY_PATH' GITHUB_SHA='$GITHUB_SHA' ENV_B64='$ENV_B64' \
+             MIN_FREE_MB='$MIN_FREE_MB' bash -s" \
             < scripts/deploy-remote.sh

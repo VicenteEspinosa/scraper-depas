@@ -155,3 +155,32 @@ docker compose logs -f depas-cron        # watch the hourly pass
 docker compose exec depas-cron depas show --limit 10
 docker compose exec depas-cron depas watch   # force a pass now
 ```
+
+## Disk
+
+The image is built on the box, natively, with no registry — so every deploy leaves the
+image the old containers were running behind as `<none>`. The deploy reaps that one
+(`docker image prune -f`, dangling only, after the restart), which is what stops the
+layer sets accumulating.
+
+Before it writes anything it also checks there are **2048 MB free** (`MIN_FREE_MB` in
+`.github/workflows/deploy.yml`). Under that it prunes the build cache and every unused
+image and re-checks; still under, it refuses, and the old containers keep serving. That
+check exists because a full box does not fail where the space ran out — the deploy that
+prompted it died on `sed: couldn't flush ./sedxji3sq: No space left on device` while
+rendering `.env`, two steps in, naming a temp file instead of the disk.
+
+If it ever refuses, on the box:
+
+```bash
+df -h
+docker system df                 # usually the build cache
+du -sh data/*                    # the other candidate: a .db-wal that never checkpointed
+```
+
+`data/` is a bind mount, not a named volume, so nothing the deploy prunes can touch the
+database. Never reach for `docker system prune --volumes`.
+
+A full disk takes the bot down with it, and not quietly to you: every update it handles
+ends in a SQLite write, which raises `database or disk is full`, and `restart:
+unless-stopped` turns that into a crash loop. Cards stop, `/config` stops answering.

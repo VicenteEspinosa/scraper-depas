@@ -9,7 +9,7 @@
 # a token containing $ would be corrupted before .env was ever written.
 #
 # Inputs (env vars set on the SSH invocation line):
-#   DEPLOY_PATH, GITHUB_SHA, ENV_B64
+#   DEPLOY_PATH, GITHUB_SHA, ENV_B64, MIN_FREE_MB (optional)
 
 set -euo pipefail
 
@@ -17,10 +17,39 @@ set -euo pipefail
 : "${GITHUB_SHA:?missing}"
 : "${ENV_B64:?missing}"
 
+# Room a native `docker compose build` needs for a fresh layer set beside the running
+# one. Checked before anything is written, because a box that fills up does not fail
+# where the space ran out: it failed at `sed: couldn't flush` while rendering .env,
+# which names a temp file nobody has heard of instead of the disk.
+MIN_FREE_MB="${MIN_FREE_MB:-2048}"
+
 log() { printf '\n=== %s ===\n' "$*"; }
+
+# -P so a long device name cannot wrap onto its own line and shift the columns.
+free_mb() { df -Pm "$1" | awk 'NR == 2 { print $4 }'; }
 
 cd "$DEPLOY_PATH"
 mkdir -p .rollback data
+
+log "check free space"
+free=$(free_mb .)
+if [ "$free" -lt "$MIN_FREE_MB" ]; then
+  # Only when short: the build cache is what makes the next build quick, so it is
+  # worth keeping right up until it is worth less than the deploy it is blocking.
+  log "${free}MB free, under ${MIN_FREE_MB}MB -- reclaiming what Docker is holding"
+  docker builder prune -af || true
+  # -a is safe next to a running container: an image one is using is never unused.
+  docker image prune -af || true
+  free=$(free_mb .)
+fi
+echo "${free}MB free, ${MIN_FREE_MB}MB wanted"
+if [ "$free" -lt "$MIN_FREE_MB" ]; then
+  # Said before the first write, so the old containers are still serving and the log
+  # names the disk rather than whichever command happened to need a temp file first.
+  echo "refusing to deploy: ${free}MB free on $DEPLOY_PATH, need ${MIN_FREE_MB}MB." >&2
+  echo "Docker has nothing left to reclaim; look at data/ and \`docker system df\`." >&2
+  exit 1
+fi
 
 log "snapshot current .env to .rollback/"
 [ -f .env ] && cp -f .env .rollback/.env
@@ -55,4 +84,12 @@ log "docker compose up -d"
 docker compose up -d
 
 echo "$GITHUB_SHA" > .last-deployed-sha
-log "deploy of ${GITHUB_SHA:0:7} applied"
+
+# The rebuild orphans the image the old containers were running and nothing ever
+# collected it, so every deploy leaked a layer set until the box filled up. Dangling
+# only: the build cache and every tagged image stay. Never fatal -- by here the deploy
+# is applied, and a failed cleanup is next deploy's problem, not this one's.
+log "reap the image this build replaced"
+docker image prune -f || true
+
+log "deploy of ${GITHUB_SHA:0:7} applied, $(free_mb .)MB free"
