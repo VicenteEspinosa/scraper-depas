@@ -10,7 +10,7 @@ from depas.config import HOME_REQUIRED
 from depas.detail import MONTH_NAMES
 from depas.fetch import Fetcher
 from depas.metro import STATION_LINES
-from depas.preferences import BY_NAME, Preferences, setting
+from depas.preferences import BY_NAME, FULL_MARKS, Preferences, setting
 from depas.store import forget_preference, store_preference
 from depas.telegram import answer_callback, ask_value, edit_menu, escape, send_menu
 from depas.traits import DISPOSITIONS, EXCLUDE, IGNORE, PENALISE
@@ -39,6 +39,7 @@ LABELS = {
     "TELEGRAM_CHAT_ID": "📢 Dónde publicar",
     "DEPAS_ADMINS": "👥 Quién configura",
     "DEPAS_COMMUNES": "🗺️ Comunas",
+    "DEPAS_COMMUNE_WEIGHT": "🗺️ Peso · comuna",
     "DEPAS_BEDROOMS_MIN": "🛏️🔻 Dormitorios mín.",
     "DEPAS_GRADE_MIN": "🏅🔻 Nota mínima",
     "DEPAS_COST_MAX": "💰🔺 Techo de costo",
@@ -122,6 +123,11 @@ WEIGHT_PRESETS = ("0", "0.5", "1", "1.5", "2", "3")
 MONTHS_OFFERED = 6
 # The checklist offers the Provincia de Santiago only; the rest of the RM is typed.
 COMMUNES_PER_PAGE = 16
+# What one commune can be worth, offered coarsely: nobody means 63 rather than 60, and
+# anything finer is `depas config set`. Full marks is first, so the common case is one tap.
+COMMUNE_SCORES = (100, 90, 80, 70, 60, 50, 40, 30, 20, 10)
+# Out of the crawl altogether, which is what a commune the setting never names means.
+OUT_MARK = "⬜"
 # Three tiers is what a preference between metro lines is ever worth spelling out.
 TIERS_OFFERED = 3
 # Offered by the picker even on a database that has not seen one yet.
@@ -192,7 +198,10 @@ def _shown(name: str, prefs: Preferences) -> str:
         return "—"
     shape = kind(name)
     if shape == COMMUNES:
-        return f"{len(value)} comuna" + ("s" if len(value) != 1 else "")
+        listed = f"{len(value)} comuna" + ("s" if len(value) != 1 else "")
+        # The floor rather than a count: what you want to know is how far down they go.
+        worst = min(value.values(), default=FULL_MARKS)
+        return listed + (f" · desde {worst}" if worst < FULL_MARKS else "")
     if shape == PLACES:
         return f"{len(value)} lugar" + ("es" if len(value) != 1 else "")
     if shape == PEOPLE:
@@ -283,26 +292,62 @@ def _day_screen(name: str, prefs: Preferences, group: str) -> tuple[str, dict]:
 
 def _communes_screen(name: str, prefs: Preferences, group: str,
                      page: int = 0) -> tuple[str, dict]:
-    chosen = prefs.value(name) or []
-    # A commune typed in is offered too, and first: a checklist must be able to untick it.
+    """Every commune with what it is worth; a press opens the one commune's own screen."""
+    scores = prefs.value(name) or {}
+    # A commune typed in is offered too, and first: the list must be able to take it out.
     province = [commune.value for commune in sorted(SANTIAGO_PROVINCE)]
-    every = [slug for slug in chosen if slug not in province] + province
+    every = [slug for slug in scores if slug not in province] + province
     pages = (len(every) + COMMUNES_PER_PAGE - 1) // COMMUNES_PER_PAGE
     page = max(0, min(page, pages - 1))
     shown = every[page * COMMUNES_PER_PAGE:(page + 1) * COMMUNES_PER_PAGE]
     rows = []
     for first in range(0, len(shown), 2):
-        rows.append([_button(("✅ " if slug in chosen else "⬜ ") + _pretty(slug),
-                             "t", _short(name), slug, page)
+        rows.append([_button(_commune_label(scores, slug), "c", slug, page)
                      for slug in shown[first:first + 2]])
     rows.append([_button("◀️", "p", _short(name), page - 1) if page else None,
                  _button(f"{page + 1}/{pages}", "p", _short(name), page),
                  _button("▶️", "p", _short(name), page + 1) if page < pages - 1 else None])
     rows.append(_footer(name, group))
-    text = _text(name, prefs)
-    if chosen:
-        text += "\n\n" + " · ".join(_pretty(slug) for slug in chosen)
-    text += "\n\nLa lista es la Provincia de Santiago; el resto de la RM se agrega con ✏️."
+    text = _text(name, prefs) + _worth(scores)
+    text += ("\n\nToca una comuna para ponerle nota sobre 100, o sacarla de la búsqueda. "
+             "La lista es la Provincia de Santiago; el resto de la RM se agrega con ✏️.")
+    return text, _keyboard(*rows)
+
+
+def _commune_label(scores: dict[str, int], slug: str) -> str:
+    """Its score in front of its name, or ⬜ where there is no score because there is no commune."""
+    return (f"{OUT_MARK} {_pretty(slug)}" if slug not in scores
+            else f"{scores[slug]} {_pretty(slug)}")
+
+
+def _worth(scores: dict[str, int]) -> str:
+    """The whole list read back, grouped by score: what you actually configured, in one look."""
+    if not scores:
+        return ""
+    grouped: dict[int, list[str]] = {}
+    for slug, score in scores.items():
+        grouped.setdefault(score, []).append(slug)
+    return "\n\n" + "\n".join(
+        f"<b>{score}</b> · " + escape(" · ".join(_pretty(slug) for slug in grouped[score]))
+        for score in sorted(grouped, reverse=True))
+
+
+def _commune_screen(prefs: Preferences, slug: str, page: int) -> tuple[str, dict]:
+    """One commune's score, which is the only place in the menu that sets points directly."""
+    scores = prefs.value("DEPAS_COMMUNES") or {}
+    current = scores.get(slug)
+    buttons = [_button(("● " if score == current else "") + str(score), "cv", slug, page, score)
+               for score in COMMUNE_SCORES]
+    half = len(buttons) // 2
+    # Taking it out is not one more number, so it gets its own row rather than a ragged one.
+    rows = [buttons[:half], buttons[half:],
+            [_button(("● " if current is None else "") + f"{OUT_MARK} Sacar de la búsqueda",
+                     "cv", slug, page, "x")],
+            [_button(BACK, "p", "COMMUNES", page)]]
+    text = (f"<b>🗺️ {escape(_pretty(slug))}</b>\n\n"
+            "Cuánto vale un aviso en esta comuna, sobre 100: 100 es donde quieres vivir, "
+            "80 es que cumple, 40 es al límite. No es un corte -- se sigue crawleando y "
+            f"alertando igual, solo baja la nota. {OUT_MARK} sí la saca: no se mira más.")
     return text, _keyboard(*rows)
 
 
@@ -335,6 +380,22 @@ def _retiered(tiers: list[list[str]], line: str, target: int | None) -> str:
     if target is not None:
         moved[target].append(line)
     return " > ".join(",".join(sorted(tier)) for tier in moved if tier)
+
+
+def _written(scores: dict[str, int]) -> str:
+    """Scored communes back as the setting's own text, for the parser to read again.
+
+    Full marks are left unwritten, so a list nobody has docked stays the plain list of
+    slugs it always was -- and the order is the order they were added, never sorted.
+    """
+    return ",".join(slug if score == FULL_MARKS else f"{slug}={score}"
+                    for slug, score in scores.items())
+
+
+def _rescored(scores: dict[str, int], slug: str, score: int | None) -> str:
+    """The setting's text with one commune scored, or taken out of the search entirely."""
+    kept = {held: points for held, points in scores.items() if held != slug}
+    return _written(kept if score is None else kept | {slug: score})
 
 
 def _places_screen(name: str, prefs: Preferences, group: str) -> tuple[str, dict]:
@@ -532,7 +593,7 @@ ASKED = {
 }
 EXAMPLES = {ADD: {"DEPAS_LOCATIONS": "pega, Avenida Providencia 1234",
                   "DEPAS_ADMINS": "467291452",
-                  "DEPAS_COMMUNES": "puente-alto, san-bernardo"},
+                  "DEPAS_COMMUNES": "puente-alto, san-bernardo=40"},
             ADDRESS: {"DEPAS_CURRENT_HOME": "Avenida Los Leones 500, Providencia"},
             COMMUNE: {"DEPAS_CURRENT_HOME": "puente-alto"}}
 
@@ -624,8 +685,12 @@ def _act(connection: sqlite3.Connection, callback: dict, action: str, rest: str)
         return _set(connection, callback, _long(short), value)
     if action == "x":
         return _clear(connection, callback, _long(rest))
-    if action == "t":
-        return _toggle(connection, callback, rest)
+    if action == "c":
+        slug, _, page = rest.partition(":")
+        _redraw(connection, callback, *_commune_screen(prefs, slug, int(page)))
+        return ""
+    if action == "cv":
+        return _score_commune(connection, callback, rest)
     if action == "d":
         return _drop(connection, callback, rest)
     if action == "w":
@@ -655,16 +720,16 @@ def _clear(connection: sqlite3.Connection, callback: dict, name: str) -> str:
     return "🗑️ borrado; vuelve a su valor por defecto"
 
 
-def _toggle(connection: sqlite3.Connection, callback: dict, rest: str) -> str:
-    """Add or remove one item of a list setting, which is how a checklist writes."""
-    short, item, page = rest.split(":")
-    name = _long(short)
+def _score_commune(connection: sqlite3.Connection, callback: dict, rest: str) -> str:
+    """Give one commune its score, or take it out of the search: `x` is the way out."""
+    slug, page, points = rest.split(":")
     prefs = Preferences.load(connection)
-    chosen = list(prefs.value(name) or [])
-    chosen.remove(item) if item in chosen else chosen.append(item)
-    toast = _write(connection, name, ",".join(chosen))
-    _redraw(connection, callback, *setting_screen(connection, name,
-                                                  Preferences.load(connection), int(page)))
+    scores = dict(prefs.value("DEPAS_COMMUNES") or {})
+    toast = _write(connection, "DEPAS_COMMUNES",
+                   _rescored(scores, slug, None if points == "x" else int(points)))
+    # Redrawn on the commune's own screen rather than the list: you are still editing it.
+    _redraw(connection, callback,
+            *_commune_screen(Preferences.load(connection), slug, int(page)))
     return toast
 
 
@@ -766,6 +831,8 @@ def _typed(connection: sqlite3.Connection, fetcher: Fetcher, name: str, action: 
         lat, lon, where = _coordinates(fetcher, typed)
         home = _home_draft(connection, prefs) | {"lat": lat, "lon": lon}
         return f"📍 {escape(where)}\n{_keep_home(connection, home)}"
+    if action == ADD and name == "DEPAS_COMMUNES":
+        return _write(connection, name, _added_communes(prefs, typed))
     if action == ADD:
         separator = SEPARATOR[name]
         existing = [entry.strip() for entry in (prefs.raw(name) or "").split(separator.strip())]
@@ -778,6 +845,16 @@ def _typed(connection: sqlite3.Connection, fetcher: Fetcher, name: str, action: 
         if matched:
             return "📍 " + escape(" · ".join(matched)) + "\n" + _write(connection, name, typed)
     return _write(connection, name, typed)
+
+
+def _added_communes(prefs: Preferences, typed: str) -> str:
+    """Typed communes join the list at full marks, or at whatever `santiago=40` says."""
+    # Parsed by the setting itself, so a slug that is not a commune is refused before
+    # anything is written -- and refused with the message the CLI would have given.
+    added = setting("DEPAS_COMMUNES").parse("DEPAS_COMMUNES", typed)
+    # Merged rather than appended: typing a commune already listed re-scores it instead
+    # of doubling it, which is the only reading of typing one that is already there.
+    return _written((prefs.value("DEPAS_COMMUNES") or {}) | added)
 
 
 def _coordinates(fetcher: Fetcher, address: str) -> tuple[float, float, str]:

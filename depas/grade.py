@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from datetime import date
 
 from depas.metro import STATION_LINES
+from depas.preferences import FULL_MARKS, Preferences
 
 # Exactly the components that carry a DEPAS_*_WEIGHT, so there is no second list to keep.
 from depas.preferences import WEIGHTED as COMPONENTS
-from depas.preferences import Preferences
 
 # Amenities a listing is credited for having; how many of them you expect is a setting.
 AMENITIES = (
@@ -19,7 +19,7 @@ LETTERS = ((80, "A"), (68, "B"), (56, "C"), (40, "D"))
 # The three anchors every component is scored between, in points.
 MET = 80.0         # exactly on your target
 BREACHED = 40.0    # on the hard bound, one span the wrong side of the target
-BEST = 100.0       # one span the right side of it
+BEST = 100.0       # one span the right side of it, and the scale a commune is scored on
 # Paying your zone's average UF/m2 is MET; this much off that average is a whole span.
 ZONE_SPAN = 0.20
 # Days past the date you want that cost a whole span; the early side has no fixed span.
@@ -132,6 +132,24 @@ def _availability(row: dict, prefs: Preferences) -> float | None:
     return _points(abs((frees_up - wanted).days) / span - 1)
 
 
+def _commune(row: dict, prefs: Preferences) -> float | None:
+    """The score you gave the commune, straight: the one component you set in points yourself.
+
+    Nowhere else does a person write points -- everywhere else you state a target and the
+    curve works them out. There is no target to state here: a commune is not more or less
+    of anything, it is somewhere you would rather live or would rather not.
+
+    A commune you never listed is one you left out of the crawl on purpose, so it scores
+    nothing. The alert never reaches one, but a link pasted into the chat does.
+    """
+    scores = prefs.commune_scores()
+    commune = row.get("commune")
+    # Every commune at full marks is not a preference, so the component stays off.
+    if commune is None or all(score >= FULL_MARKS for score in scores.values()):
+        return None
+    return float(scores.get(commune, 0))
+
+
 def _metro(row: dict, prefs: Preferences) -> float | None:
     """Your top tier is BEST, the next one MET, and the rest drop evenly to an unranked line."""
     tiers = prefs.metro_tiers()
@@ -172,7 +190,8 @@ def _traits(row: dict, prefs: Preferences) -> float | None:
 
 # One shape for all of them, so the dispatch below needs no special case.
 SCORERS = {"value": _value, "cost": _cost, "walk": _walk, "area": _area,
-           "amenities": _amenities, "security": _security, "floor": _floor, "metro": _metro,
+           "amenities": _amenities, "security": _security, "floor": _floor,
+           "commune": _commune, "metro": _metro,
            "commute": _commute, "age": _age, "availability": _availability,
            "traits": _traits}
 
@@ -187,6 +206,7 @@ def _applicable(prefs: Preferences) -> set[str]:
         "amenities": bool(prefs.value("DEPAS_AMENITIES_TARGET")),
         "security": prefs.security_wanted() is not None,
         "floor": prefs.floor.target is not None,
+        "commune": any(score < FULL_MARKS for score in prefs.commune_scores().values()),
         "metro": bool(prefs.metro_tiers()),
         "commute": prefs.commute.target is not None,
         "age": prefs.age.target is not None,

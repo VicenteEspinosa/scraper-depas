@@ -70,9 +70,9 @@ all.
 
 The registry already knows what a setting is called, how its text is parsed and what it
 means. The menu adds the one thing a keyboard needs and a parser cannot say: how you
-would rather type it. A weight is six presets, a commune is a checklist, a metro line
-is a tier, and only the handful that are genuinely open — an address, somebody's user
-id — are typed at all.
+would rather type it. A weight is six presets, a commune is a list you open one at a
+time to score, a metro line is a tier, and only the handful that are genuinely open —
+an address, somebody's user id — are typed at all.
 
 The editor is chosen from the parser's own name rather than from a table of settings,
 which is what keeps the promise the registry makes: adding a knob is adding a `Setting`,
@@ -82,7 +82,7 @@ and `MENU` are copy and running order, checked by a test against the registry so
 setting cannot go unreachable.
 
 The weights all sit in one «Pesos» group rather than each beside the parameter it
-scales, because a weight only means anything against the other eleven.
+scales, because a weight only means anything against the other twelve.
 
 Telegram caps `callback_data` at 64 bytes and silently rejects the whole keyboard past
 it, so a button whose data would not fit is dropped and any row it emptied goes with it.
@@ -125,13 +125,40 @@ the target would tax each listing 20 points it has no way to earn back.
 
 Coverage is the only thing that punishes silence. Averaging just the components that
 scored would renormalise missing data away, letting a listing that answers four
-questions tie with one that answers all eleven. The perfect bonus needs both: meeting
+questions tie with one that answers all thirteen. The perfect bonus needs both: meeting
 every target on half the axes is a promise, not a proof.
 
 Which components are live is decided by the preferences alone. The pool used to answer
 that — a component nobody could score produced no values — and the preferences are the
 more honest reading anyway: an unset target is not missing data, it is an opinion you
 never had.
+
+The comuna is the one component you score yourself. A list of places you would live is
+not a list of places you would live *equally*, so `DEPAS_COMMUNES` carries a number per
+commune — `nunoa,providencia=90,santiago=40` — and the setting answers two questions
+that used to need one answer: where to look, and where you would rather live. The score
+is never a cutoff. Every commune named is scraped and filtered on exactly as the plain
+list always was; a commune the setting does not name is not looked at at all, and scores
+zero when something that is not the alert puts one in front of you, which a pasted link
+does.
+
+It was first built as tiers, the way the metro lines are, and that was the wrong shape.
+Tiers say *more than* and *less than* but never *how much*: the bottom tier was pinned
+to `BREACHED` whatever it held, so "that commune is a 10" had no way to be said, and the
+only knob was the weight, which moves every commune at once. Numbers say it directly.
+
+Which makes this the one place a person writes points on the grading curve, and that is
+deliberate rather than an exception that slipped in. Everywhere else you state a target
+— 50 m², 25 minutes — and the curve derives the points, because those parameters have a
+direction: more m² is better, more minutes is worse. A commune has no direction. It is
+not more or less of anything, so there is no target to state and nothing for a curve to
+measure. The anchors still mean what they mean — 100 is `BEST`, 80 `MET`, 40 `BREACHED`
+— which is what makes `santiago=40` readable as a sentence: an aviso there starts at the
+bottom of my range.
+
+With every commune at 100 there is no preference to score, so the component stays off —
+which is exactly what every configuration written before this parses to, since a commune
+with no number is worth full marks.
 
 The entrega is the one two-sided component, and the two sides are not the same shape.
 Everything free between today and your date is a flat you could actually take, so the

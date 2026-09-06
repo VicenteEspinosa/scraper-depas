@@ -45,14 +45,35 @@ def _day(name: str, raw: str) -> str:
         raise ValueError(f"{name} must be a date as YYYY-MM-DD, got {raw!r}") from None
 
 
-def _communes(name: str, raw: str) -> list[str]:
-    slugs = [slug.strip() for slug in raw.split(",") if slug.strip()]
+# What a commune is worth when you did not say: full marks, which is grade.BEST. A
+# commune's score is points on that curve, so 80 is grade.MET and 40 is grade.BREACHED.
+FULL_MARKS = 100
+
+
+def _communes(name: str, raw: str) -> dict[str, int]:
+    """Communes to look at, each with what an aviso there is worth: `nunoa,santiago=40`.
+
+    A commune with no number is worth full marks, which is what every configuration
+    written before the scores existed parses to. Order is kept: it is the order the
+    checklist offers them in and the order they were added.
+    """
     known = {commune.value for commune in Commune}
-    unknown = [slug for slug in slugs if slug not in known]
-    if unknown:
-        raise ValueError(f"{name} does not know the commune {', '.join(unknown)}; "
-                         "slugs look like `nunoa` or `estacion-central`")
-    return slugs
+    scores: dict[str, int] = {}
+    for entry in raw.split(","):
+        if not entry.strip():
+            continue
+        slug, _, points = (part.strip() for part in entry.partition("="))
+        if slug not in known:
+            raise ValueError(f"{name} does not know the commune {slug}; "
+                             "slugs look like `nunoa` or `estacion-central`")
+        if points == "":
+            scores[slug] = FULL_MARKS
+            continue
+        if not points.isdigit() or int(points) > FULL_MARKS:
+            raise ValueError(f"{name} scores a commune from 0 to {FULL_MARKS}, "
+                             f"got {slug}={points}")
+        scores[slug] = int(points)
+    return scores
 
 
 def _admins(name: str, raw: str) -> list[int]:
@@ -134,7 +155,7 @@ class Setting:
 
 # Every weighted component, named for what it measures: `walk` is minutes, `area` is m2.
 WEIGHTED = ("value", "cost", "walk", "area", "amenities", "security", "floor",
-            "metro", "commute", "age", "availability", "traits")
+            "commune", "metro", "commute", "age", "availability", "traits")
 
 
 def _trait_settings() -> list[Setting]:
@@ -165,8 +186,12 @@ SETTINGS: tuple[Setting, ...] = (
 
     # -- what is even looked at ---------------------------------------------------
     Setting("DEPAS_COMMUNES", _communes,
-            "Comunas que revisa la pasada horaria, como slugs separados por coma.",
-            example="nunoa,santiago"),
+            "Comunas que revisa la pasada horaria, cada una con lo que vale un aviso ahí "
+            "sobre 100: `nunoa,santiago=40`. Sin número vale 100. Todo lo listado se "
+            "crawlea y el resto queda fuera. Con todas en 100 no hay preferencia y el "
+            "componente se apaga.",
+            example="nunoa,providencia=90,santiago=40"),
+    _weight("commune"),
     Setting("DEPAS_BEDROOMS_MIN", _whole,
             "Mínimo de dormitorios. Se aplica al buscar y otra vez al alertar.",
             example="2"),
@@ -414,8 +439,13 @@ class Preferences:
     def metro_tiers(self) -> list[list[str]]:
         return self.value("DEPAS_METRO_TIERS") or []
 
+    def commune_scores(self) -> dict[str, int]:
+        """What an aviso is worth per commune, out of 100; a commune absent from it is not."""
+        return self.value("DEPAS_COMMUNES") or {}
+
     def communes(self) -> list[str]:
-        return self.value("DEPAS_COMMUNES") or []
+        """Every commune the crawl looks at, whatever it scores; the rest are never fetched."""
+        return list(self.commune_scores())
 
     def security_wanted(self) -> str | None:
         return self.value("DEPAS_SECURITY_WANTED")
@@ -537,7 +567,7 @@ def described(preferences: Preferences) -> list[tuple[Setting, str | None, str]]
     return rows
 
 
-__all__ = ["BOOTSTRAP", "BY_NAME", "Bounds", "DEFAULTED", "Preferences", "SET", "SETTINGS",
-           "Setting",
+__all__ = ["BOOTSTRAP", "BY_NAME", "Bounds", "DEFAULTED", "FULL_MARKS", "Preferences",
+           "SET", "SETTINGS", "Setting",
            "UNSET", "WEIGHTED", "check_environment", "clear_preference", "described",
            "seed_from_env", "set_preference", "setting"]
