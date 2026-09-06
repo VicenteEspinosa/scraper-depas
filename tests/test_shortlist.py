@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from depas import shortlist
 from depas.bot import _handle
 from depas.models import Listing
 from depas.shortlist import EMPTY, LIMIT, MOST, format_shortlist, sync
@@ -167,5 +166,7 @@ def test_a_verdict_in_the_chat_rewrites_the_list(connection, telegram, monkeypat
                                "from": {"username": "vicente"}, "text": "/like",
                                "reply_to_message": {"message_id": THREAD}}, prefs())
 
-    assert telegram.posted and str(shortlist.MOST) not in telegram.posted[0][1]
+    # The marker, not the number in it: the header carries a `dd/mm HH:MM` clock, so
+    # `str(MOST)` also matched 17:30 -- one minute an hour, and all of the 30th.
+    assert telegram.posted and re.search(r"…y \d+ más", telegram.posted[0][1]) is None
     assert "Providencia" in telegram.posted[0][1]

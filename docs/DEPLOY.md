@@ -155,3 +155,53 @@ docker compose logs -f depas-cron        # watch the hourly pass
 docker compose exec depas-cron depas show --limit 10
 docker compose exec depas-cron depas watch   # force a pass now
 ```
+
+## Disk
+
+The image is built on the box, natively, with no registry — so every deploy leaves the
+layer set the old containers were running behind, untagged, and nothing collected it.
+That is what filled the box: 52 deploys, 52 dead images.
+
+The deploy reaps its own leak. After the restart it asks `docker compose images -q` —
+which answers for **this project's containers only** — for the ids the containers are on
+now, compares them with the ids taken before the build, and removes the ones that were
+replaced, by id, one at a time. `docker image rm` runs without `-f`, so anything that
+still references an image keeps it.
+
+**The box runs other stacks, and the Docker daemon is the one thing on it that is not
+scoped to this project.** So the deploy never prunes images. What it can touch:
+
+| | Reaches | When |
+| --- | --- | --- |
+| `docker image rm <id>` | exactly the ids this project's containers were on | every deploy |
+| `docker image prune -f` | untagged, unreferenced images, daemon-wide | only when short on space |
+| `docker builder prune -f --filter until=24h` | build cache over a day old, daemon-wide | only when short on space |
+
+The last two are shared, and both are deliberately the kind nothing can miss: a dangling
+image has no tag to be started by and no container using it, and build cache rebuilds
+itself. **`docker image prune -a` and `docker system prune` are never run**, and a test
+reads the script to keep it that way — either would delete images belonging to other
+stacks, which for anything else built on this box with no registry is unrecoverable
+without its source.
+
+Before writing anything the deploy checks there are **2048 MB free** (`MIN_FREE_MB` in
+`.github/workflows/deploy.yml`). Under that it runs the two shared reclaims above and
+re-checks; still under, it refuses, and the old containers keep serving. That check
+exists because a full box does not fail where the space ran out — the deploy that
+prompted it died on `sed: couldn't flush ./sedxji3sq: No space left on device` while
+rendering `.env`, two steps in, naming a temp file instead of the disk.
+
+If it ever refuses, on the box:
+
+```bash
+df -h
+docker system df                 # usually the build cache
+du -sh data/*                    # the other candidate: a .db-wal that never checkpointed
+```
+
+`data/` is a bind mount, not a named volume, so nothing the deploy runs can reach the
+database. Never answer a full box with `docker system prune --volumes`.
+
+A full disk takes the bot down with it, and not quietly to you: every update it handles
+ends in a SQLite write, which raises `database or disk is full`, and `restart:
+unless-stopped` turns that into a crash loop. Cards stop, `/config` stops answering.
