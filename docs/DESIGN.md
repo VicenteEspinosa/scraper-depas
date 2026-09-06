@@ -70,9 +70,9 @@ all.
 
 The registry already knows what a setting is called, how its text is parsed and what it
 means. The menu adds the one thing a keyboard needs and a parser cannot say: how you
-would rather type it. A weight is six presets, a commune is a checklist, a metro line
-is a tier, and only the handful that are genuinely open — an address, somebody's user
-id — are typed at all.
+would rather type it. A weight is six presets, a commune is a three-state checklist, a
+metro line is a tier, and only the handful that are genuinely open — an address,
+somebody's user id — are typed at all.
 
 The editor is chosen from the parser's own name rather than from a table of settings,
 which is what keeps the promise the registry makes: adding a knob is adding a `Setting`,
@@ -82,7 +82,7 @@ and `MENU` are copy and running order, checked by a test against the registry so
 setting cannot go unreachable.
 
 The weights all sit in one «Pesos» group rather than each beside the parameter it
-scales, because a weight only means anything against the other eleven.
+scales, because a weight only means anything against the other twelve.
 
 Telegram caps `callback_data` at 64 bytes and silently rejects the whole keyboard past
 it, so a button whose data would not fit is dropped and any row it emptied goes with it.
@@ -125,13 +125,29 @@ the target would tax each listing 20 points it has no way to earn back.
 
 Coverage is the only thing that punishes silence. Averaging just the components that
 scored would renormalise missing data away, letting a listing that answers four
-questions tie with one that answers all eleven. The perfect bonus needs both: meeting
+questions tie with one that answers all thirteen. The perfect bonus needs both: meeting
 every target on half the axes is a promise, not a proof.
 
 Which components are live is decided by the preferences alone. The pool used to answer
 that — a component nobody could score produced no values — and the preferences are the
 more honest reading anyway: an unset target is not missing data, it is an opinion you
 never had.
+
+The comuna is ranked the way the metro lines are, and for the same reason: a list of
+places you would live is not a list of places you would live *equally*. `DEPAS_COMMUNES`
+takes tiers — `nunoa,providencia > santiago` — where every tier is scraped and filtered
+on exactly as the flat list always was, and only the grade knows the difference: the top
+tier is `BEST`, the last is `BREACHED`, and any in between spread evenly. So the setting
+answers two questions that used to need one answer: where to look, and where you would
+rather live. A commune in no tier is still simply not looked at — and, exactly as an
+unranked metro line does, it scores a tier below the worst one you ranked when something
+that is not the alert puts it in front of you, which a pasted link does.
+
+One tier is not a ranking — everything listed would score the same — so the component
+stays off until there are two, which is what every configuration written before this
+still parses to. The rest follows from that: a tier that ends up empty is dropped, so
+demoting the last commune above the bottom promotes what was under it, and the menu's
+👎 on a commune with nothing above it is the way out rather than a rank it cannot leave.
 
 The entrega is the one two-sided component, and the two sides are not the same shape.
 Everything free between today and your date is a flat you could actually take, so the
