@@ -70,9 +70,9 @@ all.
 
 The registry already knows what a setting is called, how its text is parsed and what it
 means. The menu adds the one thing a keyboard needs and a parser cannot say: how you
-would rather type it. A weight is six presets, a commune is a three-state checklist, a
-metro line is a tier, and only the handful that are genuinely open — an address,
-somebody's user id — are typed at all.
+would rather type it. A weight is six presets, a commune is a list you open one at a
+time to score, a metro line is a tier, and only the handful that are genuinely open —
+an address, somebody's user id — are typed at all.
 
 The editor is chosen from the parser's own name rather than from a table of settings,
 which is what keeps the promise the registry makes: adding a knob is adding a `Setting`,
@@ -133,21 +133,32 @@ that — a component nobody could score produced no values — and the preferenc
 more honest reading anyway: an unset target is not missing data, it is an opinion you
 never had.
 
-The comuna is ranked the way the metro lines are, and for the same reason: a list of
-places you would live is not a list of places you would live *equally*. `DEPAS_COMMUNES`
-takes tiers — `nunoa,providencia > santiago` — where every tier is scraped and filtered
-on exactly as the flat list always was, and only the grade knows the difference: the top
-tier is `BEST`, the last is `BREACHED`, and any in between spread evenly. So the setting
-answers two questions that used to need one answer: where to look, and where you would
-rather live. A commune in no tier is still simply not looked at — and, exactly as an
-unranked metro line does, it scores a tier below the worst one you ranked when something
-that is not the alert puts it in front of you, which a pasted link does.
+The comuna is the one component you score yourself. A list of places you would live is
+not a list of places you would live *equally*, so `DEPAS_COMMUNES` carries a number per
+commune — `nunoa,providencia=90,santiago=40` — and the setting answers two questions
+that used to need one answer: where to look, and where you would rather live. The score
+is never a cutoff. Every commune named is scraped and filtered on exactly as the plain
+list always was; a commune the setting does not name is not looked at at all, and scores
+zero when something that is not the alert puts one in front of you, which a pasted link
+does.
 
-One tier is not a ranking — everything listed would score the same — so the component
-stays off until there are two, which is what every configuration written before this
-still parses to. The rest follows from that: a tier that ends up empty is dropped, so
-demoting the last commune above the bottom promotes what was under it, and the menu's
-👎 on a commune with nothing above it is the way out rather than a rank it cannot leave.
+It was first built as tiers, the way the metro lines are, and that was the wrong shape.
+Tiers say *more than* and *less than* but never *how much*: the bottom tier was pinned
+to `BREACHED` whatever it held, so "that commune is a 10" had no way to be said, and the
+only knob was the weight, which moves every commune at once. Numbers say it directly.
+
+Which makes this the one place a person writes points on the grading curve, and that is
+deliberate rather than an exception that slipped in. Everywhere else you state a target
+— 50 m², 25 minutes — and the curve derives the points, because those parameters have a
+direction: more m² is better, more minutes is worse. A commune has no direction. It is
+not more or less of anything, so there is no target to state and nothing for a curve to
+measure. The anchors still mean what they mean — 100 is `BEST`, 80 `MET`, 40 `BREACHED`
+— which is what makes `santiago=40` readable as a sentence: an aviso there starts at the
+bottom of my range.
+
+With every commune at 100 there is no preference to score, so the component stays off —
+which is exactly what every configuration written before this parses to, since a commune
+with no number is worth full marks.
 
 The entrega is the one two-sided component, and the two sides are not the same shape.
 Everything free between today and your date is a flat you could actually take, so the
