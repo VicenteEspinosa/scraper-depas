@@ -29,8 +29,21 @@ def _df(free_mb: int, *, then: int | None = None) -> str:
 
 
 # Every docker call, in order, written beside the checkout for a test to read back.
-LOGGING_DOCKER = ('#!/bin/sh\n[ "$2" = run ] && cat > /dev/null\n'
-                  'echo "docker $*" >> docker.log\nexit 0\n')
+# `compose images -q` answers with a different id once the restart has happened, which
+# is what tells the script its build replaced something.
+LOGGING_DOCKER = ('#!/bin/sh\n'
+                  'echo "docker $*" >> docker.log\n'
+                  '[ "$2" = run ] && cat > /dev/null\n'
+                  'if [ "$2" = images ]; then\n'
+                  '  if grep -q "compose up -d" docker.log; then echo newimageid\n'
+                  '  else echo oldimageid; fi\n'
+                  'fi\n'
+                  'exit 0\n')
+
+# Anything that reaches past this project is a bug: the box runs other stacks whose
+# images are built on it and pushed to no registry, so a daemon-wide `-a` is fatal
+# to them. Dangling images and aged build cache are the two things nothing can miss.
+PRUNES_ALLOWED = ("docker image prune -f", 'docker builder prune -f --filter "until=')
 
 
 @fixture
@@ -113,7 +126,7 @@ def test_a_full_box_deploys_once_the_prune_has_room_again(deploy_path):
     finished = _deploy(deploy_path)
 
     assert finished.returncode == 0, finished.stderr
-    assert "reclaiming what Docker is holding" in finished.stdout
+    assert "reclaiming what Docker can spare" in finished.stdout
     assert (deploy_path / ".last-deployed-sha").read_text().strip() == "a" * 40
 
 
@@ -122,10 +135,10 @@ def test_a_deploy_with_room_to_spare_keeps_the_build_cache(deploy_path):
     finished = _deploy(deploy_path)
 
     assert finished.returncode == 0, finished.stderr
-    assert "reclaiming what Docker is holding" not in finished.stdout
+    assert "reclaiming what Docker can spare" not in finished.stdout
 
 
-def test_the_image_the_build_replaced_is_reaped(deploy_path):
+def test_the_image_the_build_replaced_is_reaped_by_id(deploy_path):
     """The leak that filled the box: every build orphans one layer set, nothing collected it."""
     _stub(deploy_path, "docker", LOGGING_DOCKER)
 
@@ -133,18 +146,70 @@ def test_the_image_the_build_replaced_is_reaped(deploy_path):
     calls = (deploy_path / "docker.log").read_text()
 
     assert finished.returncode == 0, finished.stderr
-    # Dangling only: -a here would be a different, much larger promise.
-    assert "docker image prune -f" in calls
-    assert calls.index("compose up -d") < calls.index("image prune -f")
+    # By id and after the restart, so what is removed is the one this deploy replaced.
+    assert "docker image rm oldimageid" in calls
+    assert calls.index("compose up -d") < calls.index("image rm oldimageid")
+    assert "removed oldimageid" in finished.stdout
 
 
-def test_a_failed_reap_does_not_fail_an_applied_deploy(deploy_path):
-    """By then the containers are already restarted; there is nothing left to abort."""
+def test_the_image_still_in_use_is_left_alone(deploy_path):
+    """A build that changed nothing must not reap the image the containers are running."""
+    # Same id before and after: `compose images` never learns a new one.
     _stub(deploy_path, "docker",
-          '#!/bin/sh\n[ "$2" = run ] && cat > /dev/null\n'
-          '[ "$1" = image ] && exit 1\nexit 0\n')
+          '#!/bin/sh\necho "docker $*" >> docker.log\n[ "$2" = run ] && cat > /dev/null\n'
+          '[ "$2" = images ] && echo sameimageid\nexit 0\n')
 
     finished = _deploy(deploy_path)
 
     assert finished.returncode == 0, finished.stderr
-    assert "applied" in finished.stdout
+    assert "image rm" not in (deploy_path / "docker.log").read_text()
+
+
+def test_a_reap_that_is_refused_is_reported_and_not_forced(deploy_path):
+    """Something still references it, on a box full of other stacks. Take the no."""
+    _stub(deploy_path, "docker",
+          '#!/bin/sh\necho "docker $*" >> docker.log\n[ "$2" = run ] && cat > /dev/null\n'
+          'if [ "$2" = images ]; then\n'
+          '  if grep -q "compose up -d" docker.log; then echo newimageid\n'
+          '  else echo oldimageid; fi\nfi\n'
+          '[ "$1" = image ] && [ "$2" = rm ] && exit 1\nexit 0\n')
+
+    finished = _deploy(deploy_path)
+
+    assert finished.returncode == 0, finished.stderr
+    assert "kept oldimageid, something still references it" in finished.stdout
+    # -f would have taken it anyway, and an image is shared state on a shared box.
+    assert "image rm -f" not in (deploy_path / "docker.log").read_text()
+
+
+def test_no_docker_command_can_reach_another_stack():
+    """The one thing on the box that is not scoped to this project is the daemon itself.
+
+    Read off the script rather than a run, because the danger is a line somebody adds
+    later: every other test here would still pass with an `-a` on the image prune.
+    """
+    # Comments stripped: they are where the footguns are named, which is not using one.
+    code = [line.strip() for line in SCRIPT.read_text().splitlines()
+            if not line.lstrip().startswith("#")]
+
+    prunes = [line for line in code if "prune" in line]
+    assert prunes, "the reclaim path went missing"
+    for line in prunes:
+        assert line.startswith(PRUNES_ALLOWED), line
+    # Both are daemon-wide, and unrecoverable for a stack built on the box with no registry.
+    assert not [line for line in code if "image prune -a" in line or "system prune" in line]
+    # -f on a removal overrides exactly the refusal that keeps another stack's image safe.
+    assert not [line for line in code if "image rm -f" in line or "rmi -f" in line]
+
+
+def test_the_reclaim_never_touches_a_tagged_image(deploy_path):
+    """Short on space is not a licence to delete what another stack cannot rebuild."""
+    _stub(deploy_path, "df", _df(10, then=50_000))
+    _stub(deploy_path, "docker", LOGGING_DOCKER)
+
+    finished = _deploy(deploy_path)
+    calls = (deploy_path / "docker.log").read_text()
+
+    assert finished.returncode == 0, finished.stderr
+    assert "docker image prune -f\n" in calls        # dangling only, never -a
+    assert "builder prune -f --filter until=24h" in calls

@@ -31,15 +31,24 @@ free_mb() { df -Pm "$1" | awk 'NR == 2 { print $4 }'; }
 cd "$DEPLOY_PATH"
 mkdir -p .rollback data
 
+# The box hosts other stacks, and the Docker daemon is the one thing on it that is not
+# scoped to this project. So neither of these may ever grow an `-a` on the images:
+# `docker image prune -a` deletes every image no container references *daemon-wide*,
+# which for a stack that is built on the box and pushed to no registry is unrecoverable
+# without its source. Dangling images are untagged and referenced by nothing, and build
+# cache rebuilds itself -- between them that is all `docker system df` calls reclaimable.
+reclaim() {
+  docker image prune -f || true
+  docker builder prune -f --filter "until=${CACHE_KEEP_HOURS:-24}h" || true
+}
+
 log "check free space"
 free=$(free_mb .)
 if [ "$free" -lt "$MIN_FREE_MB" ]; then
   # Only when short: the build cache is what makes the next build quick, so it is
   # worth keeping right up until it is worth less than the deploy it is blocking.
-  log "${free}MB free, under ${MIN_FREE_MB}MB -- reclaiming what Docker is holding"
-  docker builder prune -af || true
-  # -a is safe next to a running container: an image one is using is never unused.
-  docker image prune -af || true
+  log "${free}MB free, under ${MIN_FREE_MB}MB -- reclaiming what Docker can spare"
+  reclaim
   free=$(free_mb .)
 fi
 echo "${free}MB free, ${MIN_FREE_MB}MB wanted"
@@ -65,6 +74,10 @@ log "fast-forward checkout to ${GITHUB_SHA:0:7}"
 git fetch origin
 git reset --hard "$GITHUB_SHA"
 
+# Taken before the build, which retags `depas:local` out from under them. `compose
+# images` answers for this project's containers only, so what comes back is ours.
+previous=$(docker compose images -q 2>/dev/null | sort -u || true)
+
 log "docker compose build"
 docker compose build
 
@@ -85,11 +98,24 @@ docker compose up -d
 
 echo "$GITHUB_SHA" > .last-deployed-sha
 
-# The rebuild orphans the image the old containers were running and nothing ever
-# collected it, so every deploy leaked a layer set until the box filled up. Dangling
-# only: the build cache and every tagged image stay. Never fatal -- by here the deploy
-# is applied, and a failed cleanup is next deploy's problem, not this one's.
-log "reap the image this build replaced"
-docker image prune -f || true
+# The rebuild orphans the layer set the old containers were running and nothing ever
+# collected it, so every deploy leaked one until the box filled up.
+#
+# Removed by id, one at a time, rather than pruned: a prune is daemon-wide and this box
+# runs other stacks, so the only safe reap is the one that can name what it is reaping.
+# `docker image rm` without -f refuses while anything at all still references the image,
+# which is the answer we want on every doubt. Never fatal -- by here the deploy is
+# applied, and a failed cleanup is the next deploy's problem, not this one's.
+log "reap the images this build replaced"
+current=$(docker compose images -q 2>/dev/null | sort -u || true)
+for image in $previous; do
+  if ! printf '%s\n' "$current" | grep -qxF "$image"; then
+    if docker image rm "$image" >/dev/null 2>&1; then
+      echo "removed $image"
+    else
+      echo "kept $image, something still references it"
+    fi
+  fi
+done
 
 log "deploy of ${GITHUB_SHA:0:7} applied, $(free_mb .)MB free"
