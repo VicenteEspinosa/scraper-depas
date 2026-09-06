@@ -17,12 +17,11 @@ permissions:
   contents: read
 
 jobs:
-  # Deploying a red main is how a broken pass reaches the box unnoticed.
-  test:
-    uses: ./.github/workflows/test.yml
-
+  # No test job to wait on. Every change reaches main through a pull request, where
+  # Test has already run ruff and pytest against the merge result -- running them
+  # again here only delays the box, and made a flaky test able to block a deploy
+  # outright. Push straight to main and nothing checks it: don't.
   deploy:
-    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

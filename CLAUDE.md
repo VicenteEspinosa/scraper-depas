@@ -62,8 +62,12 @@ reverse-engineer. Several small commits that each stand on their own beat one la
 
 ```bash
 uv run pytest      # must be green
-uv run ruff check . # must be clean; CI runs both
+uv run ruff check . # must be clean; CI runs both on the pull request
 ```
+
+Both run on the PR and **nowhere else** — merging does not re-run them, it deploys. So a
+branch merged red is a box running red, and these two commands are the last thing between
+them.
 
 Ruff is configured in `pyproject.toml` — 100 columns, `E W F I UP B C4 SIM`.
 

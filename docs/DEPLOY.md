@@ -41,6 +41,14 @@ Repository **secrets**:
 
 Repository **variables**: `TZ`.
 
+**Checks run on the pull request, not on the merge.** `Test` (ruff and pytest) fires on
+`pull_request` only, against the merge result. `Deploy` fires on the push to `main` and
+waits on nothing — a merge goes straight to the box. That is deliberate: the tree being
+merged has already passed, and re-running the suite only delayed the deploy and let one
+flaky test block it outright. The cost is that **a push straight to `main` is deployed
+unchecked**, which is the older of the two reasons not to make one. `Test` is
+`workflow_dispatch`-able for the times you want it run against `main` anyway.
+
 That is the whole list. Every preference lives in the `preferences` table, so the
 deploy carries only what a database cannot hold — see the README's
 [Configuration](../README.md#configuration). Editing one is `depas config set` on

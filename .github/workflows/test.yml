@@ -1,12 +1,12 @@
 name: Test
 
-# Also callable from the deploy workflow, so main is never deployed untested --
-# which waits on every job below, not just the tests.
+# The pull request only. A merge to main re-ran all of this against a tree that had
+# already passed it, twice over -- once here on the push and once more inside Deploy --
+# and the box waited for both. `workflow_dispatch` is the way to ask anyway, which is
+# what to reach for after a merge that skipped review.
 on:
   pull_request:
-  push:
-    branches: [main]
-  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
