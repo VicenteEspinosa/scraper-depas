@@ -10,7 +10,7 @@ from depas.config import HOME_REQUIRED
 from depas.detail import MONTH_NAMES
 from depas.fetch import Fetcher
 from depas.metro import STATION_LINES
-from depas.preferences import BY_NAME, Preferences, setting
+from depas.preferences import BY_NAME, FULL_MARKS, Preferences, setting
 from depas.store import forget_preference, store_preference
 from depas.telegram import answer_callback, ask_value, edit_menu, escape, send_menu
 from depas.traits import DISPOSITIONS, EXCLUDE, IGNORE, PENALISE
@@ -123,11 +123,11 @@ WEIGHT_PRESETS = ("0", "0.5", "1", "1.5", "2", "3")
 MONTHS_OFFERED = 6
 # The checklist offers the Provincia de Santiago only; the rest of the RM is typed.
 COMMUNES_PER_PAGE = 16
-# What a press cycles through: the communes you want, then the ones you would take
-# anyway but would rather not. A deeper tier can be typed; the button still shows 👎.
-COMMUNE_RANKS = 2
-# ⬜ is out of the crawl entirely, which is what a commune in no tier means.
-COMMUNE_MARKS = ("✅", "👎")
+# What one commune can be worth, offered coarsely: nobody means 63 rather than 60, and
+# anything finer is `depas config set`. Full marks is first, so the common case is one tap.
+COMMUNE_SCORES = (100, 90, 80, 70, 60, 50, 40, 30, 20, 10)
+# Out of the crawl altogether, which is what a commune the setting never names means.
+OUT_MARK = "⬜"
 # Three tiers is what a preference between metro lines is ever worth spelling out.
 TIERS_OFFERED = 3
 # Offered by the picker even on a database that has not seen one yet.
@@ -198,8 +198,10 @@ def _shown(name: str, prefs: Preferences) -> str:
         return "—"
     shape = kind(name)
     if shape == COMMUNES:
-        listed = [slug for tier in value for slug in tier]
-        return f"{len(listed)} comuna" + ("s" if len(listed) != 1 else "")
+        listed = f"{len(value)} comuna" + ("s" if len(value) != 1 else "")
+        # The floor rather than a count: what you want to know is how far down they go.
+        worst = min(value.values(), default=FULL_MARKS)
+        return listed + (f" · desde {worst}" if worst < FULL_MARKS else "")
     if shape == PLACES:
         return f"{len(value)} lugar" + ("es" if len(value) != 1 else "")
     if shape == PEOPLE:
@@ -288,42 +290,64 @@ def _day_screen(name: str, prefs: Preferences, group: str) -> tuple[str, dict]:
     return _text(name, prefs), _keyboard(buttons[:3], buttons[3:], _footer(name, group))
 
 
-def _rank_of(tiers: list[list[str]], slug: str) -> int | None:
-    """Which tier a commune sits in, or None when it is out of the crawl altogether."""
-    return next((index for index, tier in enumerate(tiers) if slug in tier), None)
-
-
-def _mark(rank: int | None) -> str:
-    """✅ for the tier you want, 👎 for any below it, ⬜ for a commune nobody looks at."""
-    return "⬜" if rank is None else COMMUNE_MARKS[min(rank, len(COMMUNE_MARKS) - 1)]
-
-
 def _communes_screen(name: str, prefs: Preferences, group: str,
                      page: int = 0) -> tuple[str, dict]:
-    tiers = prefs.value(name) or []
-    chosen = [slug for tier in tiers for slug in tier]
-    # A commune typed in is offered too, and first: the list must be able to cycle it out.
+    """Every commune with what it is worth; a press opens the one commune's own screen."""
+    scores = prefs.value(name) or {}
+    # A commune typed in is offered too, and first: the list must be able to take it out.
     province = [commune.value for commune in sorted(SANTIAGO_PROVINCE)]
-    every = [slug for slug in chosen if slug not in province] + province
+    every = [slug for slug in scores if slug not in province] + province
     pages = (len(every) + COMMUNES_PER_PAGE - 1) // COMMUNES_PER_PAGE
     page = max(0, min(page, pages - 1))
     shown = every[page * COMMUNES_PER_PAGE:(page + 1) * COMMUNES_PER_PAGE]
     rows = []
     for first in range(0, len(shown), 2):
-        rows.append([_button(_mark(_rank_of(tiers, slug)) + " " + _pretty(slug),
-                             "t", _short(name), slug, page)
+        rows.append([_button(_commune_label(scores, slug), "c", slug, page)
                      for slug in shown[first:first + 2]])
     rows.append([_button("◀️", "p", _short(name), page - 1) if page else None,
                  _button(f"{page + 1}/{pages}", "p", _short(name), page),
                  _button("▶️", "p", _short(name), page + 1) if page < pages - 1 else None])
     rows.append(_footer(name, group))
-    text = _text(name, prefs)
-    if tiers:
-        text += "\n\n" + "\n".join(f"{_mark(rank)} " + " · ".join(_pretty(slug) for slug in tier)
-                                   for rank, tier in enumerate(tiers))
-    text += ("\n\nCada toque baja la comuna un tramo: ✅ la quieres, 👎 la tomarías pero "
-             "pierde nota, ⬜ ni se mira. La lista es la Provincia de Santiago; el resto "
-             "de la RM se agrega con ✏️.")
+    text = _text(name, prefs) + _worth(scores)
+    text += ("\n\nToca una comuna para ponerle nota sobre 100, o sacarla de la búsqueda. "
+             "La lista es la Provincia de Santiago; el resto de la RM se agrega con ✏️.")
+    return text, _keyboard(*rows)
+
+
+def _commune_label(scores: dict[str, int], slug: str) -> str:
+    """Its score in front of its name, or ⬜ where there is no score because there is no commune."""
+    return (f"{OUT_MARK} {_pretty(slug)}" if slug not in scores
+            else f"{scores[slug]} {_pretty(slug)}")
+
+
+def _worth(scores: dict[str, int]) -> str:
+    """The whole list read back, grouped by score: what you actually configured, in one look."""
+    if not scores:
+        return ""
+    grouped: dict[int, list[str]] = {}
+    for slug, score in scores.items():
+        grouped.setdefault(score, []).append(slug)
+    return "\n\n" + "\n".join(
+        f"<b>{score}</b> · " + escape(" · ".join(_pretty(slug) for slug in grouped[score]))
+        for score in sorted(grouped, reverse=True))
+
+
+def _commune_screen(prefs: Preferences, slug: str, page: int) -> tuple[str, dict]:
+    """One commune's score, which is the only place in the menu that sets points directly."""
+    scores = prefs.value("DEPAS_COMMUNES") or {}
+    current = scores.get(slug)
+    buttons = [_button(("● " if score == current else "") + str(score), "cv", slug, page, score)
+               for score in COMMUNE_SCORES]
+    half = len(buttons) // 2
+    # Taking it out is not one more number, so it gets its own row rather than a ragged one.
+    rows = [buttons[:half], buttons[half:],
+            [_button(("● " if current is None else "") + f"{OUT_MARK} Sacar de la búsqueda",
+                     "cv", slug, page, "x")],
+            [_button(BACK, "p", "COMMUNES", page)]]
+    text = (f"<b>🗺️ {escape(_pretty(slug))}</b>\n\n"
+            "Cuánto vale un aviso en esta comuna, sobre 100: 100 es donde quieres vivir, "
+            "80 es que cumple, 40 es al límite. No es un corte -- se sigue crawleando y "
+            f"alertando igual, solo baja la nota. {OUT_MARK} sí la saca: no se mira más.")
     return text, _keyboard(*rows)
 
 
@@ -358,24 +382,20 @@ def _retiered(tiers: list[list[str]], line: str, target: int | None) -> str:
     return " > ".join(",".join(sorted(tier)) for tier in moved if tier)
 
 
-def _written(tiers: list[list[str]]) -> str:
-    """Tiers of communes back as the setting's own text, for the parser to read again.
+def _written(scores: dict[str, int]) -> str:
+    """Scored communes back as the setting's own text, for the parser to read again.
 
-    Unsorted, unlike the metro lines: the order communes were added in is the order the
-    checklist and the cards have always listed them, and nothing here should shuffle it.
-    An emptied tier is dropped, so demoting the last commune of a tier promotes the rest
-    -- with nothing ranked above them there is no ranking left for them to be below.
+    Full marks are left unwritten, so a list nobody has docked stays the plain list of
+    slugs it always was -- and the order is the order they were added, never sorted.
     """
-    return " > ".join(",".join(tier) for tier in tiers if tier)
+    return ",".join(slug if score == FULL_MARKS else f"{slug}={score}"
+                    for slug, score in scores.items())
 
 
-def _recommuned(tiers: list[list[str]], slug: str, rank: int | None) -> str:
-    """The setting's text with one commune moved to one tier, or out of the crawl."""
-    moved = [[held for held in tier if held != slug] for tier in tiers]
-    if rank is not None:
-        moved += [[] for _ in range(rank + 1 - len(moved))]
-        moved[rank].append(slug)
-    return _written(moved)
+def _rescored(scores: dict[str, int], slug: str, score: int | None) -> str:
+    """The setting's text with one commune scored, or taken out of the search entirely."""
+    kept = {held: points for held, points in scores.items() if held != slug}
+    return _written(kept if score is None else kept | {slug: score})
 
 
 def _places_screen(name: str, prefs: Preferences, group: str) -> tuple[str, dict]:
@@ -573,7 +593,7 @@ ASKED = {
 }
 EXAMPLES = {ADD: {"DEPAS_LOCATIONS": "pega, Avenida Providencia 1234",
                   "DEPAS_ADMINS": "467291452",
-                  "DEPAS_COMMUNES": "puente-alto, san-bernardo"},
+                  "DEPAS_COMMUNES": "puente-alto, san-bernardo=40"},
             ADDRESS: {"DEPAS_CURRENT_HOME": "Avenida Los Leones 500, Providencia"},
             COMMUNE: {"DEPAS_CURRENT_HOME": "puente-alto"}}
 
@@ -665,8 +685,12 @@ def _act(connection: sqlite3.Connection, callback: dict, action: str, rest: str)
         return _set(connection, callback, _long(short), value)
     if action == "x":
         return _clear(connection, callback, _long(rest))
-    if action == "t":
-        return _cycle(connection, callback, rest)
+    if action == "c":
+        slug, _, page = rest.partition(":")
+        _redraw(connection, callback, *_commune_screen(prefs, slug, int(page)))
+        return ""
+    if action == "cv":
+        return _score_commune(connection, callback, rest)
     if action == "d":
         return _drop(connection, callback, rest)
     if action == "w":
@@ -696,24 +720,16 @@ def _clear(connection: sqlite3.Connection, callback: dict, name: str) -> str:
     return "🗑️ borrado; vuelve a su valor por defecto"
 
 
-def _cycle(connection: sqlite3.Connection, callback: dict, rest: str) -> str:
-    """Move one commune down a tier and out past the last one, which is how the list writes."""
-    short, item, page = rest.split(":")
-    name = _long(short)
+def _score_commune(connection: sqlite3.Connection, callback: dict, rest: str) -> str:
+    """Give one commune its score, or take it out of the search: `x` is the way out."""
+    slug, page, points = rest.split(":")
     prefs = Preferences.load(connection)
-    tiers = [list(tier) for tier in (prefs.value(name) or [])]
-    at = _rank_of(tiers, item)
-    # ⬜ → ✅ → 👎 → ⬜, with room for a deeper tier somebody wrote by hand.
-    ranks = max(COMMUNE_RANKS, len(tiers))
-    rank = 0 if at is None else (at + 1 if at + 1 < ranks else None)
-    text = _recommuned(tiers, item, rank)
-    # Demoting the only commune of the top tier leaves nothing above it to be worse than,
-    # so it is not a demotion at all -- and pressing again has to still be the way out.
-    if rank and _rank_of(setting(name).parse(name, text), item) != rank:
-        text = _recommuned(tiers, item, None)
-    toast = _write(connection, name, text)
-    _redraw(connection, callback, *setting_screen(connection, name,
-                                                  Preferences.load(connection), int(page)))
+    scores = dict(prefs.value("DEPAS_COMMUNES") or {})
+    toast = _write(connection, "DEPAS_COMMUNES",
+                   _rescored(scores, slug, None if points == "x" else int(points)))
+    # Redrawn on the commune's own screen rather than the list: you are still editing it.
+    _redraw(connection, callback,
+            *_commune_screen(Preferences.load(connection), slug, int(page)))
     return toast
 
 
@@ -832,16 +848,13 @@ def _typed(connection: sqlite3.Connection, fetcher: Fetcher, name: str, action: 
 
 
 def _added_communes(prefs: Preferences, typed: str) -> str:
-    """Typed communes join the tier you want, never the one you are only tolerating."""
-    tiers = [list(tier) for tier in (prefs.value("DEPAS_COMMUNES") or [])] or [[]]
-    listed = [slug for tier in tiers for slug in tier]
+    """Typed communes join the list at full marks, or at whatever `santiago=40` says."""
     # Parsed by the setting itself, so a slug that is not a commune is refused before
     # anything is written -- and refused with the message the CLI would have given.
-    added = [slug for tier in setting("DEPAS_COMMUNES").parse("DEPAS_COMMUNES", typed)
-             for slug in tier]
-    # Deduplicated: typing a commune already ticked would otherwise double it.
-    tiers[0] += [slug for slug in dict.fromkeys(added) if slug not in listed]
-    return _written(tiers)
+    added = setting("DEPAS_COMMUNES").parse("DEPAS_COMMUNES", typed)
+    # Merged rather than appended: typing a commune already listed re-scores it instead
+    # of doubling it, which is the only reading of typing one that is already there.
+    return _written((prefs.value("DEPAS_COMMUNES") or {}) | added)
 
 
 def _coordinates(fetcher: Fetcher, address: str) -> tuple[float, float, str]:

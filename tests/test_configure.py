@@ -225,26 +225,38 @@ def test_borrar_returns_a_setting_to_its_default(connection, posted):
 # -- the closed sets, offered rather than typed ----------------------------------
 
 
-def test_a_commune_cycles_through_the_three_things_it_can_be(connection, posted):
-    """⬜ ni se mira, ✅ la quieres, 👎 la tomarías -- and round again, in one button."""
+def test_a_commune_is_added_at_full_marks_and_then_scored(connection, posted):
+    """Two taps: the commune, then what it is worth -- and the list shows the number back."""
     set_preference(connection, "DEPAS_COMMUNES", "providencia")
+    _, keyboard = setting_screen(connection, "DEPAS_COMMUNES", Preferences.load(connection))
 
-    for label, tiers in (("⬜ Cerrillos", [["providencia", "cerrillos"]]),
-                         ("✅ Cerrillos", [["providencia"], ["cerrillos"]]),
-                         ("👎 Cerrillos", [["providencia"]])):
-        _, keyboard = setting_screen(connection, "DEPAS_COMMUNES", Preferences.load(connection))
-        _press(connection, _data_for(keyboard, label))
-        assert Preferences.load(connection).commune_tiers() == tiers
+    _press(connection, _data_for(keyboard, "⬜ Cerrillos"))  # opens the commune's own screen
+    _, commune = configure._commune_screen(Preferences.load(connection), "cerrillos", 0)
+    _press(connection, _data_for(commune, "40"))
+
+    assert Preferences.load(connection).commune_scores() == {"providencia": 100,
+                                                             "cerrillos": 40}
+    _, keyboard = setting_screen(connection, "DEPAS_COMMUNES", Preferences.load(connection))
+    assert "40 Cerrillos" in _labels(keyboard)
 
 
-def test_the_last_commune_of_the_top_tier_is_never_stuck_there(connection, posted):
-    """A tier with nothing above it is no tier, so 👎 has to be the way out instead."""
-    set_preference(connection, "DEPAS_COMMUNES", "providencia")
+def test_a_commune_is_taken_out_of_the_search_from_its_own_screen(connection, posted):
+    """A score is never a cutoff, so taking a commune out has to be its own button."""
+    set_preference(connection, "DEPAS_COMMUNES", "providencia,cerrillos=40")
 
-    data, _ = _paged(connection, "✅ Providencia")
-    _press(connection, data)
+    _, commune = configure._commune_screen(Preferences.load(connection), "cerrillos", 0)
+    _press(connection, _data_for(commune, f"{configure.OUT_MARK} Sacar de la búsqueda"))
 
-    assert Preferences.load(connection).communes() == []
+    assert Preferences.load(connection).communes() == ["providencia"]
+
+
+def test_the_commune_screen_ticks_what_the_commune_is_worth_now(connection, posted):
+    """The same ● every other picker uses: what you are about to change is what is set."""
+    set_preference(connection, "DEPAS_COMMUNES", "providencia=70")
+
+    _, commune = configure._commune_screen(Preferences.load(connection), "providencia", 0)
+
+    assert "● 70" in _labels(commune)
 
 
 def test_the_checklist_offers_the_province_and_leaves_the_rest_to_be_typed(connection):
@@ -256,29 +268,31 @@ def test_the_checklist_offers_the_province_and_leaves_the_rest_to_be_typed(conne
     assert configure.WRITE in _labels(keyboard)
 
 
-def test_a_commune_outside_the_province_is_typed_and_then_untickable(connection, posted):
+def test_a_commune_outside_the_province_is_typed_and_then_removable(connection, posted):
     """Whatever is chosen is offered too, wherever it is, or it could not be removed."""
     answer_prompt(connection, None,
                   _message("puente-alto", replying="⚙️ DEPAS_COMMUNES · agregar"),
                   Preferences.load(connection))
     assert "puente-alto" in Preferences.load(connection).communes()
 
-    data, _ = _paged(connection, "✅ Puente Alto")
+    data, _ = _paged(connection, "100 Puente Alto")
     _press(connection, data)
+    _, commune = configure._commune_screen(Preferences.load(connection), "puente-alto", 0)
+    _press(connection, _data_for(commune, f"{configure.OUT_MARK} Sacar de la búsqueda"))
 
     assert "puente-alto" not in Preferences.load(connection).communes()
 
 
-def test_a_typed_commune_joins_the_tier_you_want_not_the_one_you_tolerate(connection, posted):
-    """✏️ appends, and appending to the bottom tier would quietly dock the new one 60 points."""
-    set_preference(connection, "DEPAS_COMMUNES", "providencia > santiago")
+def test_a_typed_commune_can_carry_its_own_score(connection, posted):
+    """The escape hatch stays a whole editor: what the CLI can write, ✏️ can write."""
+    set_preference(connection, "DEPAS_COMMUNES", "providencia")
 
     answer_prompt(connection, None,
-                  _message("puente-alto", replying="⚙️ DEPAS_COMMUNES · agregar"),
+                  _message("puente-alto=30", replying="⚙️ DEPAS_COMMUNES · agregar"),
                   Preferences.load(connection))
 
-    assert Preferences.load(connection).commune_tiers() == [["providencia", "puente-alto"],
-                                                            ["santiago"]]
+    assert Preferences.load(connection).commune_scores() == {"providencia": 100,
+                                                             "puente-alto": 30}
 
 
 def test_typing_a_commune_adds_it_rather_than_replacing_the_checklist(connection, posted):

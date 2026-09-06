@@ -103,27 +103,33 @@ def test_a_commune_that_does_not_exist_is_refused(connection):
         set_preference(connection, "DEPAS_COMMUNES", "nunoa,narnia")
 
 
-def test_a_commune_ranked_twice_is_refused(connection):
-    """Two ranks for one commune is a question with two answers, not a preference."""
-    with pytest.raises(ValueError, match="nunoa"):
-        set_preference(connection, "DEPAS_COMMUNES", "nunoa,providencia > nunoa")
+def test_a_commune_score_outside_the_scale_is_refused(connection):
+    """The scale is the grade's own, so 140 is not a stronger opinion, it is a typo."""
+    with pytest.raises(ValueError, match="santiago=140"):
+        set_preference(connection, "DEPAS_COMMUNES", "nunoa,santiago=140")
 
 
-def test_a_flat_list_of_communes_is_still_one_tier(connection):
-    """Every configuration written before the ranking existed keeps meaning what it meant."""
+def test_a_flat_list_of_communes_is_every_commune_at_full_marks(connection):
+    """Every configuration written before the scores existed keeps meaning what it meant."""
     set_preference(connection, "DEPAS_COMMUNES", "nunoa,santiago")
 
     prefs = Preferences.load(connection)
 
-    assert prefs.commune_tiers() == [["nunoa", "santiago"]]
+    assert prefs.commune_scores() == {"nunoa": 100, "santiago": 100}
     assert prefs.communes() == ["nunoa", "santiago"]
 
 
-def test_every_tier_of_communes_is_crawled_and_filtered_on(connection):
-    """The ranking moves the grade; what is even looked at is the whole list."""
-    set_preference(connection, "DEPAS_COMMUNES", "nunoa > santiago")
+def test_a_scored_commune_is_still_crawled_and_filtered_on(connection):
+    """The score moves the grade; what is even looked at is the whole list.
 
-    assert Preferences.load(connection).communes() == ["nunoa", "santiago"]
+    It is also the order it was written in, which is the order the checklist offers.
+    """
+    set_preference(connection, "DEPAS_COMMUNES", "nunoa,santiago=40")
+
+    prefs = Preferences.load(connection)
+
+    assert prefs.communes() == ["nunoa", "santiago"]
+    assert prefs.commune_scores() == {"nunoa": 100, "santiago": 40}
 
 
 def test_a_half_filled_home_is_refused(connection):

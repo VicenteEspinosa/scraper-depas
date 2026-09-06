@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from datetime import date
 
 from depas.metro import STATION_LINES
+from depas.preferences import FULL_MARKS, Preferences
 
 # Exactly the components that carry a DEPAS_*_WEIGHT, so there is no second list to keep.
 from depas.preferences import WEIGHTED as COMPONENTS
-from depas.preferences import Preferences
 
 # Amenities a listing is credited for having; how many of them you expect is a setting.
 AMENITIES = (
@@ -19,7 +19,7 @@ LETTERS = ((80, "A"), (68, "B"), (56, "C"), (40, "D"))
 # The three anchors every component is scored between, in points.
 MET = 80.0         # exactly on your target
 BREACHED = 40.0    # on the hard bound, one span the wrong side of the target
-BEST = 100.0       # one span the right side of it
+BEST = 100.0       # one span the right side of it, and the scale a commune is scored on
 # Paying your zone's average UF/m2 is MET; this much off that average is a whole span.
 ZONE_SPAN = 0.20
 # Days past the date you want that cost a whole span; the early side has no fixed span.
@@ -133,18 +133,21 @@ def _availability(row: dict, prefs: Preferences) -> float | None:
 
 
 def _commune(row: dict, prefs: Preferences) -> float | None:
-    """Your top tier is BEST and your last one BREACHED: a commune you would take, reluctantly.
+    """The score you gave the commune, straight: the one component you set in points yourself.
 
-    A commune in no tier is one you left out of the crawl on purpose, so it sits a tier
-    below the worst you ranked -- the alert never reaches it, but a pasted link can.
+    Nowhere else does a person write points -- everywhere else you state a target and the
+    curve works them out. There is no target to state here: a commune is not more or less
+    of anything, it is somewhere you would rather live or would rather not.
+
+    A commune you never listed is one you left out of the crawl on purpose, so it scores
+    nothing. The alert never reaches one, but a link pasted into the chat does.
     """
-    tiers = prefs.commune_tiers()
+    scores = prefs.commune_scores()
     commune = row.get("commune")
-    # One tier ranks nothing: everything listed would score the same, which is no opinion.
-    if len(tiers) < 2 or commune is None:
+    # Every commune at full marks is not a preference, so the component stays off.
+    if commune is None or all(score >= FULL_MARKS for score in scores.values()):
         return None
-    rank = next((index for index, tier in enumerate(tiers) if commune in tier), len(tiers))
-    return _points(2 * rank / (len(tiers) - 1) - 1)
+    return float(scores.get(commune, 0))
 
 
 def _metro(row: dict, prefs: Preferences) -> float | None:
@@ -203,7 +206,7 @@ def _applicable(prefs: Preferences) -> set[str]:
         "amenities": bool(prefs.value("DEPAS_AMENITIES_TARGET")),
         "security": prefs.security_wanted() is not None,
         "floor": prefs.floor.target is not None,
-        "commune": len(prefs.commune_tiers()) > 1,
+        "commune": any(score < FULL_MARKS for score in prefs.commune_scores().values()),
         "metro": bool(prefs.metro_tiers()),
         "commute": prefs.commute.target is not None,
         "age": prefs.age.target is not None,

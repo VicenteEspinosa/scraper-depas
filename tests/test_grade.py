@@ -4,6 +4,7 @@ from datetime import date
 import pytest
 
 from depas.grade import BEST, BREACHED, COMPONENTS, MET, PERFECT_BONUS, Scale
+from depas.preferences import FULL_MARKS
 from tests.support import prefs
 
 
@@ -251,40 +252,40 @@ def test_lines_sharing_a_tier_score_the_same(monkeypatch):
     assert one == BEST > six == three == MET > two
 
 
-def test_a_second_commune_tier_costs_score_without_costing_the_alert(monkeypatch):
-    """The third thing a commune can be: crawled like the rest, graded below them."""
-    monkeypatch.setenv("DEPAS_COMMUNES", "nunoa,providencia > santiago")
+def test_a_commune_is_scored_on_the_grade_s_own_scale():
+    """Two names for one number: full marks in the setting has to be full marks here."""
+    assert FULL_MARKS == BEST
+
+
+def test_a_commune_scores_exactly_what_you_gave_it(monkeypatch):
+    """The one component set in points directly: what you typed is what the listing gets."""
+    monkeypatch.setenv("DEPAS_COMMUNES", "nunoa,providencia=90,santiago=40")
     scale = Scale(prefs())
 
-    wanted, tolerated = (scale.grade(_listing(commune=commune)).parts["commune"]
-                         for commune in ("nunoa", "santiago"))
+    scored = [scale.grade(_listing(commune=commune)).parts["commune"]
+              for commune in ("nunoa", "providencia", "santiago")]
 
-    assert wanted == BEST > tolerated == BREACHED
-
-
-def test_communes_sharing_a_tier_score_the_same(monkeypatch):
-    """A tier is a set of places you have no preference between, exactly as the metro is."""
-    monkeypatch.setenv("DEPAS_COMMUNES", "nunoa,providencia > macul > santiago")
-    scale = Scale(prefs())
-
-    nunoa, providencia, macul, santiago = (
-        scale.grade(_listing(commune=commune)).parts["commune"]
-        for commune in ("nunoa", "providencia", "macul", "santiago"))
-
-    assert nunoa == providencia == BEST > macul == MET > santiago == BREACHED
+    assert scored == [BEST, 90, BREACHED]
 
 
-def test_a_commune_you_never_ranked_scores_below_the_ones_you_did(monkeypatch):
+def test_a_docked_commune_still_alerts(monkeypatch):
+    """The score is a preference, never a cutoff: the crawl and the filters do not read it."""
+    monkeypatch.setenv("DEPAS_COMMUNES", "nunoa,santiago=10")
+
+    assert prefs().communes() == ["nunoa", "santiago"]
+
+
+def test_a_commune_you_never_listed_scores_nothing(monkeypatch):
     """The alert never reaches one, but a pasted link does, and the answer is not silence."""
-    monkeypatch.setenv("DEPAS_COMMUNES", "nunoa > santiago")
+    monkeypatch.setenv("DEPAS_COMMUNES", "nunoa,santiago=40")
 
     graded = Scale(prefs()).grade(_listing(commune="lo-espejo"))
 
     assert graded.parts["commune"] == 0
 
 
-def test_one_tier_of_communes_ranks_nothing(monkeypatch):
-    """Every commune scoring the same is not an opinion, so the component stays off."""
+def test_communes_all_at_full_marks_are_not_a_preference(monkeypatch):
+    """A list nobody has docked is the list it always was, so the component stays off."""
     monkeypatch.setenv("DEPAS_COMMUNES", "nunoa,santiago")
 
     graded = Scale(prefs()).grade(_listing(commune="nunoa"))
