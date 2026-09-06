@@ -45,14 +45,26 @@ def _day(name: str, raw: str) -> str:
         raise ValueError(f"{name} must be a date as YYYY-MM-DD, got {raw!r}") from None
 
 
-def _communes(name: str, raw: str) -> list[str]:
-    slugs = [slug.strip() for slug in raw.split(",") if slug.strip()]
+def _communes(name: str, raw: str) -> list[list[str]]:
+    """Communes in tiers, best first: `>` separates tiers and `,` lists ones worth the same.
+
+    Every tier is crawled -- the ranking only moves the grade. A flat list is one tier,
+    which is what every configuration written before the ranking existed still parses to.
+    """
+    tiers = [[slug.strip() for slug in tier.split(",") if slug.strip()]
+             for tier in raw.split(">")]
+    tiers = [tier for tier in tiers if tier]
+    listed = [slug for tier in tiers for slug in tier]
     known = {commune.value for commune in Commune}
-    unknown = [slug for slug in slugs if slug not in known]
+    unknown = [slug for slug in listed if slug not in known]
     if unknown:
         raise ValueError(f"{name} does not know the commune {', '.join(unknown)}; "
                          "slugs look like `nunoa` or `estacion-central`")
-    return slugs
+    # Two ranks for one commune is not a preference, it is a question with two answers.
+    twice = [slug for slug in dict.fromkeys(listed) if listed.count(slug) > 1]
+    if twice:
+        raise ValueError(f"{name} puts {', '.join(twice)} in more than one tier")
+    return tiers
 
 
 def _admins(name: str, raw: str) -> list[int]:
@@ -134,7 +146,7 @@ class Setting:
 
 # Every weighted component, named for what it measures: `walk` is minutes, `area` is m2.
 WEIGHTED = ("value", "cost", "walk", "area", "amenities", "security", "floor",
-            "metro", "commute", "age", "availability", "traits")
+            "commune", "metro", "commute", "age", "availability", "traits")
 
 
 def _trait_settings() -> list[Setting]:
@@ -165,8 +177,12 @@ SETTINGS: tuple[Setting, ...] = (
 
     # -- what is even looked at ---------------------------------------------------
     Setting("DEPAS_COMMUNES", _communes,
-            "Comunas que revisa la pasada horaria, como slugs separados por coma.",
-            example="nunoa,santiago"),
+            "Comunas que revisa la pasada horaria, por tramos y mejor primero: `>` separa "
+            "tramos y `,` lista las que valen lo mismo. Todo lo listado se crawlea y el "
+            "resto queda fuera; los tramos de abajo solo bajan la nota. Un solo tramo no "
+            "rankea nada y apaga el componente.",
+            example="nunoa,providencia > santiago"),
+    _weight("commune"),
     Setting("DEPAS_BEDROOMS_MIN", _whole,
             "Mínimo de dormitorios. Se aplica al buscar y otra vez al alertar.",
             example="2"),
@@ -414,8 +430,12 @@ class Preferences:
     def metro_tiers(self) -> list[list[str]]:
         return self.value("DEPAS_METRO_TIERS") or []
 
-    def communes(self) -> list[str]:
+    def commune_tiers(self) -> list[list[str]]:
         return self.value("DEPAS_COMMUNES") or []
+
+    def communes(self) -> list[str]:
+        """Every commune the crawl looks at, best tier first; the rest are never fetched."""
+        return [slug for tier in self.commune_tiers() for slug in tier]
 
     def security_wanted(self) -> str | None:
         return self.value("DEPAS_SECURITY_WANTED")

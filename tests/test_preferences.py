@@ -103,6 +103,29 @@ def test_a_commune_that_does_not_exist_is_refused(connection):
         set_preference(connection, "DEPAS_COMMUNES", "nunoa,narnia")
 
 
+def test_a_commune_ranked_twice_is_refused(connection):
+    """Two ranks for one commune is a question with two answers, not a preference."""
+    with pytest.raises(ValueError, match="nunoa"):
+        set_preference(connection, "DEPAS_COMMUNES", "nunoa,providencia > nunoa")
+
+
+def test_a_flat_list_of_communes_is_still_one_tier(connection):
+    """Every configuration written before the ranking existed keeps meaning what it meant."""
+    set_preference(connection, "DEPAS_COMMUNES", "nunoa,santiago")
+
+    prefs = Preferences.load(connection)
+
+    assert prefs.commune_tiers() == [["nunoa", "santiago"]]
+    assert prefs.communes() == ["nunoa", "santiago"]
+
+
+def test_every_tier_of_communes_is_crawled_and_filtered_on(connection):
+    """The ranking moves the grade; what is even looked at is the whole list."""
+    set_preference(connection, "DEPAS_COMMUNES", "nunoa > santiago")
+
+    assert Preferences.load(connection).communes() == ["nunoa", "santiago"]
+
+
 def test_a_half_filled_home_is_refused(connection):
     """The same rule /compare relied on, now applied when the value is written."""
     with pytest.raises(ValueError, match="common_expenses"):

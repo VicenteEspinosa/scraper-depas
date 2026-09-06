@@ -251,6 +251,47 @@ def test_lines_sharing_a_tier_score_the_same(monkeypatch):
     assert one == BEST > six == three == MET > two
 
 
+def test_a_second_commune_tier_costs_score_without_costing_the_alert(monkeypatch):
+    """The third thing a commune can be: crawled like the rest, graded below them."""
+    monkeypatch.setenv("DEPAS_COMMUNES", "nunoa,providencia > santiago")
+    scale = Scale(prefs())
+
+    wanted, tolerated = (scale.grade(_listing(commune=commune)).parts["commune"]
+                         for commune in ("nunoa", "santiago"))
+
+    assert wanted == BEST > tolerated == BREACHED
+
+
+def test_communes_sharing_a_tier_score_the_same(monkeypatch):
+    """A tier is a set of places you have no preference between, exactly as the metro is."""
+    monkeypatch.setenv("DEPAS_COMMUNES", "nunoa,providencia > macul > santiago")
+    scale = Scale(prefs())
+
+    nunoa, providencia, macul, santiago = (
+        scale.grade(_listing(commune=commune)).parts["commune"]
+        for commune in ("nunoa", "providencia", "macul", "santiago"))
+
+    assert nunoa == providencia == BEST > macul == MET > santiago == BREACHED
+
+
+def test_a_commune_you_never_ranked_scores_below_the_ones_you_did(monkeypatch):
+    """The alert never reaches one, but a pasted link does, and the answer is not silence."""
+    monkeypatch.setenv("DEPAS_COMMUNES", "nunoa > santiago")
+
+    graded = Scale(prefs()).grade(_listing(commune="lo-espejo"))
+
+    assert graded.parts["commune"] == 0
+
+
+def test_one_tier_of_communes_ranks_nothing(monkeypatch):
+    """Every commune scoring the same is not an opinion, so the component stays off."""
+    monkeypatch.setenv("DEPAS_COMMUNES", "nunoa,santiago")
+
+    graded = Scale(prefs()).grade(_listing(commune="nunoa"))
+
+    assert "commune" not in graded.parts and "commune" not in graded.missing
+
+
 def test_no_metro_preference_leaves_the_line_unscored(monkeypatch):
     """Without the setting, the metro line must not become a missing component."""
     monkeypatch.delenv("DEPAS_METRO_TIERS", raising=False)

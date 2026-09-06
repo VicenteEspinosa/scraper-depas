@@ -39,6 +39,7 @@ LABELS = {
     "TELEGRAM_CHAT_ID": "📢 Dónde publicar",
     "DEPAS_ADMINS": "👥 Quién configura",
     "DEPAS_COMMUNES": "🗺️ Comunas",
+    "DEPAS_COMMUNE_WEIGHT": "🗺️ Peso · comuna",
     "DEPAS_BEDROOMS_MIN": "🛏️🔻 Dormitorios mín.",
     "DEPAS_GRADE_MIN": "🏅🔻 Nota mínima",
     "DEPAS_COST_MAX": "💰🔺 Techo de costo",
@@ -122,6 +123,11 @@ WEIGHT_PRESETS = ("0", "0.5", "1", "1.5", "2", "3")
 MONTHS_OFFERED = 6
 # The checklist offers the Provincia de Santiago only; the rest of the RM is typed.
 COMMUNES_PER_PAGE = 16
+# What a press cycles through: the communes you want, then the ones you would take
+# anyway but would rather not. A deeper tier can be typed; the button still shows 👎.
+COMMUNE_RANKS = 2
+# ⬜ is out of the crawl entirely, which is what a commune in no tier means.
+COMMUNE_MARKS = ("✅", "👎")
 # Three tiers is what a preference between metro lines is ever worth spelling out.
 TIERS_OFFERED = 3
 # Offered by the picker even on a database that has not seen one yet.
@@ -192,7 +198,8 @@ def _shown(name: str, prefs: Preferences) -> str:
         return "—"
     shape = kind(name)
     if shape == COMMUNES:
-        return f"{len(value)} comuna" + ("s" if len(value) != 1 else "")
+        listed = [slug for tier in value for slug in tier]
+        return f"{len(listed)} comuna" + ("s" if len(listed) != 1 else "")
     if shape == PLACES:
         return f"{len(value)} lugar" + ("es" if len(value) != 1 else "")
     if shape == PEOPLE:
@@ -281,10 +288,21 @@ def _day_screen(name: str, prefs: Preferences, group: str) -> tuple[str, dict]:
     return _text(name, prefs), _keyboard(buttons[:3], buttons[3:], _footer(name, group))
 
 
+def _rank_of(tiers: list[list[str]], slug: str) -> int | None:
+    """Which tier a commune sits in, or None when it is out of the crawl altogether."""
+    return next((index for index, tier in enumerate(tiers) if slug in tier), None)
+
+
+def _mark(rank: int | None) -> str:
+    """✅ for the tier you want, 👎 for any below it, ⬜ for a commune nobody looks at."""
+    return "⬜" if rank is None else COMMUNE_MARKS[min(rank, len(COMMUNE_MARKS) - 1)]
+
+
 def _communes_screen(name: str, prefs: Preferences, group: str,
                      page: int = 0) -> tuple[str, dict]:
-    chosen = prefs.value(name) or []
-    # A commune typed in is offered too, and first: a checklist must be able to untick it.
+    tiers = prefs.value(name) or []
+    chosen = [slug for tier in tiers for slug in tier]
+    # A commune typed in is offered too, and first: the list must be able to cycle it out.
     province = [commune.value for commune in sorted(SANTIAGO_PROVINCE)]
     every = [slug for slug in chosen if slug not in province] + province
     pages = (len(every) + COMMUNES_PER_PAGE - 1) // COMMUNES_PER_PAGE
@@ -292,7 +310,7 @@ def _communes_screen(name: str, prefs: Preferences, group: str,
     shown = every[page * COMMUNES_PER_PAGE:(page + 1) * COMMUNES_PER_PAGE]
     rows = []
     for first in range(0, len(shown), 2):
-        rows.append([_button(("✅ " if slug in chosen else "⬜ ") + _pretty(slug),
+        rows.append([_button(_mark(_rank_of(tiers, slug)) + " " + _pretty(slug),
                              "t", _short(name), slug, page)
                      for slug in shown[first:first + 2]])
     rows.append([_button("◀️", "p", _short(name), page - 1) if page else None,
@@ -300,9 +318,12 @@ def _communes_screen(name: str, prefs: Preferences, group: str,
                  _button("▶️", "p", _short(name), page + 1) if page < pages - 1 else None])
     rows.append(_footer(name, group))
     text = _text(name, prefs)
-    if chosen:
-        text += "\n\n" + " · ".join(_pretty(slug) for slug in chosen)
-    text += "\n\nLa lista es la Provincia de Santiago; el resto de la RM se agrega con ✏️."
+    if tiers:
+        text += "\n\n" + "\n".join(f"{_mark(rank)} " + " · ".join(_pretty(slug) for slug in tier)
+                                   for rank, tier in enumerate(tiers))
+    text += ("\n\nCada toque baja la comuna un tramo: ✅ la quieres, 👎 la tomarías pero "
+             "pierde nota, ⬜ ni se mira. La lista es la Provincia de Santiago; el resto "
+             "de la RM se agrega con ✏️.")
     return text, _keyboard(*rows)
 
 
@@ -335,6 +356,26 @@ def _retiered(tiers: list[list[str]], line: str, target: int | None) -> str:
     if target is not None:
         moved[target].append(line)
     return " > ".join(",".join(sorted(tier)) for tier in moved if tier)
+
+
+def _written(tiers: list[list[str]]) -> str:
+    """Tiers of communes back as the setting's own text, for the parser to read again.
+
+    Unsorted, unlike the metro lines: the order communes were added in is the order the
+    checklist and the cards have always listed them, and nothing here should shuffle it.
+    An emptied tier is dropped, so demoting the last commune of a tier promotes the rest
+    -- with nothing ranked above them there is no ranking left for them to be below.
+    """
+    return " > ".join(",".join(tier) for tier in tiers if tier)
+
+
+def _recommuned(tiers: list[list[str]], slug: str, rank: int | None) -> str:
+    """The setting's text with one commune moved to one tier, or out of the crawl."""
+    moved = [[held for held in tier if held != slug] for tier in tiers]
+    if rank is not None:
+        moved += [[] for _ in range(rank + 1 - len(moved))]
+        moved[rank].append(slug)
+    return _written(moved)
 
 
 def _places_screen(name: str, prefs: Preferences, group: str) -> tuple[str, dict]:
@@ -625,7 +666,7 @@ def _act(connection: sqlite3.Connection, callback: dict, action: str, rest: str)
     if action == "x":
         return _clear(connection, callback, _long(rest))
     if action == "t":
-        return _toggle(connection, callback, rest)
+        return _cycle(connection, callback, rest)
     if action == "d":
         return _drop(connection, callback, rest)
     if action == "w":
@@ -655,14 +696,22 @@ def _clear(connection: sqlite3.Connection, callback: dict, name: str) -> str:
     return "🗑️ borrado; vuelve a su valor por defecto"
 
 
-def _toggle(connection: sqlite3.Connection, callback: dict, rest: str) -> str:
-    """Add or remove one item of a list setting, which is how a checklist writes."""
+def _cycle(connection: sqlite3.Connection, callback: dict, rest: str) -> str:
+    """Move one commune down a tier and out past the last one, which is how the list writes."""
     short, item, page = rest.split(":")
     name = _long(short)
     prefs = Preferences.load(connection)
-    chosen = list(prefs.value(name) or [])
-    chosen.remove(item) if item in chosen else chosen.append(item)
-    toast = _write(connection, name, ",".join(chosen))
+    tiers = [list(tier) for tier in (prefs.value(name) or [])]
+    at = _rank_of(tiers, item)
+    # ⬜ → ✅ → 👎 → ⬜, with room for a deeper tier somebody wrote by hand.
+    ranks = max(COMMUNE_RANKS, len(tiers))
+    rank = 0 if at is None else (at + 1 if at + 1 < ranks else None)
+    text = _recommuned(tiers, item, rank)
+    # Demoting the only commune of the top tier leaves nothing above it to be worse than,
+    # so it is not a demotion at all -- and pressing again has to still be the way out.
+    if rank and _rank_of(setting(name).parse(name, text), item) != rank:
+        text = _recommuned(tiers, item, None)
+    toast = _write(connection, name, text)
     _redraw(connection, callback, *setting_screen(connection, name,
                                                   Preferences.load(connection), int(page)))
     return toast
@@ -766,6 +815,8 @@ def _typed(connection: sqlite3.Connection, fetcher: Fetcher, name: str, action: 
         lat, lon, where = _coordinates(fetcher, typed)
         home = _home_draft(connection, prefs) | {"lat": lat, "lon": lon}
         return f"📍 {escape(where)}\n{_keep_home(connection, home)}"
+    if action == ADD and name == "DEPAS_COMMUNES":
+        return _write(connection, name, _added_communes(prefs, typed))
     if action == ADD:
         separator = SEPARATOR[name]
         existing = [entry.strip() for entry in (prefs.raw(name) or "").split(separator.strip())]
@@ -778,6 +829,19 @@ def _typed(connection: sqlite3.Connection, fetcher: Fetcher, name: str, action: 
         if matched:
             return "📍 " + escape(" · ".join(matched)) + "\n" + _write(connection, name, typed)
     return _write(connection, name, typed)
+
+
+def _added_communes(prefs: Preferences, typed: str) -> str:
+    """Typed communes join the tier you want, never the one you are only tolerating."""
+    tiers = [list(tier) for tier in (prefs.value("DEPAS_COMMUNES") or [])] or [[]]
+    listed = [slug for tier in tiers for slug in tier]
+    # Parsed by the setting itself, so a slug that is not a commune is refused before
+    # anything is written -- and refused with the message the CLI would have given.
+    added = [slug for tier in setting("DEPAS_COMMUNES").parse("DEPAS_COMMUNES", typed)
+             for slug in tier]
+    # Deduplicated: typing a commune already ticked would otherwise double it.
+    tiers[0] += [slug for slug in dict.fromkeys(added) if slug not in listed]
+    return _written(tiers)
 
 
 def _coordinates(fetcher: Fetcher, address: str) -> tuple[float, float, str]:

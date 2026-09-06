@@ -239,7 +239,7 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
 COMPONENT_LABELS = {
     "value": "precio zona", "cost": "costo", "walk": "caminata", "area": "metraje",
     "amenities": "comodidades", "security": "conserjería", "floor": "piso",
-    "metro": "metro", "commute": "viajes", "age": "antigüedad",
+    "commune": "comuna", "metro": "metro", "commute": "viajes", "age": "antigüedad",
     "availability": "entrega", "traits": "características",
 }
 # Why a component went unscored, so an absent row reads as silence rather than a zero.
@@ -256,7 +256,7 @@ def _bar(score: int) -> str:
 
 
 def format_breakdown(grade: Any, prefs: Preferences) -> str:
-    """Render the twelve components behind a grade, worst last, as the card's own audit."""
+    """Render the thirteen components behind a grade, worst last, as the card's own audit."""
     weights = prefs.weights()
     scored = sorted(grade.parts.items(), key=lambda part: part[1], reverse=True)
     width = max((len(COMPONENT_LABELS[name]) for name, _ in scored), default=0)

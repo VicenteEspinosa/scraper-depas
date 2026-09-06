@@ -225,16 +225,26 @@ def test_borrar_returns_a_setting_to_its_default(connection, posted):
 # -- the closed sets, offered rather than typed ----------------------------------
 
 
-def test_a_commune_is_ticked_and_unticked_from_the_checklist(connection, posted):
+def test_a_commune_cycles_through_the_three_things_it_can_be(connection, posted):
+    """⬜ ni se mira, ✅ la quieres, 👎 la tomarías -- and round again, in one button."""
     set_preference(connection, "DEPAS_COMMUNES", "providencia")
-    _, keyboard = setting_screen(connection, "DEPAS_COMMUNES", Preferences.load(connection))
 
-    _press(connection, _data_for(keyboard, "⬜ Cerrillos"))
-    assert "cerrillos" in Preferences.load(connection).communes()
+    for label, tiers in (("⬜ Cerrillos", [["providencia", "cerrillos"]]),
+                         ("✅ Cerrillos", [["providencia"], ["cerrillos"]]),
+                         ("👎 Cerrillos", [["providencia"]])):
+        _, keyboard = setting_screen(connection, "DEPAS_COMMUNES", Preferences.load(connection))
+        _press(connection, _data_for(keyboard, label))
+        assert Preferences.load(connection).commune_tiers() == tiers
 
-    _, keyboard = setting_screen(connection, "DEPAS_COMMUNES", Preferences.load(connection))
-    _press(connection, _data_for(keyboard, "✅ Cerrillos"))
-    assert "cerrillos" not in Preferences.load(connection).communes()
+
+def test_the_last_commune_of_the_top_tier_is_never_stuck_there(connection, posted):
+    """A tier with nothing above it is no tier, so 👎 has to be the way out instead."""
+    set_preference(connection, "DEPAS_COMMUNES", "providencia")
+
+    data, _ = _paged(connection, "✅ Providencia")
+    _press(connection, data)
+
+    assert Preferences.load(connection).communes() == []
 
 
 def test_the_checklist_offers_the_province_and_leaves_the_rest_to_be_typed(connection):
@@ -257,6 +267,18 @@ def test_a_commune_outside_the_province_is_typed_and_then_untickable(connection,
     _press(connection, data)
 
     assert "puente-alto" not in Preferences.load(connection).communes()
+
+
+def test_a_typed_commune_joins_the_tier_you_want_not_the_one_you_tolerate(connection, posted):
+    """✏️ appends, and appending to the bottom tier would quietly dock the new one 60 points."""
+    set_preference(connection, "DEPAS_COMMUNES", "providencia > santiago")
+
+    answer_prompt(connection, None,
+                  _message("puente-alto", replying="⚙️ DEPAS_COMMUNES · agregar"),
+                  Preferences.load(connection))
+
+    assert Preferences.load(connection).commune_tiers() == [["providencia", "puente-alto"],
+                                                            ["santiago"]]
 
 
 def test_typing_a_commune_adds_it_rather_than_replacing_the_checklist(connection, posted):

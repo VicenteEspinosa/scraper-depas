@@ -132,6 +132,21 @@ def _availability(row: dict, prefs: Preferences) -> float | None:
     return _points(abs((frees_up - wanted).days) / span - 1)
 
 
+def _commune(row: dict, prefs: Preferences) -> float | None:
+    """Your top tier is BEST and your last one BREACHED: a commune you would take, reluctantly.
+
+    A commune in no tier is one you left out of the crawl on purpose, so it sits a tier
+    below the worst you ranked -- the alert never reaches it, but a pasted link can.
+    """
+    tiers = prefs.commune_tiers()
+    commune = row.get("commune")
+    # One tier ranks nothing: everything listed would score the same, which is no opinion.
+    if len(tiers) < 2 or commune is None:
+        return None
+    rank = next((index for index, tier in enumerate(tiers) if commune in tier), len(tiers))
+    return _points(2 * rank / (len(tiers) - 1) - 1)
+
+
 def _metro(row: dict, prefs: Preferences) -> float | None:
     """Your top tier is BEST, the next one MET, and the rest drop evenly to an unranked line."""
     tiers = prefs.metro_tiers()
@@ -172,7 +187,8 @@ def _traits(row: dict, prefs: Preferences) -> float | None:
 
 # One shape for all of them, so the dispatch below needs no special case.
 SCORERS = {"value": _value, "cost": _cost, "walk": _walk, "area": _area,
-           "amenities": _amenities, "security": _security, "floor": _floor, "metro": _metro,
+           "amenities": _amenities, "security": _security, "floor": _floor,
+           "commune": _commune, "metro": _metro,
            "commute": _commute, "age": _age, "availability": _availability,
            "traits": _traits}
 
@@ -187,6 +203,7 @@ def _applicable(prefs: Preferences) -> set[str]:
         "amenities": bool(prefs.value("DEPAS_AMENITIES_TARGET")),
         "security": prefs.security_wanted() is not None,
         "floor": prefs.floor.target is not None,
+        "commune": len(prefs.commune_tiers()) > 1,
         "metro": bool(prefs.metro_tiers()),
         "commute": prefs.commute.target is not None,
         "age": prefs.age.target is not None,
