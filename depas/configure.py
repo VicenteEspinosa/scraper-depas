@@ -12,7 +12,7 @@ from depas.fetch import Fetcher
 from depas.metro import STATION_LINES
 from depas.preferences import BY_NAME, FULL_MARKS, Preferences, setting
 from depas.store import forget_preference, store_preference
-from depas.telegram import answer_callback, ask_value, edit_menu, escape, send_menu
+from depas.telegram import answer_callback, ask_value, bot_id, edit_menu, escape, send_menu
 from depas.traits import DISPOSITIONS, EXCLUDE, IGNORE, PENALISE
 
 COMMAND = "/config"
@@ -809,12 +809,27 @@ def _keep_home(connection: sqlite3.Connection, home: dict) -> str:
     return toast
 
 
+def _ours(replied: dict) -> bool:
+    """Whether the message being answered is one of our prompts, not somebody's imitation.
+
+    The prompt is read back by its first line, so anybody in the group could post a
+    message shaped like one and wait for an admin to reply to it. The author has to be
+    the bot — by id where the token says what that is, and at least a bot where it does
+    not.
+    """
+    author = replied.get("from") or {}
+    if not author.get("is_bot"):
+        return False
+    ours = bot_id()
+    return ours is None or author.get("id") == ours
+
+
 def answer_prompt(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
                   prefs: Preferences) -> bool:
     """Take a typed value if this message is a reply to one of our prompts."""
     replied = message.get("reply_to_message") or {}
     head = PROMPT_HEAD.match((replied.get("text") or "").split("\n")[0])
-    if not head:
+    if not head or not _ours(replied):
         return False
     name, action = head.group(1), head.group(2)
     if name not in BY_NAME:

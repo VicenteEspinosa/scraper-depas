@@ -23,11 +23,13 @@ from depas.store import connect
 
 ADMIN = 467291452
 STRANGER = 111111
+# The part of the token before the colon, which is how the bot knows its own messages.
+BOT = 424242
 
 
 @pytest.fixture
 def connection(tmp_path, monkeypatch):
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", f"{BOT}:test-token")
     connection = connect(tmp_path / "test.db")
     set_preference(connection, "DEPAS_ADMINS", str(ADMIN))
     return connection
@@ -55,10 +57,12 @@ def _press(connection, data, user_id=ADMIN):
           Preferences.load(connection))
 
 
-def _message(text, user_id=ADMIN, replying=None):
+def _message(text, user_id=ADMIN, replying=None, prompted_by=None):
+    """A typed answer; the prompt it replies to is the bot's unless somebody else is named."""
     message = {"chat": {"id": 5}, "message_id": 7, "text": text, "from": {"id": user_id}}
     if replying is not None:
-        message["reply_to_message"] = {"text": replying}
+        author = {"id": BOT, "is_bot": True} if prompted_by is None else prompted_by
+        message["reply_to_message"] = {"text": replying, "from": author}
     return message
 
 
@@ -596,3 +600,28 @@ def test_start_from_a_stranger_still_answers_with_their_id(connection, posted):
             Preferences.load(connection))
 
     assert str(STRANGER) in posted["sent"][0][0]
+
+
+def test_a_prompt_somebody_else_wrote_is_not_answered(connection, posted):
+    """The prompt is read back by its first line, which anybody in the group can imitate.
+
+    An admin replying to an imitation with a value must write nothing: only a prompt the
+    bot itself posted may be answered.
+    """
+    handled = answer_prompt(connection, None,
+                            _message("999", replying="⚙️ DEPAS_ADMINS · agregar",
+                                     prompted_by={"id": STRANGER, "is_bot": False}),
+                            Preferences.load(connection))
+
+    assert not handled
+    assert Preferences.load(connection).admins() == [ADMIN]
+
+
+def test_a_prompt_from_another_bot_is_not_answered_either(connection, posted):
+    handled = answer_prompt(connection, None,
+                            _message("42", replying="⚙️ DEPAS_AREA_MIN · reemplazar",
+                                     prompted_by={"id": 777, "is_bot": True}),
+                            Preferences.load(connection))
+
+    assert not handled
+    assert Preferences.load(connection).value("DEPAS_AREA_MIN") is None

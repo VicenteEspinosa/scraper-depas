@@ -103,6 +103,13 @@ def pressed(monkeypatch):
          "https://portalinmobiliario.com/MLC-2-b-_JM", 2),
         ("https://www.houm.com/propiedad/123", 0),
         ("sin links", 0),
+        # Subdomains of the portal are the portal; a host that merely ends in its name is
+        # somebody else's, and a card linking there would carry the bot's endorsement.
+        ("https://departamento.portalinmobiliario.com/MLC-5-x-_JM", 1),
+        ("https://articulo.mercadolibre.cl/MLC-5-x-_JM", 1),
+        ("https://miportalinmobiliario.com/MLC-5-x-_JM", 0),
+        ("https://otro-portalinmobiliario.com/MLC-5-x-_JM", 0),
+        ("https://evilmercadolibre.cl/MLC-5-x-_JM", 0),
     ],
 )
 def test_link_detection(text, expected):
@@ -632,3 +639,43 @@ def test_an_update_that_cannot_be_answered_is_not_redelivered(poll, monkeypatch)
     poll([{"update_id": 41, "message": {"chat": {"id": 1}, "text": "hola"}}], StopLoop())
 
     assert advanced == [42]
+
+
+def test_a_stored_preference_that_stops_parsing_does_not_end_the_bot(poll, connection,
+                                                                     monkeypatch):
+    """A row the parsers no longer accept keeps the last good reading serving instead."""
+    good = prefs()
+    readings = iter([good, ValueError("DEPAS_COMMUNES does not know the commune narnia")])
+    handled = []
+
+    def load(_connection):
+        reading = next(readings)
+        if isinstance(reading, Exception):
+            raise reading
+        return reading
+
+    monkeypatch.setattr("depas.bot.Preferences.load", load)
+    monkeypatch.setattr("depas.bot._handle",
+                        lambda connection, fetcher, message, prefs: handled.append(prefs))
+
+    poll([{"update_id": 1, "message": {"chat": {"id": 1}, "text": "hola"}}],
+         [{"update_id": 2, "message": {"chat": {"id": 1}, "text": "hola"}}], StopLoop())
+
+    assert handled == [good, good]
+
+
+def test_a_telegram_error_page_is_a_blip_not_a_traceback(monkeypatch):
+    """An outage answers HTML; that has to surface as the RuntimeError the loop survives."""
+    from depas.telegram import call
+
+    class Outage:
+        status_code = 502
+
+        def json(self):
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr("depas.telegram.requests.post", lambda *args, **kwargs: Outage())
+
+    with pytest.raises(RuntimeError, match="HTTP 502 with no JSON"):
+        call("getUpdates")
