@@ -325,6 +325,16 @@ SETTINGS: tuple[Setting, ...] = (
             "Máximo de tarjetas publicadas por pasada. Lo que pasa el corte y no "
             "alcanza a salir no se pierde: sale en la siguiente.",
             example="10", default="10"),
+    Setting("DEPAS_REFRESH_LIMIT", _budget,
+            "Cuántas fichas ya leídas se releen por pasada, aparte de las nuevas. Una "
+            "ficha se relee cuando el precio se movió o cuando le toca; sube esto si la "
+            "base quedó desactualizada. En 0 nunca se relee nada.",
+            example="20", default="20"),
+    Setting("DEPAS_DELIST_AFTER", _budget,
+            "Cuántos barridos creíbles del portal tienen que no encontrar un aviso para "
+            "darlo de baja. Un barrido cuenta solo si terminó y vio avisos, así que un "
+            "portal caído no da de baja a nadie. En 0 nunca se dan de baja.",
+            example="3", default="3"),
 )
 
 BY_NAME: Mapping[str, Setting] = {setting.name: setting for setting in SETTINGS}

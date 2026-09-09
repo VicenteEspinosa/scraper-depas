@@ -2,7 +2,9 @@ import argparse
 import sqlite3
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from types import ModuleType
 
 from curl_cffi.requests.exceptions import HTTPError
 
@@ -32,18 +34,23 @@ from depas.store import (
     KEPT,
     clear_notified,
     connect,
+    fill_gaps,
     forget_preference,
+    mark_delisted,
     mark_notified,
     pending_detail,
     pool_query,
+    quiet_portals,
     refresh_commutes,
     refresh_zone_benchmarks,
     remember_card,
+    remember_sweep,
     remember_watch,
     save,
     save_detail,
     store_preference,
     stored_watch,
+    sweep_delisted,
     sync_lease_income,
 )
 from depas.telegram import (
@@ -106,6 +113,39 @@ def _matching(
         yield listing
 
 
+def _sweep(connection: sqlite3.Connection, fetcher: Fetcher, portal: ModuleType,
+           query: Query) -> dict[str, int] | None:
+    """Scrape one portal comuna by comuna, recording what each sweep actually saw.
+
+    Comuna by comuna rather than all at once because that is the unit the evidence has
+    to be recorded at: one comuna's markup breaking must not make the portal's other
+    comunas look swept. Returns None for a portal that does not do this operation.
+    """
+    totals = {"new": 0, "price_changed": 0, "unchanged": 0}
+    for commune in query.communes or [None]:
+        one = replace(query, communes=[commune] if commune else [])
+        started_at = datetime.now(UTC).isoformat()
+        try:
+            found = list(_matching(portal.search(fetcher, one), fetcher, one))
+        except NotImplementedError:
+            return None
+        except Exception as error:
+            # Recorded and re-raised: the pass still fails, but a comuna that never got
+            # looked at must not be mistaken later for one that came back empty.
+            remember_sweep(connection, portal.NAME, _slug(commune), started_at, 0,
+                           f"{type(error).__name__}: {error}")
+            raise
+        counts = save(connection, found)
+        remember_sweep(connection, portal.NAME, _slug(commune), started_at, len(found), None)
+        for name in totals:
+            totals[name] += counts[name]
+    return totals
+
+
+def _slug(commune: Commune | None) -> str | None:
+    return commune.value if commune is not None else None
+
+
 def _budget(override: int | None, prefs: Preferences, name: str) -> int:
     """How much work this pass may do: the flag if one was given, else the setting."""
     return override if override is not None else prefs.value(name)
@@ -126,7 +166,7 @@ def _infer_stored_descriptions(connection: sqlite3.Connection) -> int:
                 for column, value in infer_from_description(row["description"]).items()
                 if row[column] is None}
         if gaps:
-            save_detail(connection, row["portal"], row["external_id"], gaps)
+            fill_gaps(connection, row["portal"], row["external_id"], gaps)
             filled += 1
     # Stamped after the reading, so a pass that dies half way scans those rows again
     # rather than marking them read on the strength of work it never did.
@@ -146,7 +186,10 @@ def _enrich_one(connection: sqlite3.Connection, fetcher: Fetcher, row: sqlite3.R
     except HTTPError as error:
         if error.response.status_code != 404:  # anything else is the portal, not this listing
             raise
-        # Taken down between the search and now; it stays unenriched, out of the pool.
+        # The strongest delisting signal there is: the portal itself says the page is
+        # gone. Before `delisted_at` existed, leaving the row unenriched was the only
+        # way to keep it out of the pool — which did nothing for a row already in it.
+        mark_delisted(connection, row["portal"], row["external_id"])
         print(f"gone: {row['url']}")
         return False
     description = detail.get("description")
@@ -165,7 +208,8 @@ def enrich(args: argparse.Namespace) -> None:
     connection = connect()
     prefs = Preferences.load(connection)
     limit = _budget(args.limit, prefs, "DEPAS_ENRICH_LIMIT")
-    pending = pending_detail(connection, limit)
+    # Same two budgets the pass uses, so running this by hand does the same work.
+    pending = pending_detail(connection, limit, prefs.value("DEPAS_REFRESH_LIMIT"))
 
     fetcher = Fetcher()
     enriched = 0
@@ -316,16 +360,23 @@ def watch(args: argparse.Namespace) -> None:
         # The ranked view prices per m2 straight from this, so cache it before reading it.
         stored_uf(connection, fetcher)
         for name, portal in PORTALS.items():
-            try:
-                counts = save(connection, _matching(portal.search(fetcher, query), fetcher, query))
-            except NotImplementedError:
+            counts = _sweep(connection, fetcher, portal, query)
+            if counts is None:
                 continue
             print(f"scrape {name}: {counts['new']} new, {counts['price_changed']} price changed")
 
         pending = pending_detail(
-            connection, _budget(args.enrich_limit, prefs, "DEPAS_ENRICH_LIMIT"))
+            connection,
+            _budget(args.enrich_limit, prefs, "DEPAS_ENRICH_LIMIT"),
+            _budget(args.refresh_limit, prefs, "DEPAS_REFRESH_LIMIT"))
         enriched = sum(_enrich_one(connection, fetcher, row) for row in pending)
         print(f"enrich: {enriched} of {len(pending)} listings")
+        # After the enrichment, so a 404 seen just now counts towards this pass.
+        gone = sweep_delisted(connection, prefs.value("DEPAS_DELIST_AFTER"))
+        print(f"delisted: {gone} listings no sweep has turned up")
+        for quiet in quiet_portals(connection):
+            print(f"WARNING {quiet['portal']}: last sweep saw no listings at all, "
+                  f"where an earlier one saw {quiet['cards_at_best']} — parser or portal?")
         print(f"from descriptions: {_infer_stored_descriptions(connection)} listings filled")
         routed = refresh_commutes(
             connection, fetcher, prefs,
@@ -618,6 +669,8 @@ def main() -> None:
     # moved without a redeploy. A flag is a one-off override for this run.
     watcher.add_argument("--enrich-limit", type=int,
                          help="detail pages this pass; default DEPAS_ENRICH_LIMIT")
+    watcher.add_argument("--refresh-limit", type=int,
+                         help="detail pages re-read this pass; default DEPAS_REFRESH_LIMIT")
     watcher.add_argument("--commute-limit", type=int,
                          help="listings routed this pass; default DEPAS_COMMUTE_LIMIT")
     watcher.add_argument("--max-alerts", type=int,
