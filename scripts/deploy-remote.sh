@@ -9,7 +9,7 @@
 # a token containing $ would be corrupted before .env was ever written.
 #
 # Inputs (env vars set on the SSH invocation line):
-#   DEPLOY_PATH, GITHUB_SHA, ENV_B64, MIN_FREE_MB (optional)
+#   DEPLOY_PATH, GITHUB_SHA, ENV_B64, MIN_FREE_MB (optional), BACKUPS_KEPT (optional)
 
 set -euo pipefail
 
@@ -92,6 +92,15 @@ docker compose build
 # deploy ends here, green, having restarted nothing.
 log "validate .env against the settings registry"
 docker compose run --rm -T depas-bot depas config check < /dev/null
+
+# The new code migrates the database the first time it opens it, and a migration that
+# moves data is not something to find out about afterwards. `depas backup` copies the
+# file through SQLite's own backup API without opening it the normal way, so the copy is
+# of the schema the *old* code left, taken while the old containers are still writing.
+# It lands in data/backups/ on the host, beside the database. A backup that fails stops
+# the deploy here, with the old containers still serving.
+log "back up the database before the new code migrates it"
+docker compose run --rm -T depas-bot depas backup --keep "${BACKUPS_KEPT:-5}" < /dev/null
 
 log "docker compose up -d"
 docker compose up -d

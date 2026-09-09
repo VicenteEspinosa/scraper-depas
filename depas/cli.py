@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from types import ModuleType
 
 from curl_cffi.requests.exceptions import HTTPError
@@ -16,7 +17,7 @@ from depas.bot import run as run_bot
 from depas.communes import SANTIAGO_PROVINCE, Commune
 from depas.commute import as_text as commute_text
 from depas.commute import resolve_locations
-from depas.config import DEFAULT_COMMON_EXPENSES
+from depas.config import DEFAULT_COMMON_EXPENSES, db_path
 from depas.detail import INFERRED_VERSION, infer_from_description
 from depas.fetch import Fetcher
 from depas.grade import Scale
@@ -846,6 +847,43 @@ def config_import_env(args: argparse.Namespace) -> None:
     print(f"imported {len(seeded)} settings from the environment: {', '.join(seeded)}")
 
 
+# How many backups are kept beside the database; the deploy takes one before every restart.
+BACKUPS_KEPT = 5
+
+
+def _backup_stamp() -> str:
+    """When a copy was taken, as its filename; sorts in time order, which the rotation reads."""
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
+def backup(args: argparse.Namespace) -> None:
+    """Copy the database as it stands, before the code about to run migrates it.
+
+    Deliberately not `connect()`: that applies every pending migration on the way in, and
+    the copy is worth having precisely because it predates them. SQLite's own backup API
+    takes a consistent snapshot while the bot and the cron sidecar keep writing.
+    """
+    source = db_path()
+    if not source.exists():
+        print(f"backup: nothing to copy, {source} does not exist yet")
+        return
+    folder = Path(args.dir) if args.dir else source.parent / "backups"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"{source.stem}-{_backup_stamp()}{source.suffix}"
+    origin, copy = sqlite3.connect(source), sqlite3.connect(target)
+    try:
+        origin.backup(copy)
+    finally:
+        copy.close()
+        origin.close()
+    # Rotated only once the new copy is safely on disk, oldest first.
+    kept = sorted(folder.glob(f"{source.stem}-*{source.suffix}"))
+    for old in kept[:-args.keep] if args.keep > 0 else []:
+        old.unlink()
+    print(f"backup: {target} ({target.stat().st_size // 1024} KB), "
+          f"{min(len(kept), args.keep) if args.keep > 0 else len(kept)} kept in {folder}")
+
+
 # What every stage reads off its args. `watch` calls the stages directly, so its own
 # namespace has to carry the same names — None everywhere, meaning "use the setting".
 _STAGE_DEFAULTS = {"limit": None, "refresh_limit": None}
@@ -986,6 +1024,14 @@ def main() -> None:
     pinner = subparsers.add_parser(
         "shortlist", help="re-post or re-render the pinned list of what you starred")
     pinner.set_defaults(func=pinned_list)
+
+    copier = subparsers.add_parser(
+        "backup", help="copy the database as it stands, without migrating it")
+    copier.add_argument("--dir", help="where the copies go; default `backups/` beside the db")
+    copier.add_argument("--keep", type=int, default=BACKUPS_KEPT,
+                        help=f"how many copies to keep, oldest dropped; default {BACKUPS_KEPT}, "
+                             "0 keeps every one")
+    copier.set_defaults(func=backup)
 
     viewer = subparsers.add_parser("show", help="best price per m2, or your own SQL")
     viewer.add_argument("sql", nargs="?")

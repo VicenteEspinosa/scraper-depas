@@ -213,3 +213,32 @@ def test_the_reclaim_never_touches_a_tagged_image(deploy_path):
     assert finished.returncode == 0, finished.stderr
     assert "docker image prune -f\n" in calls        # dangling only, never -a
     assert "builder prune -f --filter until=24h" in calls
+
+
+# -- the database is copied before the new code can migrate it ----------------------
+
+
+def test_the_database_is_backed_up_before_the_restart(deploy_path):
+    """A migration that moves data is not something to find out about afterwards."""
+    _stub(deploy_path, "docker", LOGGING_DOCKER)
+
+    finished = _deploy(deploy_path)
+    calls = (deploy_path / "docker.log").read_text()
+
+    assert finished.returncode == 0, finished.stderr
+    assert "depas backup" in calls
+    assert calls.index("depas config check") < calls.index("depas backup") < calls.index(
+        "compose up -d")
+
+
+def test_a_backup_that_fails_stops_the_deploy_with_the_old_containers_serving(deploy_path):
+    _stub(deploy_path, "docker",
+          '#!/bin/sh\necho "docker $*" >> docker.log\n'
+          'if [ "$2" = run ]; then cat > /dev/null; '
+          'case "$*" in *backup*) exit 1;; esac; fi\nexit 0\n')
+
+    finished = _deploy(deploy_path)
+
+    assert finished.returncode != 0
+    assert "compose up -d" not in (deploy_path / "docker.log").read_text()
+    assert not (deploy_path / ".last-deployed-sha").exists()
