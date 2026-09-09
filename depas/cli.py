@@ -695,9 +695,12 @@ def pinned_list(args: argparse.Namespace) -> None:
 
 def show(args: argparse.Namespace) -> None:
     connection = connect()
-    prefs = Preferences.load(connection)
-    query, parameters = (args.sql, ()) if args.sql else _build_query(args, prefs)
-    rows = connection.execute(query, parameters).fetchall()
+    try:
+        prefs = Preferences.load(connection)
+        query, parameters = (args.sql, ()) if args.sql else _build_query(args, prefs)
+        rows = connection.execute(query, parameters).fetchall()
+    finally:
+        connection.close()
     if args.sql:
         _print_table(rows)
         return
@@ -707,7 +710,6 @@ def show(args: argparse.Namespace) -> None:
     _print_table([{k: v for k, v in row.items() if k != "score"} for row in graded[:args.limit]])
     if any(row["grade"].endswith("*") for row in graded[:args.limit]):
         print("\n* graded on partial data — see the 'on' column for how many components scored")
-    connection.close()
 
 
 SUMMARY_COLUMNS = ("commune", "bedrooms", "area", "floor", "age", "gastos", "est", "bod",
@@ -897,8 +899,11 @@ def main() -> None:
 
     checker = subparsers.add_parser(
         "healthcheck", help="warn the admins if the hourly pass has stopped completing")
-    checker.add_argument("--stale-hours", type=int, default=4,
-                         help="hours without a completed pass before the admins are warned")
+    # No number by default: each stage has its own patience in `STALE_HOURS`, and a
+    # default here used to override all five of them with four.
+    checker.add_argument("--stale-hours", type=int, default=None,
+                         help="hours without a completed stage before the admins are "
+                              "warned, for every stage alike; default is per stage")
     checker.set_defaults(func=healthcheck)
 
     bot = subparsers.add_parser("bot", help="reply to portal links posted in the chat")

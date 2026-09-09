@@ -80,3 +80,45 @@ def test_a_pass_that_dies_records_what_killed_it(connection):
         watch(Namespace(limit=1, refresh_limit=1))
 
     assert "ValueError: set DEPAS_COMMUNES" in stored_watch(connection)[1]
+
+
+def _stage_completed_hours_ago(connection, stage: str, hours: float) -> None:
+    remember_watch(connection, None, stage)
+    connection.execute("UPDATE settings SET value = ? WHERE key = ?",
+                       ((datetime.now(UTC) - timedelta(hours=hours)).isoformat(),
+                        f"watch_completed_at:{stage}"))
+    connection.commit()
+
+
+def test_without_a_flag_each_stage_keeps_its_own_patience(connection, warned):
+    """Routing is allowed a day; the flag's old default of four hours overrode that."""
+    remember_watch(connection, None)
+    _stage_completed_hours_ago(connection, "route", 10)
+
+    healthcheck(Namespace(stale_hours=None))
+
+    assert warned == []
+
+
+def test_the_flag_still_applies_one_patience_to_every_stage(connection, warned):
+    remember_watch(connection, None)
+    _stage_completed_hours_ago(connection, "route", 10)
+
+    healthcheck(Namespace(stale_hours=4))
+
+    assert len(warned) == 2 and "el ruteo de viajes" in warned[0][1]
+
+
+def test_the_command_line_defaults_to_the_per_stage_patience(monkeypatch):
+    """Read off the parser: the bug was a default nobody passed, so no run could catch it."""
+    import sys
+
+    from depas import cli
+
+    seen = []
+    monkeypatch.setattr(cli, "healthcheck", lambda args: seen.append(args.stale_hours))
+    monkeypatch.setattr(sys, "argv", ["depas", "healthcheck"])
+
+    cli.main()
+
+    assert seen == [None]
