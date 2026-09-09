@@ -34,6 +34,7 @@ from depas.store import (
     connect,
     forget_preference,
     mark_notified,
+    pending_detail,
     pool_query,
     refresh_commutes,
     refresh_zone_benchmarks,
@@ -145,11 +146,7 @@ def _enrich_one(connection: sqlite3.Connection, fetcher: Fetcher, row: sqlite3.R
 def enrich(args: argparse.Namespace) -> None:
     connection = connect()
     prefs = Preferences.load(connection)
-    pending = connection.execute(
-        "SELECT portal, external_id, url FROM listings "
-        "WHERE detail_fetched_at IS NULL LIMIT ?",
-        (args.limit,),
-    ).fetchall()
+    pending = pending_detail(connection, args.limit)
 
     fetcher = Fetcher()
     enriched = 0
@@ -304,10 +301,7 @@ def watch(args: argparse.Namespace) -> None:
                 continue
             print(f"scrape {name}: {counts['new']} new, {counts['price_changed']} price changed")
 
-        pending = connection.execute(
-            "SELECT portal, external_id, url FROM listings WHERE detail_fetched_at IS NULL LIMIT ?",
-            (args.enrich_limit,),
-        ).fetchall()
+        pending = pending_detail(connection, args.enrich_limit)
         enriched = sum(_enrich_one(connection, fetcher, row) for row in pending)
         print(f"enrich: {enriched} of {len(pending)} listings")
         print(f"from descriptions: {_infer_stored_descriptions(connection)} listings filled")

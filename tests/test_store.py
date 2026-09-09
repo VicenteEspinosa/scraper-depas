@@ -4,7 +4,17 @@ import pytest
 
 from depas.config import DEFAULT_COMMON_EXPENSES
 from depas.models import Listing
-from depas.store import MIGRATIONS_DIR, connect, migrate, pool_query, save, save_detail
+from depas.store import (
+    DISLIKE,
+    MIGRATIONS_DIR,
+    connect,
+    migrate,
+    pending_detail,
+    pool_query,
+    save,
+    save_detail,
+    set_interest,
+)
 from tests.support import prefs
 
 
@@ -208,3 +218,40 @@ def test_a_furnished_listing_is_left_out_of_the_pool(tmp_path):
     pooled = [row["external_id"] for row in connection.execute(pool_query(prefs()))]
 
     assert pooled == ["42"]  # 43 says so in its spec table, 44 only in its title
+
+
+# -- the enrichment queue ---------------------------------------------------------
+
+
+def _unit(external_id: str, **overrides) -> Listing:
+    return Listing(portal="houm", external_id=external_id, url=f"https://x/{external_id}",
+                   price=500_000, currency="CLP", price_clp=500_000.0, **overrides)
+
+
+def test_the_queue_skips_what_the_pool_could_never_accept(tmp_path):
+    """A project and a listing already turned down never reach the pool, so never a fetch."""
+    connection = connect(tmp_path / "test.db")
+    save(connection, [_unit("unit"), _unit("project", is_project=True), _unit("rejected")])
+    set_interest(connection, "houm", "rejected", DISLIKE)
+
+    queued = [row["external_id"] for row in pending_detail(connection, 10)]
+
+    assert queued == ["unit"]
+
+
+def test_the_queue_hands_over_the_newest_first(tmp_path):
+    """A budget that runs out should strand the stale ones, not the finds."""
+    connection = connect(tmp_path / "test.db")
+    save(connection, [_unit("older")])
+    connection.execute("UPDATE listings SET first_seen = '2020-01-01' WHERE external_id = 'older'")
+    save(connection, [_unit("newer")])
+
+    assert [row["external_id"] for row in pending_detail(connection, 1)] == ["newer"]
+
+
+def test_an_enriched_listing_leaves_the_queue(tmp_path):
+    connection = connect(tmp_path / "test.db")
+    save(connection, [_unit("done")])
+    save_detail(connection, "houm", "done", {"floor": 3})
+
+    assert pending_detail(connection, 10) == []

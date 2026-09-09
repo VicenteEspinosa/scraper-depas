@@ -111,6 +111,23 @@ def pool_query(prefs: Preferences) -> str:
     return f"SELECT * FROM listings_ranked WHERE {' AND '.join([KEPT, *excluded])}"
 
 
+# A detail page is the crawl's most expensive request, so it is only ever spent on a
+# listing the pool could accept: `KEPT` wants an enriched, actual unit nobody turned
+# down, and neither a project nor a /dislike can become one however long it waits.
+PENDING_DETAIL = "detail_fetched_at IS NULL AND is_project = 0 AND COALESCE(interest, 0) >= 0"
+
+
+def pending_detail(connection: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
+    """The listings still owed a detail page, newest first."""
+    # Newest first because a budget that runs out should leave the stale ones waiting,
+    # not the finds: the whole point of the pass is to announce what just appeared.
+    return connection.execute(
+        f"SELECT portal, external_id, url FROM listings WHERE {PENDING_DETAIL} "
+        "ORDER BY first_seen DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+
 def refresh_zone_benchmarks(connection: sqlite3.Connection) -> int:
     """Recompute each commune's median published zone UF/m2 for the other portals to borrow."""
     by_commune: dict[str, list[float]] = defaultdict(list)
