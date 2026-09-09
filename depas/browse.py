@@ -3,7 +3,7 @@ import sqlite3
 
 from depas.grade import Scale
 from depas.preferences import Preferences
-from depas.store import LIKE, pool_query, set_interest
+from depas.store import LIKE, Subscriber, pool_query, set_interest
 from depas.telegram import (
     DISLIKE_BUTTON,
     LIKE_BUTTON,
@@ -39,14 +39,14 @@ STALE = "ese aviso ya no está en el pool"
 STALE_KEYBOARD = "ese menú quedó viejo; manda /top otra vez"
 
 
-def _listings(connection: sqlite3.Connection, prefs: Preferences,
-              view: int) -> list[tuple[dict, object]]:
+def _listings(connection: sqlite3.Connection, prefs: Preferences, view: int,
+              subscriber: Subscriber) -> list[tuple[dict, object]]:
     """The pool as this view sees it, graded and best first."""
     # The same pool the alerts draw from, so browsing and alerting never disagree.
-    query = pool_query(prefs)
+    query = pool_query(prefs, subscriber)
     if view == STARRED:
         # Starred means starred: a listing you marked is shown even if the pool moved on.
-        query = "SELECT * FROM listings_ranked WHERE interest = ?"
+        query = f"SELECT * FROM ({subscriber.view()}) WHERE interest = ?"
     rows = [dict(row) for row in connection.execute(
         query, (LIKE,) if view == STARRED else ())]
     scale = Scale(prefs)
@@ -76,10 +76,21 @@ def _keyboard(index: int, view: int, found: list, listing_id: int) -> dict[str, 
                                 [_button(f"🔀 Ver: {VIEWS[other]}", FILTER, 0, other)]]}
 
 
+def browsing(message_or_callback: dict) -> Subscriber:
+    """The pool as the person browsing sees it.
+
+    /top is private and admin-only, so there is always a person on the other side —
+    their own verdicts shape what they are shown, whether or not this chat is one of
+    the places cards get posted.
+    """
+    chat = (message_or_callback.get("message") or message_or_callback)["chat"]["id"]
+    return Subscriber(str(chat), _author(message_or_callback))
+
+
 def screen(connection: sqlite3.Connection, prefs: Preferences, index: int,
-           view: int) -> tuple[str, dict[str, object] | None]:
+           view: int, subscriber: Subscriber) -> tuple[str, dict[str, object] | None]:
     """One listing of the pool, rendered as the card it would have been posted as."""
-    found = _listings(connection, prefs, view)
+    found = _listings(connection, prefs, view, subscriber)
     if not found:
         return EMPTY[view], None
     index = max(0, min(index, len(found) - 1))
@@ -106,7 +117,7 @@ def open_browser(connection: sqlite3.Connection, message: dict, prefs: Preferenc
         # Telling somebody their own id is the whole bootstrap: it is what they paste in.
         send_menu(chat, NO_ADMINS.format(user_id=user_id), None, None, message["message_id"])
         return
-    text, keyboard = screen(connection, prefs, 0, POOL)
+    text, keyboard = screen(connection, prefs, 0, POOL, browsing(message))
     send_menu(chat, text, keyboard, None, message["message_id"])
 
 
@@ -151,28 +162,29 @@ def press(connection: sqlite3.Connection, callback: dict,
     rated, toast = None, ""
     if action == RATE:
         author = callback.get("from") or {}
-        rated, toast = listing_id, _rate(connection, listing_id, button,
-                                         author.get("username") or author.get("first_name"))
+        rated, toast = listing_id, _rate(
+            connection, listing_id, button,
+            author.get("username") or author.get("first_name"), author.get("id"))
     # Acknowledged before the redraw: a press times out in about ten seconds.
     answer_callback(callback["id"], toast)
 
     message = callback.get("message") or {}
     if message:
-        text, keyboard = screen(connection, prefs, index, view)
+        text, keyboard = screen(connection, prefs, index, view, browsing(callback))
         edit_menu(str(message["chat"]["id"]), message["message_id"], text,
                   keyboard or NO_KEYBOARD)
     return rated
 
 
 def _rate(connection: sqlite3.Connection, listing_id: int, button: str,
-          rated_by: str | None) -> str:
+          rated_by: str | None, user_id: int | None) -> str:
     """Record a verdict given while browsing, on the listing the screen was showing."""
     listing = connection.execute(
         "SELECT portal, external_id FROM listings WHERE rowid = ?", (listing_id,)
     ).fetchone()
     if listing is None:
         return STALE
-    # The same column a card's buttons write, so a verdict means the same either way.
+    # The same table a card's buttons write, so a verdict means the same either way.
     set_interest(connection, listing["portal"], listing["external_id"],
-                 INTEREST[button], rated_by)
+                 INTEREST[button], rated_by, user_id)
     return TOAST[button]

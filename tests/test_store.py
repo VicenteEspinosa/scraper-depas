@@ -7,6 +7,7 @@ from depas.models import Listing
 from depas.store import (
     DISLIKE,
     MIGRATIONS_DIR,
+    Subscriber,
     connect,
     migrate,
     pending_detail,
@@ -16,6 +17,9 @@ from depas.store import (
     set_interest,
 )
 from tests.support import prefs
+
+# Nobody in particular: these tests are about the listings, not the reader.
+SHARED = Subscriber("-100999")
 
 
 def _listing(price: int) -> Listing:
@@ -215,7 +219,8 @@ def test_a_furnished_listing_is_left_out_of_the_pool(tmp_path):
         save_detail(connection, "houm", external_id,
                     {"furnished": 1 if external_id == "43" else None})
 
-    pooled = [row["external_id"] for row in connection.execute(pool_query(prefs()))]
+    pooled = [row["external_id"] for row
+              in connection.execute(pool_query(prefs(), SHARED))]
 
     assert pooled == ["42"]  # 43 says so in its spec table, 44 only in its title
 

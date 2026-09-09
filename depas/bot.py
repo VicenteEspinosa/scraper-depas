@@ -15,6 +15,7 @@ from depas.preferences import Preferences
 from depas.store import (
     DISLIKE,
     LIKE,
+    Subscriber,
     card_for_message,
     card_for_thread,
     connect,
@@ -24,6 +25,7 @@ from depas.store import (
     save,
     save_detail,
     set_interest,
+    subscribers,
 )
 from depas.telegram import (
     DISLIKE_BUTTON,
@@ -158,8 +160,10 @@ def _offer_buttons(connection: sqlite3.Connection, card_chat: object, card_messa
     card = card_for_message(connection, card_chat, card_message)
     if card is None:
         return  # not a card we posted: there is nothing to rate
+    subscriber = _card_subscriber(connection, dict(card))
     listing = connection.execute(
-        "SELECT rowid AS id, interest FROM listings WHERE portal = ? AND external_id = ?",
+        f"SELECT id, interest FROM ({subscriber.view()}) "
+        "WHERE portal = ? AND external_id = ?",
         (card["portal"], card["external_id"]),
     ).fetchone()
     if listing is None:
@@ -204,8 +208,9 @@ def refresh_card(connection: sqlite3.Connection, card: dict, prefs: Preferences)
     if not card.get("message_id"):
         return False  # traced back by its printed id alone; there is no message to edit
     key = (card["portal"], card["external_id"])
+    subscriber = _card_subscriber(connection, card)
     row = connection.execute(
-        "SELECT * FROM listings_ranked WHERE portal = ? AND external_id = ?", key
+        f"SELECT * FROM ({subscriber.view()}) WHERE portal = ? AND external_id = ?", key
     ).fetchone()
     if row is None:
         return False  # a card outliving its listing must not take the bot down with it
@@ -223,6 +228,20 @@ def refresh_card(connection: sqlite3.Connection, card: dict, prefs: Preferences)
         # Its own failures are already swallowed, and a card redrawn is a grade restated.
         refresh_breakdown(connection, card, prefs)
     return True
+
+
+def _card_subscriber(connection: sqlite3.Connection, card: dict) -> Subscriber:
+    """Whose view a card is drawn in: the chat it was posted to.
+
+    A card carries the verdict of the chat it lives in, not of whoever happens to be
+    looking — two people reading one channel see the same ⭐ on it, which is what a
+    shared subscriber means.
+    """
+    for one in subscribers(connection, None):
+        if one.chat_id == str(card["chat_id"]):
+            return one
+    # A card in a chat nobody is subscribed to any more still redraws, shared.
+    return Subscriber(str(card["chat_id"]))
 
 
 # A discarded card keeps only what says which listing it was, and so does its breakdown.
@@ -243,9 +262,15 @@ def _breakdown_text(row: dict, prefs: Preferences) -> str:
 
 
 def _ranked(connection: sqlite3.Connection, card: dict) -> dict | None:
-    """The card's listing as the ranked view sees it, or None once it is gone."""
+    """The card's listing as its own chat sees it, or None once it is gone.
+
+    Through the subscriber, not `listings_ranked` directly: the breakdown says «🚫
+    descartado» instead of a grade, and which of those it is depends on whose verdict
+    counts in the chat the card is sitting in.
+    """
+    subscriber = _card_subscriber(connection, card)
     row = connection.execute(
-        "SELECT * FROM listings_ranked WHERE portal = ? AND external_id = ?",
+        f"SELECT * FROM ({subscriber.view()}) WHERE portal = ? AND external_id = ?",
         (card["portal"], card["external_id"]),
     ).fetchone()
     return dict(row) if row else None
@@ -298,8 +323,10 @@ def _rate(connection: sqlite3.Connection, message: dict, interest: int,
         return
     author = message.get("from") or {}
     set_interest(connection, card["portal"], card["external_id"], interest,
-                 author.get("username") or author.get("first_name"))
+                 author.get("username") or author.get("first_name"), author.get("id"))
     refresh_card(connection, card, prefs)
+    # Every subscriber, not just this card's chat: a shared subscriber counts
+    # anybody's verdict, so one person's /like belongs on more than one list.
     shortlist.sync(connection, prefs)
     reply(chat, VERDICT[interest], thread, message["message_id"])
 
@@ -391,12 +418,14 @@ def _handle_callback(connection: sqlite3.Connection, callback: dict,
 
     author = callback.get("from") or {}
     set_interest(connection, listing["portal"], listing["external_id"], interest,
-                 author.get("username") or author.get("first_name"))
+                 author.get("username") or author.get("first_name"), author.get("id"))
     # Acknowledged before the redraw: a press times out in about ten seconds.
     answer_callback(callback["id"], TOAST[interest])
     pressed = callback.get("message") or {}
     card = _pressed_card(connection, pressed, dict(listing))
     refresh_card(connection, card, prefs)
+    # Every subscriber, not just this card's chat: a shared subscriber counts
+    # anybody's verdict, so one person's /like belongs on more than one list.
     shortlist.sync(connection, prefs)
     _tick(pressed, card, int(listing_id), interest)
 

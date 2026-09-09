@@ -11,6 +11,7 @@ from depas.shortlist import format_shortlist, starred
 from depas.store import (
     KEPT,
     LIKE,
+    Subscriber,
     connect,
     mark_delisted,
     quiet_portals,
@@ -191,10 +192,10 @@ def test_a_starred_listing_that_went_away_stays_on_the_list_marked(connection):
     set_interest(connection, "houm", "starred", LIKE)
     mark_delisted(connection, "houm", "starred")
 
-    rendered = format_shortlist(connection, prefs(), "-100123")
+    rendered = format_shortlist(connection, prefs(), Subscriber("-100123"))
 
     assert "ya no está" in rendered
-    assert len(starred(connection, prefs())) == 1
+    assert len(starred(connection, prefs(), Subscriber("-100123"))) == 1
 
 
 # -- sweeping every portal at once ------------------------------------------------

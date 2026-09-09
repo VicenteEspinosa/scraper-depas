@@ -2,6 +2,7 @@ import json
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
@@ -98,26 +99,102 @@ SELECT *,
 FROM listings;
 """
 
-# A /dislike is out for good: never announced again, and out of the pool. Not a preference.
+# A /dislike is out for good: never announced again, and out of the pool. Not a
+# preference — there is no reading of a /dislike that means "rank it lower". Whose
+# /dislike, though, is the subscriber's business: see `Subscriber.rejected`.
 NOT_REJECTED = "COALESCE(interest, 0) >= 0"
 
-# Enriched, an actual unit, still published, and not turned down: an unenriched one
-# would beat everything, and one already rented is not a candidate however well it grades.
-KEPT = ("detail_fetched_at IS NOT NULL AND is_project = 0 AND delisted_at IS NULL "
-        f"AND {NOT_REJECTED}")
+# Enriched, an actual unit, still published: an unenriched one would beat everything, and
+# one already rented is not a candidate however well it grades. What somebody thinks of
+# it is not here any more, because it is not a property of the listing.
+KEPT = "detail_fetched_at IS NOT NULL AND is_project = 0 AND delisted_at IS NULL"
 
 
-def pool_query(prefs: Preferences) -> str:
-    """Every listing worth ranking or alerting on, minus the traits you rule out."""
+@dataclass(frozen=True, slots=True)
+class Subscriber:
+    """One place cards are posted, and whose opinion decides what it is shown.
+
+    `owner` is None for a shared destination — a channel, or a channel with its linked
+    discussion group — where anybody's verdict counts for it. That is what a couple
+    reading one channel together already had, so it is what the existing chat becomes.
+    A private conversation carries its owner, and only that person's opinion shapes it.
+    """
+
+    chat_id: str
+    owner: int | None = None
+
+    @property
+    def mine(self) -> str:
+        """The verdicts that count for this subscriber, as a SQL condition on `verdict`."""
+        return "1 = 1" if self.owner is None else f"verdict.user_id = {int(self.owner)}"
+
+    def view(self) -> str:
+        """`listings_ranked` as this subscriber sees it.
+
+        The per-reader columns keep the names they had as columns of `listings`, so
+        everything that reads `row["interest"]` — the cards, the ⭐ list, the browser —
+        goes on reading it and simply gets an answer that is about somebody.
+        """
+        return f"""
+        SELECT listings_ranked.*,
+               (SELECT verdict.interest FROM user_interest AS verdict
+                 WHERE verdict.portal = listings_ranked.portal
+                   AND verdict.external_id = listings_ranked.external_id
+                   AND {self.mine}
+                 ORDER BY verdict.rated_at DESC LIMIT 1)          AS interest,
+               (SELECT verdict.rated_by FROM user_interest AS verdict
+                 WHERE verdict.portal = listings_ranked.portal
+                   AND verdict.external_id = listings_ranked.external_id
+                   AND {self.mine}
+                 ORDER BY verdict.rated_at DESC LIMIT 1)          AS rated_by,
+               (SELECT verdict.rated_at FROM user_interest AS verdict
+                 WHERE verdict.portal = listings_ranked.portal
+                   AND verdict.external_id = listings_ranked.external_id
+                   AND {self.mine}
+                 ORDER BY verdict.rated_at DESC LIMIT 1)          AS rated_at,
+               (SELECT announced.notified_at FROM subscriber_notifications AS announced
+                 WHERE announced.chat_id = '{_chat_sql(self.chat_id)}'
+                   AND announced.portal = listings_ranked.portal
+                   AND announced.external_id = listings_ranked.external_id) AS notified_at
+          FROM listings_ranked"""
+
+
+def _chat_sql(chat_id: object) -> str:
+    """A chat id inside a SQL literal. Telegram's are numeric; anything else is refused."""
+    text = str(chat_id)
+    if not text.lstrip("-").isdigit():
+        raise ValueError(f"a chat id is a number, got {text!r}")
+    return text
+
+
+def pool_query(prefs: Preferences, subscriber: Subscriber) -> str:
+    """Every listing worth ranking or alerting on, as one subscriber sees it."""
     excluded = [f"({trait.keeps})" for trait in prefs.traits(EXCLUDE)]
-    return f"SELECT * FROM listings_ranked WHERE {' AND '.join([KEPT, *excluded])}"
+    conditions = " AND ".join([KEPT, NOT_REJECTED, *excluded])
+    # Wrapped: `interest` is computed by the inner select, so it cannot be filtered on in
+    # the same WHERE that produces it.
+    return f"SELECT * FROM ({subscriber.view()}) WHERE {conditions}"
 
 
 # A detail page is the crawl's most expensive request, so it is only ever spent on a
 # listing the pool could accept: `KEPT` wants an actual unit nobody turned down that is
 # still published, and none of those three can change however long a row waits.
-ELIGIBLE_FOR_DETAIL = ("delisted_at IS NULL AND is_project = 0 "
-                       "AND COALESCE(interest, 0) >= 0")
+# The interest half is a subquery now, which a partial index may not contain — so the
+# index covers the other two and this rides along in the query. "Turned down" here means
+# turned down by everybody who has an opinion: with one shared reader that is exactly
+# what the old column said, and with two it stops one person's /dislike from deciding
+# whether the other one ever gets to see the flat.
+NOBODY_WANTS_IT = """
+    EXISTS (SELECT 1 FROM user_interest AS verdict
+             WHERE verdict.portal = listings.portal
+               AND verdict.external_id = listings.external_id
+               AND verdict.interest < 0)
+    AND NOT EXISTS (SELECT 1 FROM user_interest AS verdict
+                     WHERE verdict.portal = listings.portal
+                       AND verdict.external_id = listings.external_id
+                       AND verdict.interest >= 0)"""
+
+ELIGIBLE_FOR_DETAIL = f"delisted_at IS NULL AND is_project = 0 AND NOT ({NOBODY_WANTS_IT})"
 
 QUEUED = ("SELECT portal, external_id, url, detail_fetched_at, price, price_at_detail "
           f"FROM listings WHERE {ELIGIBLE_FOR_DETAIL}")
@@ -518,26 +595,96 @@ def save(connection: sqlite3.Connection, listings: Iterable[Listing]) -> dict[st
     return counts
 
 
-def mark_notified(connection: sqlite3.Connection, portal: str, external_id: str) -> None:
+def mark_notified(connection: sqlite3.Connection, chat_id: object, portal: str,
+                  external_id: str) -> None:
+    """Record that this destination has had this listing; posting it again would repeat it."""
     connection.execute(
-        "UPDATE listings SET notified_at = ? WHERE portal = ? AND external_id = ?",
-        (datetime.now(UTC).isoformat(), portal, external_id),
+        "INSERT INTO subscriber_notifications (chat_id, portal, external_id, notified_at) "
+        "VALUES (?, ?, ?, ?) ON CONFLICT(chat_id, portal, external_id) DO NOTHING",
+        (str(chat_id), portal, external_id, datetime.now(UTC).isoformat()),
     )
     connection.commit()
+
+
+# ── who is subscribed ───────────────────────────────────────────────────────────
+
+
+def add_subscriber(connection: sqlite3.Connection, chat_id: object,
+                   owner_user_id: int | None = None) -> None:
+    """Start posting cards to a chat. Without an owner it is shared: see `Subscriber`."""
+    _chat_sql(chat_id)  # refuse anything that is not a chat id before it is stored
+    connection.execute(
+        "INSERT INTO subscribers (chat_id, owner_user_id, added_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(chat_id) DO UPDATE SET owner_user_id = excluded.owner_user_id, "
+        "enabled = 1",
+        (str(chat_id), owner_user_id, datetime.now(UTC).isoformat()),
+    )
+    connection.commit()
+
+
+def remove_subscriber(connection: sqlite3.Connection, chat_id: object) -> bool:
+    """Stop posting to a chat, keeping what it was already told so re-adding is quiet."""
+    removed = connection.execute(
+        "UPDATE subscribers SET enabled = 0 WHERE chat_id = ? AND enabled = 1",
+        (str(chat_id),),
+    ).rowcount
+    connection.commit()
+    return bool(removed)
+
+
+def subscribers(connection: sqlite3.Connection,
+                prefs: Preferences | None = None) -> list[Subscriber]:
+    """Every chat cards go to, newest last.
+
+    Falls back to TELEGRAM_CHAT_ID when the table is empty, which is what a database
+    that has never had a subscriber written looks like — the migration only carries the
+    setting across if it was already set.
+    """
+    rows = connection.execute(
+        "SELECT chat_id, owner_user_id FROM subscribers WHERE enabled = 1 ORDER BY added_at"
+    ).fetchall()
+    if rows:
+        return [Subscriber(row["chat_id"], row["owner_user_id"]) for row in rows]
+    # No subscribers and no chat configured is a fresh install, not an error: whoever
+    # actually needs a destination is the one that should complain about not having one.
+    configured = None if prefs is None else prefs.raw("TELEGRAM_CHAT_ID")
+    return [Subscriber(str(configured))] if configured else []
 
 
 # What the chat commands mean, as stored in `listings.interest`.
 LIKE, DISLIKE = 1, -1
 
 
+# Nobody's account, and the one id Telegram never issues: where a verdict given before
+# verdicts had an owner ended up, and where one from a chat that hides its author goes.
+NOBODY = 0
+
+
 def set_interest(connection: sqlite3.Connection, portal: str, external_id: str,
-                 interest: int | None, rated_by: str | None = None) -> None:
-    """Record the verdict somebody gave a listing from the chat, or None to undo it."""
-    connection.execute(
-        "UPDATE listings SET interest = ?, rated_at = ?, rated_by = ? "
-        "WHERE portal = ? AND external_id = ?",
-        (interest, datetime.now(UTC).isoformat(), rated_by, portal, external_id),
-    )
+                 interest: int | None, rated_by: str | None = None,
+                 user_id: int | None = None) -> None:
+    """Record one person's verdict on a listing, or None to take it back.
+
+    Deleting rather than storing a NULL: "I take that back" is the absence of an
+    opinion, and a row saying so would have to be excluded from every query that asks
+    who dislikes this.
+    """
+    key = (NOBODY if user_id is None else int(user_id), portal, external_id)
+    if interest is None:
+        connection.execute(
+            "DELETE FROM user_interest WHERE user_id = ? AND portal = ? AND external_id = ?",
+            key,
+        )
+    else:
+        connection.execute(
+            "INSERT INTO user_interest "
+            "(user_id, portal, external_id, interest, rated_by, rated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id, portal, external_id) DO UPDATE SET "
+            "interest = excluded.interest, rated_by = excluded.rated_by, "
+            "rated_at = excluded.rated_at",
+            (*key, interest, rated_by, datetime.now(UTC).isoformat()),
+        )
     connection.commit()
 
 
@@ -595,38 +742,36 @@ def card_for_message(connection: sqlite3.Connection, chat_id: object,
     ).fetchone()
 
 
-# The pinned ⭐ list, kept in `settings` beside the poll offset: two integers, no table.
-SHORTLIST_CHAT, SHORTLIST_MESSAGE = "shortlist_chat_id", "shortlist_message_id"
-
-
 def remember_shortlist(connection: sqlite3.Connection, chat_id: object,
                        message_id: int) -> None:
-    """Record the message the ⭐ list lives in, so the next verdict edits it rather than posts."""
-    connection.executemany(
-        "INSERT INTO settings (key, value) VALUES (?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        ((SHORTLIST_CHAT, int(chat_id)), (SHORTLIST_MESSAGE, message_id)),
+    """Record the message one subscriber's ⭐ list lives in, so a verdict edits it."""
+    connection.execute(
+        "INSERT INTO subscriber_shortlist (chat_id, message_id) VALUES (?, ?) "
+        "ON CONFLICT(chat_id) DO UPDATE SET message_id = excluded.message_id",
+        (str(chat_id), message_id),
     )
     connection.commit()
 
 
-def stored_shortlist(connection: sqlite3.Connection) -> tuple[str, int] | None:
-    """Where the pinned ⭐ list is, or None until one has been posted."""
-    found = dict(connection.execute(
-        "SELECT key, value FROM settings WHERE key IN (?, ?)",
-        (SHORTLIST_CHAT, SHORTLIST_MESSAGE),
-    ).fetchall())
-    if SHORTLIST_CHAT not in found or SHORTLIST_MESSAGE not in found:
-        return None
-    return str(found[SHORTLIST_CHAT]), found[SHORTLIST_MESSAGE]
+def stored_shortlist(connection: sqlite3.Connection,
+                     chat_id: object) -> tuple[str, int] | None:
+    """Where this subscriber's ⭐ list is, or None until one has been posted there."""
+    row = connection.execute(
+        "SELECT chat_id, message_id FROM subscriber_shortlist WHERE chat_id = ?",
+        (str(chat_id),),
+    ).fetchone()
+    return (row["chat_id"], row["message_id"]) if row else None
 
 
-def clear_notified(connection: sqlite3.Connection, hours: int) -> int:
-    """Un-stamp recently announced listings so the next watch pass posts them again."""
+def clear_notified(connection: sqlite3.Connection, hours: int,
+                   chat_id: object | None = None) -> int:
+    """Forget recent announcements so the next pass posts them again, to one chat or all."""
     # Same isoformat the stamp was written with, so the comparison stays lexicographic.
     cutoff = (datetime.now(UTC) - timedelta(hours=hours)).isoformat()
+    where = "notified_at >= ?" + ("" if chat_id is None else " AND chat_id = ?")
+    parameters = (cutoff,) if chat_id is None else (cutoff, str(chat_id))
     cleared = connection.execute(
-        "UPDATE listings SET notified_at = NULL WHERE notified_at >= ?", (cutoff,)
+        f"DELETE FROM subscriber_notifications WHERE {where}", parameters
     ).rowcount
     connection.commit()
     return cleared

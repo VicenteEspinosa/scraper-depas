@@ -7,7 +7,15 @@ import pytest
 from depas.bot import _handle
 from depas.models import Listing
 from depas.shortlist import EMPTY, LIMIT, MOST, format_shortlist, sync
-from depas.store import LIKE, connect, remember_card, save, save_detail, set_interest
+from depas.store import (
+    LIKE,
+    Subscriber,
+    connect,
+    remember_card,
+    save,
+    save_detail,
+    set_interest,
+)
 from depas.telegram import message_link
 from tests.support import prefs
 
@@ -49,7 +57,7 @@ def telegram(monkeypatch):
 
 def test_a_list_with_nothing_in_it_says_how_to_fill_it(connection):
     """A pinned message that is simply blank teaches nobody what the star is for."""
-    assert format_shortlist(connection, prefs(), str(CHANNEL)) == EMPTY
+    assert format_shortlist(connection, prefs(), Subscriber(str(CHANNEL))) == EMPTY
 
 
 def test_a_starred_listing_is_named_priced_and_graded(connection):
@@ -57,7 +65,7 @@ def test_a_starred_listing_is_named_priced_and_graded(connection):
     external_id = _listing(connection)
     set_interest(connection, "portalinmobiliario", external_id, LIKE, "vicente")
 
-    text = format_shortlist(connection, prefs(), str(CHANNEL))
+    text = format_shortlist(connection, prefs(), Subscriber(str(CHANNEL)))
 
     assert "Providencia" in text and "$700.000" in text and "50 m²" in text
 
@@ -68,7 +76,7 @@ def test_an_entry_links_back_to_the_card_it_was_announced_on(connection):
     remember_card(connection, CHANNEL, CARD, "portalinmobiliario", external_id)
     set_interest(connection, "portalinmobiliario", external_id, LIKE, "vicente")
 
-    text = format_shortlist(connection, prefs(), str(CHANNEL))
+    text = format_shortlist(connection, prefs(), Subscriber(str(CHANNEL)))
 
     assert message_link(CHANNEL, CARD) in text
     assert "tarjeta" in text and "aviso" in text
@@ -79,7 +87,7 @@ def test_a_listing_that_was_never_announced_still_has_its_link(connection):
     external_id = _listing(connection)
     set_interest(connection, "portalinmobiliario", external_id, LIKE, "vicente")
 
-    text = format_shortlist(connection, prefs(), str(CHANNEL))
+    text = format_shortlist(connection, prefs(), Subscriber(str(CHANNEL)))
 
     assert "tarjeta" not in text
     assert f"https://portalinmobiliario.com/{external_id}-x-_JM" in text
@@ -91,7 +99,7 @@ def test_the_list_is_ordered_best_first(connection):
         _listing(connection, external_id, price)
         set_interest(connection, "portalinmobiliario", external_id, LIKE, "vicente")
 
-    text = format_shortlist(connection, prefs(), str(CHANNEL))
+    text = format_shortlist(connection, prefs(), Subscriber(str(CHANNEL)))
 
     assert text.index("cheap") < text.index("dear")
 
@@ -104,7 +112,7 @@ def test_a_list_too_long_to_post_says_how_much_it_left_out(connection):
         external_id = _listing(connection, f"MLC-{index}", 400_000 + index * 1_000)
         set_interest(connection, "portalinmobiliario", external_id, LIKE, "vicente")
 
-    text = format_shortlist(connection, prefs(), str(CHANNEL))
+    text = format_shortlist(connection, prefs(), Subscriber(str(CHANNEL)))
 
     assert len(text) <= LIMIT
     shown = text.count("<code>[")

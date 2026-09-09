@@ -34,6 +34,8 @@ from depas.preferences import (
 )
 from depas.store import (
     KEPT,
+    Subscriber,
+    add_subscriber,
     clear_notified,
     connect,
     fill_gaps,
@@ -49,11 +51,13 @@ from depas.store import (
     remember_sweep,
     remember_validators,
     remember_watch,
+    remove_subscriber,
     save,
     save_detail,
     stale_stages,
     store_preference,
     stored_watch,
+    subscribers,
     sweep_delisted,
     sync_lease_income,
     validator_coverage,
@@ -328,11 +332,12 @@ def _post_card(connection: sqlite3.Connection, prefs: Preferences, destination: 
     time.sleep(ALERT_DELAY_SECONDS)  # a second message spends a second slice of the rate limit
 
 
-def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) -> int:
-    """Post enriched, un-announced listings that clear DEPAS_GRADE_MIN."""
+def _announce_to(connection: sqlite3.Connection, prefs: Preferences,
+                 subscriber: Subscriber, limit: int) -> int:
+    """Post what this subscriber has not been shown yet and that clears DEPAS_GRADE_MIN."""
     conditions, parameters = _requirement_clauses(prefs)
     candidates = connection.execute(
-        f"{pool_query(prefs)} AND notified_at IS NULL"
+        f"{pool_query(prefs, subscriber)} AND notified_at IS NULL"
         + "".join(f" AND {condition}" for condition in conditions),
         parameters,
     ).fetchall()
@@ -344,9 +349,10 @@ def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) ->
 
     graded = sorted(((row, scale.grade(dict(row))) for row in candidates),
                     key=lambda pair: pair[1].score, reverse=True)
-    destination = prefs.chat_id()
-    # The id alone cannot say which: channels and discussion groups share the -100 prefix.
-    print(f"alerts: posting to a {chat_type(destination)}")
+    destination = subscriber.chat_id
+    # Not `chat_type` any more: it asks Telegram, and per subscriber per pass that is a
+    # request bought for a log line. `depas subscribers list` says what each chat is.
+    print(f"alerts: posting to {destination}")
     posted = 0
     for row, grade in graded:
         if posted >= limit:
@@ -357,7 +363,23 @@ def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) ->
                        format_listing(dict(row), grade, prefs))
             posted += 1
             time.sleep(ALERT_DELAY_SECONDS)  # Telegram rate-limits how fast a chat is posted to
-        mark_notified(connection, row["portal"], row["external_id"])
+        mark_notified(connection, destination, row["portal"], row["external_id"])
+    return posted
+
+
+def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) -> int:
+    """Post to every subscriber, each with its own budget and its own idea of the pool.
+
+    Per subscriber rather than per listing: the budget is there to keep one chat from
+    being flooded, and two chats are not one chat. One destination refusing a card — a
+    bot removed from a channel, say — must not cost the others theirs.
+    """
+    posted = 0
+    for subscriber in subscribers(connection, prefs):
+        try:
+            posted += _announce_to(connection, prefs, subscriber, limit)
+        except (RuntimeError, ValueError) as error:
+            print(f"WARNING could not post to {subscriber.chat_id}: {error}")
     return posted
 
 
@@ -504,6 +526,50 @@ def healthcheck(args: argparse.Namespace) -> None:
         connection.close()
 
 
+def subscribers_list(args: argparse.Namespace) -> None:
+    """Every chat cards go to, and whose opinion shapes what each one is shown."""
+    connection = connect()
+    try:
+        prefs = Preferences.load(connection)
+        found = subscribers(connection, prefs)
+        stored = {row["chat_id"] for row in connection.execute(
+            "SELECT chat_id FROM subscribers WHERE enabled = 1")}
+    finally:
+        connection.close()
+    if not found:
+        print("nobody is subscribed. `depas subscribers add CHAT_ID` starts one, and "
+              "`depas chats` lists what the bot can see.")
+        return
+    for one in found:
+        shared = "compartido" if one.owner is None else f"de {one.owner}"
+        # A chat standing in for the setting is not stored, and says so: it disappears
+        # the moment a real subscriber is added.
+        source = "" if one.chat_id in stored else "  (desde TELEGRAM_CHAT_ID)"
+        print(f"{one.chat_id:>16}  {chat_type(one.chat_id):12}  {shared}{source}")
+
+
+def subscribers_add(args: argparse.Namespace) -> None:
+    """Start posting to a chat: a private conversation, or a channel with its group."""
+    connection = connect()
+    try:
+        add_subscriber(connection, args.chat_id, args.owner)
+    finally:
+        connection.close()
+    whose = "compartido: cuenta el veredicto de cualquiera" if args.owner is None \
+        else f"privado de {args.owner}: solo su veredicto lo moldea"
+    print(f"{args.chat_id} suscrito ({whose})")
+
+
+def subscribers_remove(args: argparse.Namespace) -> None:
+    """Stop posting to a chat, keeping what it was already told."""
+    connection = connect()
+    try:
+        removed = remove_subscriber(connection, args.chat_id)
+    finally:
+        connection.close()
+    print(f"{args.chat_id} " + ("dado de baja" if removed else "no estaba suscrito"))
+
+
 def telegram_chats(args: argparse.Namespace) -> None:
     """List the chats the bot can see, so the right id can be copied into TELEGRAM_CHAT_ID."""
     found = chats()
@@ -521,13 +587,17 @@ def test_alert(args: argparse.Namespace) -> None:
     connection = connect()
     prefs = Preferences.load(connection)
     try:
-        pool = [dict(row) for row in connection.execute(pool_query(prefs))]
+        first = subscribers(connection, prefs)
+        if not first:
+            raise ValueError("nobody is subscribed; set TELEGRAM_CHAT_ID or "
+                             "`depas subscribers add`")
+        pool = [dict(row) for row in connection.execute(pool_query(prefs, first[0]))]
         if not pool:
             raise ValueError("nothing enriched to post; run `depas enrich` first")
         scale = Scale(prefs)
         row, grade = max(((row, scale.grade(row)) for row in pool), key=lambda pair: pair[1].score)
         # Posted like any other card, so /like, /dislike and the breakdown can be tried on it.
-        _post_card(connection, prefs, prefs.chat_id(), row,
+        _post_card(connection, prefs, first[0].chat_id, row,
                    format_listing(row, grade, prefs, is_test=True))
         print(f"test alert posted: {grade.letter} {grade.score} {row['url']}")
     finally:
@@ -538,7 +608,7 @@ def resend(args: argparse.Namespace) -> None:
     """Un-stamp recent alerts so the next watch pass posts them again, to wherever it posts now."""
     connection = connect()
     try:
-        cleared = clear_notified(connection, args.hours)
+        cleared = clear_notified(connection, args.hours, args.chat)
     finally:
         connection.close()
     print(f"{cleared} listings un-stamped; `depas watch` will announce them again")
@@ -788,6 +858,24 @@ def main() -> None:
     chatter = subparsers.add_parser("chats", help="list Telegram chats the bot can see")
     chatter.set_defaults(func=telegram_chats)
 
+    subs = subparsers.add_parser("subscribers", help="where cards get posted")
+    subs.set_defaults(func=subscribers_list)
+    sub_actions = subs.add_subparsers()
+
+    sub_lister = sub_actions.add_parser("list", help="every chat cards go to")
+    sub_lister.set_defaults(func=subscribers_list)
+
+    sub_adder = sub_actions.add_parser("add", help="start posting to a chat")
+    sub_adder.add_argument("chat_id")
+    sub_adder.add_argument("--owner", type=int,
+                           help="Telegram user id whose verdicts shape this chat's pool; "
+                                "omit for a shared chat, where anybody's count")
+    sub_adder.set_defaults(func=subscribers_add)
+
+    sub_remover = sub_actions.add_parser("remove", help="stop posting to a chat")
+    sub_remover.add_argument("chat_id")
+    sub_remover.set_defaults(func=subscribers_remove)
+
     tester = subparsers.add_parser("test-alert", help="post the top listing as a test card")
     tester.set_defaults(func=test_alert)
 
@@ -795,6 +883,7 @@ def main() -> None:
         "resend", help="re-announce recently alerted listings on the next watch pass")
     resender.add_argument("--hours", type=int, default=6,
                           help="how far back to un-stamp; older alerts are left alone")
+    resender.add_argument("--chat", help="only this subscriber; default every one of them")
     resender.set_defaults(func=resend)
 
     redrawer = subparsers.add_parser(

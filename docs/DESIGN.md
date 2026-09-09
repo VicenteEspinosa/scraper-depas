@@ -259,6 +259,56 @@ each of those days, and `uf_daily` only keeps the days the bot happened to be up
 trail now stores `price_clp` alongside. The backfill converted what it could and left the
 rest NULL rather than pick a rate: a wrong number in a price history is worse than a gap.
 
+## A pool per subscriber
+
+`interest` and `notified_at` were columns of `listings`, which made them everybody's: one
+person's `/dislike` took the flat out of every reader's pool, and "already announced" was
+a property of the listing rather than of the chat it was announced in. With one reader
+those are the same thing. With two they are not, and the second reader cannot be added
+until they come apart.
+
+**They come apart along two different keys, and that is the whole design.** A verdict
+belongs to a *person* — it is an opinion, and two people may disagree about the same
+flat. An announcement belongs to a *destination* — a card posted in a channel has been
+posted, and marking it per person would repeat it in the same chat once per reader. So
+`user_interest` is keyed by Telegram user id and `subscriber_notifications` by chat.
+
+`Subscriber` is one place cards go, and `Subscriber.view()` is `listings_ranked` as that
+subscriber sees it: `interest`, `rated_by`, `rated_at` and `notified_at` come back as
+columns with the names they had, so the cards, the ⭐ list and the browser go on reading
+`row["interest"]` and simply get an answer that is about somebody. That is why the change
+is smaller than it sounds — the shape stayed and only the source moved.
+
+**`owner` is what makes a shared destination work.** A channel — with its linked
+discussion group, which is how this repo's own instance runs — has no owner, and anybody's
+verdict counts for it. That is exactly what a couple reading one channel together already
+had, so it is what the existing chat becomes on upgrade, and nothing about their setup
+changes. A private conversation carries its owner, and only that person's opinion shapes
+what it is shown.
+
+The enrichment queue had to be re-decided rather than translated. `COALESCE(interest, 0)
+>= 0` used to mean "nobody has turned this down", and with two readers the question is
+whose. It now gives up on a detail page only when *everybody* who has an opinion has
+turned it down — with one shared reader that is the old column exactly, and with two it
+stops one person's `/dislike` from deciding whether the other ever gets to see the flat.
+It also had to leave the partial index: a partial index may not contain a subquery, so
+the index covers `delisted_at` and `is_project` and the rest rides in the query.
+
+Two smaller consequences. The pinned ⭐ list was two integers in `settings`, so there
+could only ever be one of it; it is a row per chat now. And a verdict syncs *every*
+subscriber's list rather than the chat it came from, because a shared subscriber counts
+anybody's verdict — one person's `/like` genuinely belongs on more than one list.
+
+A chat id reaches SQL as a literal, since a view cannot take a bound parameter, so
+`_chat_sql` refuses anything that is not a number before it gets there.
+
+**What this does not do is per-reader preferences.** Every subscriber is graded and
+filtered by the one set of settings, so they all receive the same cards — useful when you
+and somebody else each want your own copy and your own verdicts, and not yet "two people
+with different criteria". That is the next change, and it is the reason the budget is per
+subscriber rather than shared: `DEPAS_ALERTS_LIMIT` exists to keep one chat from being
+flooded, and two chats are not one chat.
+
 ## Knowing what is still for rent
 
 `last_seen` was written on every scrape from the first migration and read by nothing, so

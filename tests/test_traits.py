@@ -4,7 +4,17 @@ import pytest
 from depas.grade import Scale
 from depas.models import Listing
 from depas.preferences import Preferences
-from depas.store import connect, pool_query, save, save_detail, store_preference
+from depas.store import (
+    Subscriber,
+    connect,
+    pool_query,
+    save,
+    save_detail,
+    store_preference,
+)
+
+# Nobody in particular: these tests are about traits, not about who is reading.
+SHARED = Subscriber("-100999")
 
 
 def _save(connection, external_id, **detail):
@@ -28,14 +38,14 @@ def pool(tmp_path):
 
 def _pooled(connection):
     prefs = Preferences.load(connection)
-    return sorted(row["external_id"] for row in connection.execute(pool_query(prefs)))
+    return sorted(row["external_id"] for row in connection.execute(pool_query(prefs, SHARED)))
 
 
 def _scores(connection):
     prefs = Preferences.load(connection)
     scale = Scale(prefs)
     return {row["external_id"]: scale.grade(dict(row)).score
-            for row in connection.execute(pool_query(prefs))}
+            for row in connection.execute(pool_query(prefs, SHARED))}
 
 
 @pytest.mark.parametrize("disposition, expected", [
@@ -81,7 +91,7 @@ def test_the_top_floor_penalty_stays_inside_the_floor_component(pool):
     """It competes against the height the flat already earned, where its size means something."""
     prefs = Preferences.load(pool)
     scale = Scale(prefs)
-    top = next(dict(row) for row in pool.execute(pool_query(prefs))
+    top = next(dict(row) for row in pool.execute(pool_query(prefs, SHARED))
                if row["external_id"] == "top")
 
     graded = scale.grade(top)
