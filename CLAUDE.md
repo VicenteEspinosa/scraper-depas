@@ -1,8 +1,10 @@
 # Working on this repo
 
 Notes for Claude Code sessions. [README.md](README.md) says what the project does,
-[docs/DESIGN.md](docs/DESIGN.md) why the code is shaped the way it is; this file is
-about how to land a change in it.
+[docs/DESIGN.md](docs/DESIGN.md) why the code is shaped the way it is, and
+[docs/MULTI-USER.md](docs/MULTI-USER.md) where it is going — read that before touching
+`preferences`, `subscribers` or anything keyed by a chat or a person. This file is about
+how to land a change in it.
 
 ## Branches
 
@@ -78,6 +80,11 @@ Ruff is configured in `pyproject.toml` — 100 columns, `E W F I UP B C4 SIM`.
 - **Never edit an applied migration.** `migrations/*.sql` run in filename order and are
   recorded in `schema_migrations`; a column is added by adding `014_*.sql`. Editing `001`
   changes nothing on a database that already ran it.
+- **A migration adds and copies; it never drops or moves what a person typed.** Rename a
+  column to `legacy_*` rather than dropping it, and test the migration from a database at
+  the previous version (`tests/test_subscribers.py`, `_at_015`). `depas backup` copies the
+  file without migrating it — the deploy runs it before every restart, and so should you
+  before trying a migration against a real database.
 - **A new setting is a `Setting` in `depas/preferences.py`, and nothing else.** The seed,
   the `depas config` commands and the `/config` chat menu all read that one declaration,
   so a knob added there arrives everywhere with a keyboard already. A parser with no

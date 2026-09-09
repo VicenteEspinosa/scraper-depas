@@ -132,6 +132,28 @@ no-op. Adding a column means adding `002_*.sql` — never editing `001`.
 SQLite runs in WAL mode with a 5s busy timeout because the cron sidecar and the
 bot share one file.
 
+### A copy before every migration
+
+Between validating `.env` and restarting the containers, the deploy runs
+`depas backup` in a throwaway container of the **new** image. The command does not
+call `connect()`, so it applies nothing: it copies the file through SQLite's backup
+API — consistent even while the old containers keep writing — into `data/backups/`
+on the host, as `depas-<UTC stamp>.db`, and keeps the last five (`BACKUPS_KEPT` on the
+SSH line changes that). A backup that fails stops the deploy with the old containers
+still serving.
+
+Rolling a migration back is therefore a file copy:
+
+```bash
+docker compose stop
+cp data/backups/depas-20260909T120000Z.db data/depas.db
+rm -f data/depas.db-wal data/depas.db-shm
+git checkout <the previous sha> && docker compose up -d --build
+```
+
+Five copies of a database that grows is disk the space check has to see; `du -sh
+data/backups` is the first place to look if the check starts refusing.
+
 ## Schedule
 
 `deploy/crontab` drives supercronic inside `depas-cron`:
@@ -196,7 +218,7 @@ If it ever refuses, on the box:
 ```bash
 df -h
 docker system df                 # usually the build cache
-du -sh data/*                    # the other candidate: a .db-wal that never checkpointed
+du -sh data/*                    # the other candidates: backups/, or a .db-wal that never checkpointed
 ```
 
 `data/` is a bind mount, not a named volume, so nothing the deploy runs can reach the

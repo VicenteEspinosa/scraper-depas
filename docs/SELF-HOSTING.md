@@ -155,6 +155,16 @@ Most preference edits need no restart at all: the bot re-reads the table on
 every poll, and the cron pass loads it fresh. Only the two environment values
 — `TELEGRAM_BOT_TOKEN` and `TZ` — need `docker compose up -d`.
 
+Before pulling a new version, or anything else you are not sure of:
+
+```bash
+docker compose exec depas-cron depas backup       # data/backups/depas-<stamp>.db, last 5 kept
+```
+
+The deploy workflow does this on its own before every restart. Restoring is copying
+the file back over `data/depas.db` with the containers stopped, and deleting the
+`-wal` and `-shm` files beside it.
+
 ### Not on arm64
 
 `Dockerfile` downloads supercronic by URL with a pinned SHA1, and that pin is

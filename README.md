@@ -66,9 +66,15 @@ Scraping is two-stage, because detail pages are expensive:
   coordinates, the portal's routed walk times, the broker, and its own price
   benchmark. Only touches rows where `detail_fetched_at IS NULL`.
 - **`watch`** — both of the above in one scheduled pass, driven by the stored settings.
-- **`healthcheck`** — warns `DEPAS_ADMINS` by direct message when no `watch` pass
-  has completed in four hours. Runs every four hours from the same crontab, because
-  a `watch` that crashes every hour looks exactly like a quiet market from the chat.
+- **`healthcheck`** — warns `DEPAS_ADMINS` by direct message when a stage has gone
+  too long without completing: four hours for `watch` and `discover`, six for `enrich`
+  and `announce`, a day for `route`. Runs every four hours from the same crontab,
+  because a `watch` that crashes every hour looks exactly like a quiet market from the
+  chat. `--stale-hours N` applies one patience to every stage instead.
+- **`backup`** — copies the database through SQLite's backup API, **without** opening
+  it the normal way, so the copy is of the schema as it stands and not as the current
+  code would migrate it. Into `backups/` beside the file, keeping the last five. The
+  deploy runs it before every restart; run it by hand before anything you are unsure of.
 - **`show`** — filter and rank. Pass raw SQL instead for anything ad hoc.
 - **`resend`** — drop the notified stamp from recent alerts so the next `watch`
   posts them again, which is how listings announced to the wrong chat are moved.
@@ -258,7 +264,9 @@ scrolling — plus the escape hatch every editor keeps, an **✏️ Escribir** a
 **🗑️ Borrar**. Typing into a list setting appends to it and de-duplicates, so it adds
 to the checklist rather than replacing it. A typed value answers a force-reply prompt
 that names the setting, which is how it finds its way home without any pending-edit
-state to go stale.
+state to go stale. Only a prompt the bot itself posted is answered: a message shaped
+like one but written by somebody else in the group is left alone, however an admin
+replies to it.
 
 Every write goes through the same path `depas config set` uses, so a value the parsers
 refuse is refused here too, with the same message, before it is stored.
@@ -314,6 +322,11 @@ needs to be to see pasted links at all. Registering the commands with
 
 Anyone who can see the chat can press a button — there is no per-user check, which
 suits a private channel and would not suit a public one.
+
+A pasted link is only fetched, and only answered with a card, when its host **is** one of
+the portals or a subdomain of one — `departamento.portalinmobiliario.com` yes,
+`miportalinmobiliario.com` no. The card the bot posts carries its endorsement, so a
+lookalike host must never earn one.
 
 A verdict is a column on the listing (`interest`, `rated_at`, `rated_by`), so it
 survives re-scrapes and is queryable:
@@ -423,6 +436,12 @@ Every value is checked before it is stored, against the same declaration that
 half-filled `DEPAS_CURRENT_HOME` is refused at the moment somebody types it rather
 than on the next watch pass. `depas/preferences.py` holds that declaration, and it is
 the only place a new setting has to be added.
+
+A value that was valid when it was stored can stop being valid when the code that parses
+it changes — a commune dropped from the enum, say. That is logged as a warning rather than
+raised: the database still opens, the bot keeps running on the last reading that did
+parse, and `depas config unset NAME` is the repair. Raising would have been a crash loop
+with the repair command locked out of the database.
 
 Two things stay in the environment, because they are needed before a database can be
 opened or must not be stored beside the data: `TELEGRAM_BOT_TOKEN` and `DEPAS_DB_PATH`.
@@ -607,7 +626,15 @@ behind a scrape that kept succeeding.
 
 `migrations/*.sql`, applied in filename order on every `connect()` and recorded
 in `schema_migrations`. Add a column by adding `002_*.sql` — never by editing
-`001`.
+`001`. The deploy takes a `depas backup` of the file before the new code opens it, so a
+migration that goes wrong is a copy away from being undone; `data/backups/` keeps the
+last five.
+
+## Where this is going
+
+[docs/MULTI-USER.md](docs/MULTI-USER.md) is the plan for letting several people, each
+with their own criteria, read the same bot without stepping on one another — and the
+audit of the code that preceded it.
 
 ## Deploying
 
