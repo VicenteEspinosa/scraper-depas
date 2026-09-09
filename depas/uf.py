@@ -2,6 +2,8 @@ import sqlite3
 from datetime import date
 from functools import cache
 
+from curl_cffi.requests.exceptions import RequestException
+
 from depas.fetch import Fetcher
 from depas.models import Listing
 
@@ -20,7 +22,18 @@ def stored_uf(connection: sqlite3.Connection, fetcher: Fetcher) -> float:
     row = connection.execute("SELECT value FROM uf_daily WHERE day = ?", (today,)).fetchone()
     if row:
         return float(row[0])
-    value = uf_in_clp(fetcher)
+    try:
+        value = uf_in_clp(fetcher)
+    except (RequestException, KeyError, IndexError, ValueError) as error:
+        # The indicator being down is not worth the whole sweep: the UF moves by a
+        # fraction of a percent a day, so yesterday's is a fine price for today. Not
+        # stored under today, so tomorrow's pass asks again.
+        last = connection.execute(
+            "SELECT day, value FROM uf_daily ORDER BY day DESC LIMIT 1").fetchone()
+        if last is None:
+            raise
+        print(f"WARNING UF indicator unavailable ({error}); using the UF of {last[0]}")
+        return float(last[1])
     connection.execute("INSERT INTO uf_daily (day, value) VALUES (?, ?)", (today, value))
     connection.commit()
     return value

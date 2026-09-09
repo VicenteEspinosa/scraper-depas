@@ -494,6 +494,7 @@ def run() -> None:
     fetcher = Fetcher()
     stored_uf(connection, fetcher)  # the ranked view prices per m2 straight from this
     print("bot listening")
+    prefs: Preferences | None = None
     try:
         while True:
             try:
@@ -503,7 +504,16 @@ def run() -> None:
                 time.sleep(ERROR_BACKOFF_SECONDS)
                 continue
             # Read once per poll, so a setting edited while the bot runs needs no restart.
-            prefs = Preferences.load(connection)
+            try:
+                prefs = Preferences.load(connection)
+            except ValueError as error:
+                # A row the parsers no longer accept must not take the bot down with it:
+                # the last reading that did parse keeps serving until somebody repairs it.
+                print(f"the stored preferences do not parse, keeping the last good ones: "
+                      f"{error}")
+                if prefs is None:
+                    time.sleep(ERROR_BACKOFF_SECONDS)
+                    continue
             for update in updates:
                 message = update.get("message") or update.get("channel_post")
                 # A pressed button arrives on this same poll — no webhook, no open port.
