@@ -13,7 +13,7 @@ from depas.communes import SANTIAGO_PROVINCE, Commune
 from depas.commute import as_text as commute_text
 from depas.commute import resolve_locations
 from depas.config import DEFAULT_COMMON_EXPENSES
-from depas.detail import infer_from_description
+from depas.detail import INFERRED_VERSION, infer_from_description
 from depas.fetch import Fetcher
 from depas.grade import Scale
 from depas.metro import nearest_station
@@ -106,18 +106,31 @@ def _matching(
         yield listing
 
 
+HAS_DESCRIPTION = "description IS NOT NULL AND description != ''"
+
+
 def _infer_stored_descriptions(connection: sqlite3.Connection) -> int:
-    """Fill columns a portal left empty from descriptions already in the database."""
+    """Fill columns a portal left empty from descriptions this version has not read."""
     filled = 0
-    for row in connection.execute(
-        "SELECT * FROM listings WHERE description IS NOT NULL AND description != ''"
-    ).fetchall():
+    rows = connection.execute(
+        f"SELECT * FROM listings WHERE {HAS_DESCRIPTION} AND inferred_version < ?",
+        (INFERRED_VERSION,),
+    ).fetchall()
+    for row in rows:
         gaps = {column: value
                 for column, value in infer_from_description(row["description"]).items()
                 if row[column] is None}
         if gaps:
             save_detail(connection, row["portal"], row["external_id"], gaps)
             filled += 1
+    # Stamped after the reading, so a pass that dies half way scans those rows again
+    # rather than marking them read on the strength of work it never did.
+    connection.execute(
+        f"UPDATE listings SET inferred_version = ? WHERE {HAS_DESCRIPTION} "
+        "AND inferred_version < ?",
+        (INFERRED_VERSION, INFERRED_VERSION),
+    )
+    connection.commit()
     return filled
 
 

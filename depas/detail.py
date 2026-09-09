@@ -159,6 +159,12 @@ def _available_from(text: str) -> str | None:
     return None
 
 
+# Bump when the reader below learns to recognise something new. Descriptions already
+# scanned by this version are left alone: re-reading one finds exactly what it found
+# last time, so only a change here makes a second pass worth the scan.
+INFERRED_VERSION = 1
+
+
 def infer_from_description(text: str) -> dict[str, object]:
     """Read off the fields a portal omitted from its spec table but stated in prose."""
     inferred: dict[str, object] = {}
