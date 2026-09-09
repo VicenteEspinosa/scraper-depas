@@ -344,6 +344,70 @@ means splitting fetching from parsing across all six portals, which is its own c
 and one worth justifying on evidence rather than on the hope that these portals emit
 validators at all. `validator_coverage` is that evidence, gathered from production.
 
+## Six portals at once
+
+The sweep was a `for` over six portals, each with a polite delay between requests, so a
+pass took the *sum* of six portals however idle the machine was. They are six different
+hosts: one worker each asks no host for more requests per second than the sequential
+version did — `Fetcher` keeps its own delay inside each thread — and the pass stops
+taking as long as the slowest arrangement of them.
+
+**The workers fetch and parse; the caller writes.** Nothing in a worker touches the
+database, so SQLite keeps the single writer it is happiest with and none of this code has
+to think about transactions or `SQLITE_BUSY`. A sweep comes back as a `Swept` — plain
+objects — and the main thread saves it and records the evidence.
+
+Each worker gets its own `Fetcher`, because a `curl_cffi` session is not built to be
+shared. That is also why `normalize` now takes the UF value rather than the fetcher:
+`uf_in_clp` caches per Fetcher, so six fetchers meant six requests to the indicator, and
+normalising was doing network inside what reads like arithmetic. Handing the number down
+also fixed `scrape`, which was passing a `Fetcher` where a float was wanted and would
+have raised on the first UF-priced listing — nothing tested that command.
+
+**One portal failing no longer aborts the pass.** It used to re-raise, which cost every
+other portal's alerts for that hour to spite one flaky host; now the error goes into
+`scrape_runs`, prints a warning, and the other five carry on. Every sweep failing is a
+different thing and still raises: nothing was scraped at all.
+
+## Four stages instead of one pass
+
+`watch` did everything in one strict sequence, so the slowest phase set the pace for
+every phase after it. A scrape that grew to forty minutes delayed an alert for a listing
+that had been enriched an hour earlier, and the enrichment got one go per hour because
+that was how often the scrape finished — not because sixty pages was the right amount.
+
+The stages were already separated by columns: `detail_due_at <= now` *is* a queue, and so
+is `notified_at IS NULL`. Making them separate commands only stops them queueing behind
+each other. On the split crontab the enrichment runs six times an hour in small batches —
+the same requests, spread out, clearing a backlog six times faster — and `announce` runs
+four times, so a listing enriched at :12 goes out at :15 rather than waiting for a whole
+pass. `depas watch` still runs all four in order for anyone who would rather have one
+entry, and keeps stamping the original two keys so an upgrading box does not read as
+having never completed a pass.
+
+Each stage now stamps its own heartbeat, which is the point. The 404 that started all of
+this got past every freshness signal there was; what it would still have got past is a
+single stamp saying "the pass ran", because the phase that was broken was not the phase
+being watched. A stalled enrichment is no longer hidden behind a scrape that keeps
+succeeding. Each stage has its own patience too — discovery feeds everything downstream
+and gets four hours, routing is somebody else's server and gets a day.
+
+A *sub*-stage nobody runs is not stale, since splitting the pass up is opt-in and a box
+on one hourly `watch` runs none of them. `watch` itself is always checked, unstamped
+included: a deploy whose pass has never finished is the case the watchdog was built for.
+
+## Why the pagination still reads every page
+
+Cutting the sweep short once a page turns up nothing new only works if the portal returns
+newest first. Portal Inmobiliario and Chilepropiedades are the only two that paginate at
+all — houm's API already stops on its own `next`, and toctoc and assetplan answer with
+everything at once — and neither documents its default sort or the modifier for ordering
+by date. Guessing one that is ignored would leave the pages in relevance order, where
+stopping at the first page of known listings silently drops the unknown ones behind it.
+
+That is a listing lost with nothing to show it happened, which is worse than the requests
+it saves. It stays undone until the sort order can be confirmed against the live portals.
+
 ## Knowing the pass still runs
 
 `watch` stamps `watch_completed_at` in `settings` as its last act, and records what
