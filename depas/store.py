@@ -111,6 +111,23 @@ def pool_query(prefs: Preferences) -> str:
     return f"SELECT * FROM listings_ranked WHERE {' AND '.join([KEPT, *excluded])}"
 
 
+# A detail page is the crawl's most expensive request, so it is only ever spent on a
+# listing the pool could accept: `KEPT` wants an enriched, actual unit nobody turned
+# down, and neither a project nor a /dislike can become one however long it waits.
+PENDING_DETAIL = "detail_fetched_at IS NULL AND is_project = 0 AND COALESCE(interest, 0) >= 0"
+
+
+def pending_detail(connection: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
+    """The listings still owed a detail page, newest first."""
+    # Newest first because a budget that runs out should leave the stale ones waiting,
+    # not the finds: the whole point of the pass is to announce what just appeared.
+    return connection.execute(
+        f"SELECT portal, external_id, url FROM listings WHERE {PENDING_DETAIL} "
+        "ORDER BY first_seen DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+
 def refresh_zone_benchmarks(connection: sqlite3.Connection) -> int:
     """Recompute each commune's median published zone UF/m2 for the other portals to borrow."""
     by_commune: dict[str, list[float]] = defaultdict(list)
@@ -190,19 +207,50 @@ def save_detail(
     connection.commit()
 
 
+# SQLite caps how many values one statement may bind. No single portal answers with
+# this many, but a sweep of several comunas can, so the lookup goes in chunks.
+LOOKUP_CHUNK = 500
+
+
+def _stored_prices(connection: sqlite3.Connection,
+                   listings: Iterable[Listing]) -> dict[tuple[str, str], float]:
+    """What we last stored for each of these, read in one query per portal per chunk."""
+    by_portal: dict[str, list[str]] = defaultdict(list)
+    for listing in listings:
+        by_portal[listing.portal].append(listing.external_id)
+
+    stored: dict[tuple[str, str], float] = {}
+    for portal, external_ids in by_portal.items():
+        for start in range(0, len(external_ids), LOOKUP_CHUNK):
+            chunk = external_ids[start:start + LOOKUP_CHUNK]
+            stored.update(
+                ((portal, row["external_id"]), row["price"])
+                for row in connection.execute(
+                    "SELECT external_id, price FROM listings WHERE portal = ? "
+                    f"AND external_id IN ({', '.join('?' * len(chunk))})",
+                    (portal, *chunk),
+                )
+            )
+    return stored
+
+
 def save(connection: sqlite3.Connection, listings: Iterable[Listing]) -> dict[str, int]:
     """Upsert listings, recording a price_history row whenever the price moves."""
     now = datetime.now(UTC).isoformat()
     counts = {"new": 0, "price_changed": 0, "unchanged": 0}
 
-    for listing in listings:
-        key = (listing.portal, listing.external_id)
-        previous = connection.execute(
-            "SELECT price FROM listings WHERE portal = ? AND external_id = ?", key
-        ).fetchone()
+    # A listing shows up twice when it matches two of the comunas swept, and only Portal
+    # Inmobiliario dedupes its own pages. Last one wins, as it did when each was upserted
+    # in turn — but now it costs one write instead of two.
+    unique = {(listing.portal, listing.external_id): listing for listing in listings}
+    # One query for the whole batch rather than one per listing: cheap against a local
+    # SQLite, a round-trip each against anything over a socket.
+    stored = _stored_prices(connection, unique.values())
 
+    for key, listing in unique.items():
+        previous = stored.get(key)
         values = [getattr(listing, name) for name in FIELDS]
-        if previous is None:
+        if key not in stored:
             connection.execute(
                 f"INSERT INTO listings (portal, external_id, {', '.join(FIELDS)}, "
                 "first_seen, last_seen) "
@@ -216,13 +264,14 @@ def save(connection: sqlite3.Connection, listings: Iterable[Listing]) -> dict[st
                 "WHERE portal = ? AND external_id = ?",
                 [*values, now, *key],
             )
-            counts["price_changed" if previous["price"] != listing.price else "unchanged"] += 1
+            counts["price_changed" if previous != listing.price else "unchanged"] += 1
 
-        if previous is None or previous["price"] != listing.price:
+        if key not in stored or previous != listing.price:
             connection.execute(
-                "INSERT INTO price_history (portal, external_id, price, currency, seen_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                [*key, listing.price, listing.currency, now],
+                "INSERT INTO price_history "
+                "(portal, external_id, price, currency, price_clp, seen_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [*key, listing.price, listing.currency, listing.price_clp, now],
             )
 
     connection.commit()

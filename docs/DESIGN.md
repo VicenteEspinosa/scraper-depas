@@ -223,6 +223,42 @@ Any other status is the portal, not the listing, and still fails loudly.
 coordinates, specs — are owned by `save_detail`, because listing them there would blank
 them on the next re-scrape, the card having nothing to put in their place.
 
+## What the pass is allowed to spend
+
+The search phase re-reads every card on every portal every hour, and has to: it is the
+only way to hear about a new listing or a moved price. The detail page is the expensive
+request — a whole page against one flat — and it is fetched exactly once, which is what
+`detail_fetched_at IS NULL` means. That column is the queue.
+
+So the queue is where the saving is, and it now refuses two things it used to buy. A
+project and a listing somebody turned down are both excluded by `KEPT`, and neither can
+stop being: no length of wait turns a proyecto into a unit or un-says a `/dislike`. The
+page was being fetched for a row that could never be announced. `PENDING_DETAIL` is that
+predicate, written once in `store.py` rather than twice in `cli.py`, and the partial
+index carries the same text so SQLite can still use it.
+
+The queue also hands over the newest first. The budget runs out most passes, and when it
+does the listings left waiting should be the stale ones rather than the finds — the point
+of the pass is to announce what just appeared. Insertion order did the opposite.
+
+Reading the stored descriptions had the same shape of waste in a different place. Prose
+that the current `infer_from_description` has already read yields exactly what it yielded
+last time, so scanning every description every hour bought nothing; only teaching the
+reader something new does. `INFERRED_VERSION` records which release read a row, and the
+pass looks at the rows behind it. Bumping the constant is what backfills, once. The stamp
+is written after the reading rather than before, so a pass that dies half way scans those
+rows again instead of marking them read on the strength of work it never did.
+
+The budgets themselves moved out of the command line and into the settings, because the
+right number moves with how many comunas are watched and changing it should not need a
+redeploy. The flags stayed as a one-off override.
+
+`price_history` was recording `price` and `currency` but not what they were worth. A
+series that runs in UF for a while and in CLP afterwards cannot be read without the UF of
+each of those days, and `uf_daily` only keeps the days the bot happened to be up. The
+trail now stores `price_clp` alongside. The backfill converted what it could and left the
+rest NULL rather than pick a rate: a wrong number in a price history is worse than a gap.
+
 ## Knowing the pass still runs
 
 `watch` stamps `watch_completed_at` in `settings` as its last act, and records what

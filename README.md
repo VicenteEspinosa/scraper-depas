@@ -462,6 +462,7 @@ whatever was edited from the chat since.
 | `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. Environment only — it says where the settings live, so it cannot be one of them. |
 | `TELEGRAM_BOT_TOKEN` | From @BotFather. Environment only: a credential does not belong in the table beside the data. |
 | `DEPAS_ADMINS` | Numeric Telegram user ids allowed to change the settings from a chat, comma-separated. Empty is nobody, and being in the alert chat is not enough — a discussion group is joinable. Ids rather than usernames, because a username can be given away and reclaimed. **The seed carries the author's id**, so replace it with yours if you are hosting your own; `@userinfobot` tells you what it is. |
+| `DEPAS_ENRICH_LIMIT`, `DEPAS_COMMUTE_LIMIT`, `DEPAS_ALERTS_LIMIT` | How much work one `watch` pass may do: detail pages fetched, listings routed, cards posted. Defaults 60, 40 and 10 — the numbers the command-line flags used to hardcode. They belong in the table rather than in the crontab because the right figure moves with how many comunas you watch, and moving it should not need a redeploy. `0` switches a stage off. The flags still exist and override the setting for one run. |
 | `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread, which is also where `/like` and `/dislike` are read from; a group takes the cards but leaves them undiscussable, so verdicts have to be replies. Switching between the two is only this value. |
 
 ## Schema
