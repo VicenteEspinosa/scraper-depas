@@ -1,0 +1,25 @@
+tests/test_enrich.py
+  s_8ca4f48722c18b::t_785c422aa4f06b 1-14,16-46
+  s_8ca4f48722c18b::t_4299f9e78dbb20 15
+depas/cli.py
+  s_8ca4f48722c18b::t_f020593a6f64ff 150
+  s_8ca4f48722c18b::t_3043b568ed06a8 6-7,118,120-127,137,154,160,306-307
+docs/DESIGN.md
+  s_8ca4f48722c18b::t_63a2a866f4a5ab 217-221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "a30e8786bf71b9d395d54ceb9a4082f87692fce1",
+  "prompts": {},
+  "sessions": {
+    "s_8ca4f48722c18b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab0fc3d4-7ad4-4144-ae9f-3f60c9f299ee",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
