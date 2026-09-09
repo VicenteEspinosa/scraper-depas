@@ -1,10 +1,32 @@
 # supercronic crontab for the depas-cron sidecar (TZ=America/Santiago).
 #
-# Hourly pass: scrape the communes in DEPAS_COMMUNES, then enrich whatever
-# is new. Runs at :07 rather than :00 so the portal isn't hit by a clock-aligned
-# request every hour.
-7 * * * * depas watch
+# The pass is four stages, each on its own schedule. Run as separate entries they
+# stop waiting on each other: a slow scrape no longer holds back an alert for a
+# listing that was enriched an hour ago, and the enrichment gets 6 goes an hour
+# instead of one, which clears a backlog six times faster without asking any portal
+# for more requests per second. `depas watch` still runs all four in order if you
+# would rather have one entry.
+#
+# Offset minutes rather than :00 so no portal sees a clock-aligned request, and
+# staggered so the stages tend to run in the order they feed each other.
 
-# Watchdog: warn the admins by DM when no pass has completed in four hours. The
-# hourly one is what posts the alerts, so a crash loop there is otherwise silent.
+# Discovery: sweep DEPAS_COMMUNES on all six portals at once, then delist whatever
+# no believable sweep has turned up. This is the one that must not stall.
+7 * * * * depas discover
+
+# Detail pages: the new ones first, then the re-reads. Every ten minutes, in small
+# batches, which spreads the requests instead of firing 60 at the top of the hour.
+2,12,22,32,42,52 * * * * depas enrich
+
+# Travel times and the zone benchmarks. Transitous is somebody else's server, and
+# nothing downstream needs this to be minutes fresh.
+21,51 * * * * depas route
+
+# Alerts and the pinned ⭐ list. Four times an hour, so a listing enriched at :12 is
+# announced at :15 rather than waiting for the next whole pass.
+15,30,45,0 * * * * depas announce
+
+# Watchdog: warn the admins by DM about any stage that has stopped completing. Each
+# stage stamps its own heartbeat, so a stalled enrichment is no longer hidden behind
+# a scrape that keeps succeeding.
 0 */4 * * * depas healthcheck

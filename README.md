@@ -514,6 +514,36 @@ is the history of one aviso. An entrega date that slips three times means the fl
 been sitting unrented for months, and a field that used to be published and now is not
 is what a broken parser looks like from the inside.
 
+## The pass, and its four stages
+
+One hourly `depas watch` does everything in order and is still supported. But the work is
+four stages that feed each other, and run as separate crontab entries they stop waiting
+on one another:
+
+| Stage | What it does |
+| --- | --- |
+| `depas discover` | Sweeps every comuna in `DEPAS_COMMUNES` across all six portals **at once**, then delists what no believable sweep turned up. |
+| `depas enrich` | Reads the detail pages that are due — the new ones first, then the re-reads. |
+| `depas route` | Travel times and the zone benchmarks. |
+| `depas announce` | Posts what is over the bar and restates the pinned ⭐ list. |
+
+`deploy/crontab` runs them at staggered minutes. The enrichment gets six goes an hour in
+small batches rather than one big one — the same number of requests, spread out, so a
+backlog clears six times faster without asking any portal for more per second — and
+alerts go out four times an hour, so a listing enriched at :12 is announced at :15 instead
+of waiting for the next whole pass.
+
+The six portals are swept in parallel because they are six different hosts; each worker
+keeps the same polite delay, so no single portal sees more requests per second than
+before. And one portal being down no longer costs you the other five's alerts: the
+failure is recorded and the pass carries on. All six failing still fails the pass.
+
+**Each stage keeps its own heartbeat**, and `depas healthcheck` warns about any that has
+stopped completing, with its own patience per stage — discovery feeds everything
+downstream and gets four hours, routing is somebody else's server and gets a day. That
+closes the gap a single "the pass ran" stamp left: a stalled enrichment used to hide
+behind a scrape that kept succeeding.
+
 ## Schema
 
 `migrations/*.sql`, applied in filename order on every `connect()` and recorded
