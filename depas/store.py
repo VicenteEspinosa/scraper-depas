@@ -341,3 +341,29 @@ def clear_notified(connection: sqlite3.Connection, hours: int) -> int:
     ).rowcount
     connection.commit()
     return cleared
+
+
+# The watch's own heartbeat, in `settings` beside the shortlist: what `healthcheck` reads.
+# A pass that dies mid-way still updates `last_seen`, so freshness there proves nothing.
+WATCH_COMPLETED, WATCH_ERROR = "watch_completed_at", "watch_error"
+
+
+def remember_watch(connection: sqlite3.Connection, error: str | None) -> None:
+    """Record how a pass ended: the time it finished, or what stopped it."""
+    key, value = ((WATCH_ERROR, error) if error
+                  else (WATCH_COMPLETED, datetime.now(UTC).isoformat()))
+    connection.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    connection.commit()
+
+
+def stored_watch(connection: sqlite3.Connection) -> tuple[str | None, str | None]:
+    """When the last pass completed, and what stopped the last one that did not."""
+    found = dict(connection.execute(
+        "SELECT key, value FROM settings WHERE key IN (?, ?)",
+        (WATCH_COMPLETED, WATCH_ERROR),
+    ).fetchall())
+    return found.get(WATCH_COMPLETED), found.get(WATCH_ERROR)

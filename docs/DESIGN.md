@@ -223,6 +223,24 @@ Any other status is the portal, not the listing, and still fails loudly.
 coordinates, specs — are owned by `save_detail`, because listing them there would blank
 them on the next re-scrape, the card having nothing to put in their place.
 
+## Knowing the pass still runs
+
+`watch` stamps `watch_completed_at` in `settings` as its last act, and records what
+stopped it in `watch_error` on the way out. `healthcheck` warns the admins when that
+stamp is more than a few hours old.
+
+The stamp is written at the *end* on purpose. The 404 above got past every freshness
+signal further up — `last_seen` on listings was minutes old, the UF cache current, both
+containers up for days — while no alert had been posted for 44 hours, because the scrape
+phase succeeded every time. Only completing the pass proves it completed.
+
+What it deliberately does not watch is silence. Hours with nothing to announce are
+normal, so alerting on "no cards lately" would cry wolf far more often than it caught
+anything. The stale warning repeats every four hours until a pass completes: there is no
+acknowledgement state, and for a bot on one box a reminder that keeps arriving is the
+point. Nothing here survives the box itself dying — the watchdog runs in the same
+container as the thing it watches, and catching that needs something outside it.
+
 ## Telegram
 
 `depas/telegram.py`, `depas/bot.py`.

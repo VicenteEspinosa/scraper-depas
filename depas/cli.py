@@ -2,6 +2,7 @@ import argparse
 import sqlite3
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 
 from curl_cffi.requests.exceptions import HTTPError
 
@@ -37,16 +38,20 @@ from depas.store import (
     refresh_commutes,
     refresh_zone_benchmarks,
     remember_card,
+    remember_watch,
     save,
     save_detail,
     store_preference,
+    stored_watch,
     sync_lease_income,
 )
 from depas.telegram import (
     chat_type,
     chats,
+    escape,
     format_listing,
     hides_comments,
+    reply,
     send_listing,
     verdict_buttons,
 )
@@ -312,8 +317,38 @@ def watch(args: argparse.Namespace) -> None:
         print(f"alerts: {_announce(connection, prefs, args.max_alerts)} posted")
         # Grades move with the pool, so the pinned list is restated once a pass.
         print(f"lista: {'actualizada' if shortlist.sync(connection, prefs) else 'sin cambios'}")
+        remember_watch(connection, None)
+    except Exception as error:
+        # Re-raised: supercronic still logs it and the exit code still says it failed.
+        remember_watch(connection, f"{type(error).__name__}: {error}")
+        raise
     finally:
         fetcher.close()
+        connection.close()
+
+
+def healthcheck(args: argparse.Namespace) -> None:
+    """Warn the admins when no hourly pass has completed for a while."""
+    connection = connect()
+    try:
+        prefs = Preferences.load(connection)
+        completed, error = stored_watch(connection)
+        cutoff = (datetime.now(UTC) - timedelta(hours=args.stale_hours)).isoformat()
+        if completed is not None and completed >= cutoff:
+            print(f"watch healthy: last completed {completed}")
+            return
+
+        # Read on a phone, so the minute rather than the microsecond the stamp carries.
+        since = (f"la última terminó el {completed[:16].replace('T', ' ')} UTC" if completed
+                 else "nunca ha terminado una")
+        warning = (f"⚠️ <b>La pasada horaria no está corriendo</b>\n"
+                   f"Sin pasadas completas en {args.stale_hours} h: {since}.")
+        if error:
+            warning += f"\n\nÚltimo error:\n<code>{escape(error)}</code>"
+        for admin in prefs.admins():
+            reply(str(admin), warning)
+        print(f"watch stale: warned {len(prefs.admins())} admins, last completed {completed}")
+    finally:
         connection.close()
 
 
@@ -564,6 +599,12 @@ def main() -> None:
                          help="listings routed per pass; Transitous is somebody else's server")
     watcher.add_argument("--max-alerts", type=int, default=10)
     watcher.set_defaults(func=watch)
+
+    checker = subparsers.add_parser(
+        "healthcheck", help="warn the admins if the hourly pass has stopped completing")
+    checker.add_argument("--stale-hours", type=int, default=4,
+                         help="hours without a completed pass before the admins are warned")
+    checker.set_defaults(func=healthcheck)
 
     bot = subparsers.add_parser("bot", help="reply to portal links posted in the chat")
     bot.set_defaults(func=lambda _: run_bot())
