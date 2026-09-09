@@ -3,6 +3,8 @@ import sqlite3
 import time
 from collections.abc import Iterator
 
+from curl_cffi.requests.exceptions import HTTPError
+
 from depas import shortlist
 from depas.bot import post_breakdown, refresh_card
 from depas.bot import run as run_bot
@@ -113,9 +115,16 @@ def _infer_stored_descriptions(connection: sqlite3.Connection) -> int:
     return filled
 
 
-def _enrich_one(connection: sqlite3.Connection, fetcher: Fetcher, row: sqlite3.Row) -> None:
+def _enrich_one(connection: sqlite3.Connection, fetcher: Fetcher, row: sqlite3.Row) -> bool:
     """Fetch one detail page, falling back to a computed walk when the portal omits one."""
-    detail = PORTALS[row["portal"]].fetch_detail(fetcher, row["url"])
+    try:
+        detail = PORTALS[row["portal"]].fetch_detail(fetcher, row["url"])
+    except HTTPError as error:
+        if error.response.status_code != 404:  # anything else is the portal, not this listing
+            raise
+        # Taken down between the search and now; it stays unenriched, out of the pool.
+        print(f"gone: {row['url']}")
+        return False
     description = detail.get("description")
     if description:
         # The portal's own spec table always wins; prose only fills what it left empty.
@@ -125,6 +134,7 @@ def _enrich_one(connection: sqlite3.Connection, fetcher: Fetcher, row: sqlite3.R
         detail |= {"nearest_station": station, "station_distance_m": metres,
                    "walk_minutes": minutes, "walk_source": "computed"}
     save_detail(connection, row["portal"], row["external_id"], detail)
+    return True
 
 
 def enrich(args: argparse.Namespace) -> None:
@@ -137,16 +147,17 @@ def enrich(args: argparse.Namespace) -> None:
     ).fetchall()
 
     fetcher = Fetcher()
+    enriched = 0
     try:
         stored_uf(connection, fetcher)
         for index, row in enumerate(pending, start=1):
-            _enrich_one(connection, fetcher, row)
+            enriched += _enrich_one(connection, fetcher, row)
             print(f"\r{index}/{len(pending)} enriched", end="", flush=True)
         refresh_commutes(connection, fetcher, prefs, args.limit)
     finally:
         fetcher.close()
         connection.close()
-    print(f"\n{len(pending)} listings enriched")
+    print(f"\n{enriched} of {len(pending)} listings enriched")
 
 
 FILTERS = (
@@ -292,9 +303,8 @@ def watch(args: argparse.Namespace) -> None:
             "SELECT portal, external_id, url FROM listings WHERE detail_fetched_at IS NULL LIMIT ?",
             (args.enrich_limit,),
         ).fetchall()
-        for row in pending:
-            _enrich_one(connection, fetcher, row)
-        print(f"enrich: {len(pending)} listings")
+        enriched = sum(_enrich_one(connection, fetcher, row) for row in pending)
+        print(f"enrich: {enriched} of {len(pending)} listings")
         print(f"from descriptions: {_infer_stored_descriptions(connection)} listings filled")
         routed = refresh_commutes(connection, fetcher, prefs, args.commute_limit)
         print(f"commutes: {routed} routed")
