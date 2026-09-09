@@ -472,17 +472,50 @@ A *sub*-stage nobody runs is not stale, since splitting the pass up is opt-in an
 on one hourly `watch` runs none of them. `watch` itself is always checked, unstamped
 included: a deploy whose pass has never finished is the case the watchdog was built for.
 
-## Why the pagination still reads every page
+## Cutting the pagination short without trusting the portal
 
-Cutting the sweep short once a page turns up nothing new only works if the portal returns
-newest first. Portal Inmobiliario and Chilepropiedades are the only two that paginate at
-all — houm's API already stops on its own `next`, and toctoc and assetplan answer with
-everything at once — and neither documents its default sort or the modifier for ordering
-by date. Guessing one that is ignored would leave the pages in relevance order, where
-stopping at the first page of known listings silently drops the unknown ones behind it.
+Portal Inmobiliario and Chilepropiedades are the only two that paginate at all — houm's
+API already stops on its own `next`, and toctoc and assetplan answer with everything at
+once. Both *appear* to return the newest listings first, and neither documents it.
 
-That is a listing lost with nothing to show it happened, which is worse than the requests
-it saves. It stays undone until the sort order can be confirmed against the live portals.
+That gap matters more than it sounds, because the failure is silent. If the order is by
+relevance instead, a listing published an hour ago can sit on page three behind ones we
+already have; stopping at the first quiet page never sees it, raises nothing, and leaves
+nothing in the log. A flat lost with no trace is worse than the requests it saves.
+
+So the cutoff is built to be correct whether or not the assumption holds, along three
+lines.
+
+**It takes consecutive quiet pages, not one.** `DEPAS_SWEEP_QUIET_PAGES` defaults to two,
+so a single stale page in the middle of a run of finds does not end a sweep. That is
+cheap insurance against an ordering that is *mostly* by date rather than strictly.
+
+**A deep sweep is the floor under it.** Every `DEPAS_DEEP_SWEEP_HOURS` a portal is read
+to the bottom regardless, so the worst the cutoff can cost is latency — a listing hiding
+behind known ones is found within a day rather than never. Both settings at 0 give back
+exactly the pre-cutoff behaviour, which is the escape hatch if any of this goes wrong.
+
+**And it measures the assumption instead of trusting it.** Each listing carries the page
+it came from in `Listing.extra`, which is not among `FIELDS` and so never reaches the
+database. A sweep records `deepest_new_page`: of the listings it had never seen, the
+deepest page one turned up on. On a deep sweep that is exactly the question the cutoff
+depends on — while it stays below `DEPAS_SWEEP_QUIET_PAGES`, stopping early could not
+have dropped anything. `cutoff_safety` reports the portals where it does not, and
+`discover` prints that every pass. Only deep sweeps count as evidence: a shallow one
+never looked past the cutoff, so it can say nothing about what is behind it.
+
+The known ids reach the portal as a plain `frozenset` on the `Query` rather than as a
+callback. A portal has no database and should not grow one to tell a page of finds from a
+page it has seen before, and `_discover` reads them once per portal on the main thread —
+the workers still touch nothing.
+
+`Query.nothing_new` lives on the dataclass rather than in `depas.portals` because that
+package imports every portal module, so a portal importing back out of it is a cycle.
+
+What this does *not* save much of any more: the sweep going parallel already cut the
+pass's wall clock by about six, so what is left is requests — roughly half of the listing
+sweep. Worth having, not worth being wrong about, which is why the safety net is bigger
+than the optimisation.
 
 ## Knowing the pass still runs
 

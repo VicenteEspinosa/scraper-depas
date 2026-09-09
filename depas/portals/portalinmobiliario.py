@@ -36,6 +36,7 @@ def search(fetcher: Fetcher, query: Query) -> Iterator[Listing]:
 
 def _search_commune(fetcher: Fetcher, query: Query, commune: Commune | None) -> Iterator[Listing]:
     seen: set[str] = set()
+    quiet = 0
     for page in range(query.max_pages):
         url = _build_url(query, commune, offset=page * PAGE_SIZE + 1)
         try:
@@ -47,11 +48,19 @@ def _search_commune(fetcher: Fetcher, query: Query, commune: Commune | None) -> 
         cards = HTMLParser(page_html).css("li.ui-search-layout__item")
         if not cards:
             return
+        found = []
         for card in cards:
             listing = _parse_card(card, commune)
             if listing and listing.external_id not in seen:
                 seen.add(listing.external_id)
-                yield listing
+                # Which page it came from, for the check that the ordering holds. `extra`
+                # is not among FIELDS, so it never reaches the database.
+                listing.extra["page"] = page
+                found.append(listing)
+        yield from found
+        quiet = quiet + 1 if query.nothing_new(found) else 0
+        if query.quiet_pages and quiet >= query.quiet_pages:
+            return
 
 
 def _build_url(query: Query, commune: Commune | None, offset: int) -> str:

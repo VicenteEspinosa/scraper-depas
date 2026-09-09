@@ -38,8 +38,11 @@ from depas.store import (
     add_subscriber,
     clear_notified,
     connect,
+    cutoff_safety,
+    due_a_deep_sweep,
     fill_gaps,
     forget_preference,
+    known_ids,
     mark_delisted,
     mark_notified,
     pending_detail,
@@ -92,6 +95,8 @@ def scrape(args: argparse.Namespace) -> None:
     connection = connect()
     try:
         chosen = {name: PORTALS[name] for name in args.portals} or PORTALS
+        # No prefs: run by hand it reads every page, since the point is usually to see
+        # everything a portal has rather than only what is new.
         counts = _discover(connection, stored_uf(connection, fetcher), query, chosen)
     finally:
         fetcher.close()
@@ -126,6 +131,22 @@ class Swept:
     started_at: str
     listings: list[Listing] = field(default_factory=list)
     error: str | None = None
+    deep: bool = False
+
+    def pages_read(self) -> int | None:
+        """How many pages this sweep got through, for the portals that paginate at all."""
+        pages = [one.extra["page"] for one in self.listings if "page" in one.extra]
+        return max(pages) + 1 if pages else None
+
+    def deepest_new_page(self, known: frozenset[str]) -> int | None:
+        """The deepest page a listing we had never seen turned up on.
+
+        The evidence for or against the ordering the cutoff assumes: while this stays
+        under DEPAS_SWEEP_QUIET_PAGES, stopping early cannot have dropped anything.
+        """
+        pages = [one.extra["page"] for one in self.listings
+                 if "page" in one.extra and one.external_id not in known]
+        return max(pages) if pages else None
 
 
 def _sweep_portal(portal: ModuleType, query: Query, uf_value: float) -> list[Swept]:
@@ -152,16 +173,19 @@ def _sweep_portal(portal: ModuleType, query: Query, uf_value: float) -> list[Swe
                 # Recorded rather than raised: the comunas already swept are real
                 # findings, and the other five portals have nothing to do with this.
                 swept.append(Swept(portal.NAME, commune, started_at,
-                                   error=f"{type(error).__name__}: {error}"))
+                                   error=f"{type(error).__name__}: {error}",
+                                   deep=query.quiet_pages == 0))
                 return swept
-            swept.append(Swept(portal.NAME, commune, started_at, found))
+            swept.append(Swept(portal.NAME, commune, started_at, found,
+                               deep=query.quiet_pages == 0))
         return swept
     finally:
         fetcher.close()
 
 
 def _discover(connection: sqlite3.Connection, uf_value: float, query: Query,
-              portals: Mapping[str, ModuleType] | None = None) -> dict[str, int]:
+              portals: Mapping[str, ModuleType] | None = None,
+              prefs: Preferences | None = None) -> dict[str, int]:
     """Sweep every portal at once, then write what they found.
 
     One worker per portal: they are six different hosts, so this costs no host more
@@ -169,17 +193,31 @@ def _discover(connection: sqlite3.Connection, uf_value: float, query: Query,
     delay inside each thread — and the pass stops taking the sum of six portals.
     """
     chosen = PORTALS if portals is None else portals
-    totals = {"new": 0, "price_changed": 0, "unchanged": 0, "portals": 0, "failed": 0}
+    quiet = 0 if prefs is None else prefs.value("DEPAS_SWEEP_QUIET_PAGES")
+    hours = 0 if prefs is None else prefs.value("DEPAS_DEEP_SWEEP_HOURS")
+    # Both read here rather than inside a worker, which never touches the database: what
+    # each portal has already stored, and whether it is its turn to be read to the bottom.
+    known = {name: known_ids(connection, name) for name in chosen}
+    plans = {name: replace(query, known=known[name],
+                           quiet_pages=0 if due_a_deep_sweep(connection, name, hours)
+                           else quiet)
+             for name in chosen}
+
+    totals = {"new": 0, "price_changed": 0, "unchanged": 0, "portals": 0, "failed": 0,
+              "deep": 0}
     with ThreadPoolExecutor(max_workers=len(chosen)) as pool:
-        sweeps = pool.map(lambda portal: _sweep_portal(portal, query, uf_value),
-                          chosen.values())
+        sweeps = pool.map(lambda name: _sweep_portal(chosen[name], plans[name], uf_value),
+                          list(chosen))
         for swept in [one for portal in sweeps for one in portal]:
             counts = save(connection, swept.listings)
             remember_sweep(connection, swept.portal, _slug(swept.commune),
-                           swept.started_at, len(swept.listings), swept.error)
+                           swept.started_at, len(swept.listings), swept.error,
+                           pages_read=swept.pages_read(), deep=swept.deep,
+                           deepest_new_page=swept.deepest_new_page(known[swept.portal]))
             for name in ("new", "price_changed", "unchanged"):
                 totals[name] += counts[name]
             totals["failed" if swept.error else "portals"] += 1
+            totals["deep"] += int(swept.deep and not swept.error)
             if swept.error:
                 print(f"WARNING {swept.portal} "
                       f"{_slug(swept.commune) or 'todas'}: {swept.error}")
@@ -428,9 +466,16 @@ def discover(args: argparse.Namespace) -> None:
         # fetched, and naming `stored_uf` inside the call would have it evaluated first.
         query = _watched_query(prefs)
         # The ranked view prices per m2 straight from this, so cache it before reading it.
-        counts = _discover(connection, stored_uf(connection, fetcher), query)
+        counts = _discover(connection, stored_uf(connection, fetcher), query,
+                           prefs=prefs)
         print(f"scrape: {counts['new']} new, {counts['price_changed']} price changed, "
-              f"{counts['portals']} sweeps ok, {counts['failed']} failed")
+              f"{counts['portals']} sweeps ok, {counts['failed']} failed, "
+              f"{counts['deep']} read to the bottom")
+        # The cutoff assumes the portal returns the newest first. This is the check.
+        for risky in cutoff_safety(connection, prefs.value("DEPAS_SWEEP_QUIET_PAGES")):
+            print(f"WARNING {risky['portal']}: a listing we had never seen turned up on "
+                  f"page {risky['deepest'] + 1}, past where the cutoff stops — its pages "
+                  f"are not newest-first, so set DEPAS_SWEEP_QUIET_PAGES to 0")
         gone = sweep_delisted(connection, prefs.value("DEPAS_DELIST_AFTER"))
         print(f"delisted: {gone} listings no sweep has turned up")
         for quiet in quiet_portals(connection):
