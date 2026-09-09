@@ -4,10 +4,11 @@ from types import SimpleNamespace
 import pytest
 from curl_cffi.requests.exceptions import HTTPError
 
-from depas.cli import _enrich_one, _infer_stored_descriptions
+from depas.cli import _budget, _enrich_one, _infer_stored_descriptions
 from depas.detail import INFERRED_VERSION, infer_from_description
 from depas.models import Listing
 from depas.store import connect, save
+from tests.support import prefs
 
 
 @pytest.fixture
@@ -95,3 +96,24 @@ def test_a_smarter_reader_goes_round_again(connection, monkeypatch):
 
 def test_a_listing_with_no_description_is_never_scanned(connection):
     assert _infer_stored_descriptions(connection) == 0
+
+
+# -- how much work one pass may do ------------------------------------------------
+
+
+def test_a_budget_falls_back_to_its_setting(connection, monkeypatch):
+    """The flag overrides one run; the setting is the standing value, editable from the chat."""
+    monkeypatch.setenv("DEPAS_ENRICH_LIMIT", "7")
+    preferences = prefs()
+
+    assert _budget(None, preferences, "DEPAS_ENRICH_LIMIT") == 7
+    assert _budget(3, preferences, "DEPAS_ENRICH_LIMIT") == 3
+
+
+def test_the_budgets_have_the_numbers_the_flags_used_to_carry(connection):
+    """Nobody's box changes behaviour just by upgrading into settings-held budgets."""
+    unset = prefs()
+
+    assert (_budget(None, unset, "DEPAS_ENRICH_LIMIT"),
+            _budget(None, unset, "DEPAS_COMMUTE_LIMIT"),
+            _budget(None, unset, "DEPAS_ALERTS_LIMIT")) == (60, 40, 10)

@@ -106,6 +106,11 @@ def _matching(
         yield listing
 
 
+def _budget(override: int | None, prefs: Preferences, name: str) -> int:
+    """How much work this pass may do: the flag if one was given, else the setting."""
+    return override if override is not None else prefs.value(name)
+
+
 HAS_DESCRIPTION = "description IS NOT NULL AND description != ''"
 
 
@@ -159,7 +164,8 @@ def _enrich_one(connection: sqlite3.Connection, fetcher: Fetcher, row: sqlite3.R
 def enrich(args: argparse.Namespace) -> None:
     connection = connect()
     prefs = Preferences.load(connection)
-    pending = pending_detail(connection, args.limit)
+    limit = _budget(args.limit, prefs, "DEPAS_ENRICH_LIMIT")
+    pending = pending_detail(connection, limit)
 
     fetcher = Fetcher()
     enriched = 0
@@ -168,7 +174,9 @@ def enrich(args: argparse.Namespace) -> None:
         for index, row in enumerate(pending, start=1):
             enriched += _enrich_one(connection, fetcher, row)
             print(f"\r{index}/{len(pending)} enriched", end="", flush=True)
-        refresh_commutes(connection, fetcher, prefs, args.limit)
+        # Its own budget: `--limit` names the detail pages, and used to silently cap
+        # the routing too.
+        refresh_commutes(connection, fetcher, prefs, prefs.value("DEPAS_COMMUTE_LIMIT"))
     finally:
         fetcher.close()
         connection.close()
@@ -314,14 +322,18 @@ def watch(args: argparse.Namespace) -> None:
                 continue
             print(f"scrape {name}: {counts['new']} new, {counts['price_changed']} price changed")
 
-        pending = pending_detail(connection, args.enrich_limit)
+        pending = pending_detail(
+            connection, _budget(args.enrich_limit, prefs, "DEPAS_ENRICH_LIMIT"))
         enriched = sum(_enrich_one(connection, fetcher, row) for row in pending)
         print(f"enrich: {enriched} of {len(pending)} listings")
         print(f"from descriptions: {_infer_stored_descriptions(connection)} listings filled")
-        routed = refresh_commutes(connection, fetcher, prefs, args.commute_limit)
+        routed = refresh_commutes(
+            connection, fetcher, prefs,
+            _budget(args.commute_limit, prefs, "DEPAS_COMMUTE_LIMIT"))
         print(f"commutes: {routed} routed")
         print(f"zone benchmarks: {refresh_zone_benchmarks(connection)} communes")
-        print(f"alerts: {_announce(connection, prefs, args.max_alerts)} posted")
+        alerts = _budget(args.max_alerts, prefs, "DEPAS_ALERTS_LIMIT")
+        print(f"alerts: {_announce(connection, prefs, alerts)} posted")
         # Grades move with the pool, so the pinned list is restated once a pass.
         print(f"lista: {'actualizada' if shortlist.sync(connection, prefs) else 'sin cambios'}")
         remember_watch(connection, None)
@@ -597,14 +609,19 @@ def main() -> None:
     scraper.set_defaults(func=scrape)
 
     enricher = subparsers.add_parser("enrich", help="fetch detail pages for listings missing them")
-    enricher.add_argument("--limit", type=int, default=50)
+    enricher.add_argument("--limit", type=int,
+                          help="detail pages this run; default DEPAS_ENRICH_LIMIT")
     enricher.set_defaults(func=enrich)
 
     watcher = subparsers.add_parser("watch", help="scheduled pass: scrape then enrich new listings")
-    watcher.add_argument("--enrich-limit", type=int, default=60)
-    watcher.add_argument("--commute-limit", type=int, default=40,
-                         help="listings routed per pass; Transitous is somebody else's server")
-    watcher.add_argument("--max-alerts", type=int, default=10)
+    # No defaults here: the standing budgets live in the settings, where they can be
+    # moved without a redeploy. A flag is a one-off override for this run.
+    watcher.add_argument("--enrich-limit", type=int,
+                         help="detail pages this pass; default DEPAS_ENRICH_LIMIT")
+    watcher.add_argument("--commute-limit", type=int,
+                         help="listings routed this pass; default DEPAS_COMMUTE_LIMIT")
+    watcher.add_argument("--max-alerts", type=int,
+                         help="cards posted this pass; default DEPAS_ALERTS_LIMIT")
     watcher.set_defaults(func=watch)
 
     checker = subparsers.add_parser(

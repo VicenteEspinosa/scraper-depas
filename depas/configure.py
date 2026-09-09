@@ -75,6 +75,9 @@ LABELS = {
     "DEPAS_FURNISHED": "🛋️ Amoblado",
     "DEPAS_TOP_FLOOR": "🔝 Último piso",
     "DEPAS_TRAITS_WEIGHT": "✨ Peso · características",
+    "DEPAS_ENRICH_LIMIT": "📄 Fichas por pasada",
+    "DEPAS_COMMUTE_LIMIT": "🧭 Rutas por pasada",
+    "DEPAS_ALERTS_LIMIT": "📢 Tarjetas por pasada",
 }
 
 # Group key, heading and the settings it holds, in order; each appears exactly once.
@@ -92,6 +95,8 @@ MENU: tuple[tuple[str, str, tuple[str, ...]], ...] = (
                              "DEPAS_FURNISHED", "DEPAS_TOP_FLOOR")),
     ("weights", "⚖️ Pesos", tuple(name for name in BY_NAME if name.endswith("_WEIGHT"))),
     ("bot", "🤖 Bot", ("TELEGRAM_CHAT_ID", "DEPAS_ADMINS")),
+    ("pace", "⏱️ Ritmo", ("DEPAS_ENRICH_LIMIT", "DEPAS_COMMUTE_LIMIT",
+                          "DEPAS_ALERTS_LIMIT")),
 )
 GROUPS = {key: (heading, names) for key, heading, names in MENU}
 
@@ -102,7 +107,8 @@ GROUPS = {key: (heading, names) for key, heading, names in MENU}
 NUMBER, WEIGHT, CHOICE, DAY, PLACES, PEOPLE, HOME, COMMUNES, TIERS, PICK = (
     "number", "weight", "choice", "day", "places", "people", "home", "communes",
     "tiers", "pick")
-KIND = {"_whole": NUMBER, "_clp": NUMBER, "_number": WEIGHT, "_disposition": CHOICE,
+KIND = {"_whole": NUMBER, "_clp": NUMBER, "_budget": NUMBER, "_number": WEIGHT,
+        "_disposition": CHOICE,
         "_day": DAY, "_locations": PLACES, "_admins": PEOPLE, "_home": HOME,
         "_communes": COMMUNES, "_tiers": TIERS, "_text": PICK}
 
@@ -116,7 +122,9 @@ UNITS = {"DEPAS_WALK_MAX": " min", "DEPAS_WALK_TARGET": " min",
          "DEPAS_AREA_MIN": " m²", "DEPAS_AREA_TARGET": " m²",
          "DEPAS_AGE_TARGET": " años", "DEPAS_FLOOR_TARGET": "º",
          "DEPAS_BEDROOMS_MIN": "D", "DEPAS_AMENITIES_TARGET": " de 9",
-         "DEPAS_GRADE_MIN": " pts"}
+         "DEPAS_GRADE_MIN": " pts",
+         "DEPAS_ENRICH_LIMIT": " fichas", "DEPAS_COMMUTE_LIMIT": " rutas",
+         "DEPAS_ALERTS_LIMIT": " tarjetas"}
 # What a weight is ever set to in practice.
 WEIGHT_PRESETS = ("0", "0.5", "1", "1.5", "2", "3")
 # As far ahead as a portal ever publishes an entrega date.

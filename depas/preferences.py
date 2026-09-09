@@ -26,6 +26,14 @@ def _clp(name: str, raw: str) -> int:
     return int(raw)
 
 
+def _budget(name: str, raw: str) -> int:
+    """How much work one pass may do. Zero turns the stage off; negative is a trap,
+    since SQLite reads a negative LIMIT as no limit at all."""
+    if not raw.isdigit():
+        raise ValueError(f"{name} must be a whole number of 0 or more, got {raw!r}")
+    return int(raw)
+
+
 def _number(name: str, raw: str) -> float:
     try:
         return float(raw)
@@ -301,6 +309,22 @@ SETTINGS: tuple[Setting, ...] = (
             example='{"commune":"nunoa","price_clp":800000,"common_expenses":130000,'
                     '"area_m2":62,"lat":-33.45590,"lon":-70.59780}'),
 
+    # -- how much work one pass is allowed to do -------------------------------------
+    # Budgets, not preferences: they bound the requests a pass makes, and the right
+    # number moves with how many comunas are watched rather than with what you want.
+    Setting("DEPAS_ENRICH_LIMIT", _budget,
+            "Cuántas fichas de detalle baja cada pasada. Es el gasto más caro del "
+            "crawl, así que subirlo acelera las alertas y castiga al portal. En 0 no "
+            "se enriquece nada y el pool deja de crecer.",
+            example="60", default="60"),
+    Setting("DEPAS_COMMUTE_LIMIT", _budget,
+            "Cuántos avisos se rutean por pasada. Transitous es un servidor ajeno, "
+            "así que conviene no exigirle de más.",
+            example="40", default="40"),
+    Setting("DEPAS_ALERTS_LIMIT", _budget,
+            "Máximo de tarjetas publicadas por pasada. Lo que pasa el corte y no "
+            "alcanza a salir no se pierde: sale en la siguiente.",
+            example="10", default="10"),
 )
 
 BY_NAME: Mapping[str, Setting] = {setting.name: setting for setting in SETTINGS}
