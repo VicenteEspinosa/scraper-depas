@@ -1,9 +1,11 @@
 import argparse
 import sqlite3
 import time
-from collections.abc import Iterator
-from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from collections.abc import Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from types import ModuleType
 
 from curl_cffi.requests.exceptions import HTTPError
@@ -49,6 +51,7 @@ from depas.store import (
     remember_watch,
     save,
     save_detail,
+    stale_stages,
     store_preference,
     stored_watch,
     sweep_delisted,
@@ -84,26 +87,21 @@ def scrape(args: argparse.Namespace) -> None:
     fetcher = Fetcher()
     connection = connect()
     try:
-        stored_uf(connection, fetcher)
-        for name in args.portals or PORTALS:
-            try:
-                found = _matching(PORTALS[name].search(fetcher, query), fetcher, query)
-                counts = save(connection, found)
-            except NotImplementedError as error:
-                print(f"{name}: skipped ({error})")
-                continue
-            print(f"{name}: {counts['new']} new, {counts['price_changed']} price changed")
+        chosen = {name: PORTALS[name] for name in args.portals} or PORTALS
+        counts = _discover(connection, stored_uf(connection, fetcher), query, chosen)
     finally:
         fetcher.close()
         connection.close()
+    print(f"{counts['new']} new, {counts['price_changed']} price changed, "
+          f"{counts['portals']} sweeps ok, {counts['failed']} failed")
 
 
 def _matching(
-    listings: Iterator[Listing], fetcher: Fetcher, query: Query
+    listings: Iterator[Listing], uf_value: float, query: Query
 ) -> Iterator[Listing]:
     """Normalize UF prices to CLP; portal-side filters are unreliable, so re-check them here."""
     for listing in listings:
-        normalize(listing, fetcher)
+        normalize(listing, uf_value)
         if query.min_price is not None and listing.price_clp < query.min_price:
             continue
         if query.max_price is not None and listing.price_clp > query.max_price:
@@ -115,32 +113,76 @@ def _matching(
         yield listing
 
 
-def _sweep(connection: sqlite3.Connection, fetcher: Fetcher, portal: ModuleType,
-           query: Query) -> dict[str, int] | None:
-    """Scrape one portal comuna by comuna, recording what each sweep actually saw.
+@dataclass(slots=True)
+class Swept:
+    """One (portal, comuna) sweep as it came back, before anything has been written."""
 
-    Comuna by comuna rather than all at once because that is the unit the evidence has
-    to be recorded at: one comuna's markup breaking must not make the portal's other
-    comunas look swept. Returns None for a portal that does not do this operation.
+    portal: str
+    commune: Commune | None
+    started_at: str
+    listings: list[Listing] = field(default_factory=list)
+    error: str | None = None
+
+
+def _sweep_portal(portal: ModuleType, query: Query, uf_value: float) -> list[Swept]:
+    """Scrape one portal comuna by comuna, in this thread, touching no database.
+
+    The workers fetch and parse; the caller writes. That keeps SQLite to the one writer
+    it is happiest with and means nothing here has to think about transactions — the
+    listings come back as plain objects.
+
+    Comuna by comuna because that is the unit the evidence is recorded at: one comuna's
+    markup breaking must not make the portal's others look swept.
     """
-    totals = {"new": 0, "price_changed": 0, "unchanged": 0}
-    for commune in query.communes or [None]:
-        one = replace(query, communes=[commune] if commune else [])
-        started_at = datetime.now(UTC).isoformat()
-        try:
-            found = list(_matching(portal.search(fetcher, one), fetcher, one))
-        except NotImplementedError:
-            return None
-        except Exception as error:
-            # Recorded and re-raised: the pass still fails, but a comuna that never got
-            # looked at must not be mistaken later for one that came back empty.
-            remember_sweep(connection, portal.NAME, _slug(commune), started_at, 0,
-                           f"{type(error).__name__}: {error}")
-            raise
-        counts = save(connection, found)
-        remember_sweep(connection, portal.NAME, _slug(commune), started_at, len(found), None)
-        for name in totals:
-            totals[name] += counts[name]
+    fetcher = Fetcher()
+    swept: list[Swept] = []
+    try:
+        for commune in query.communes or [None]:
+            one = replace(query, communes=[commune] if commune else [])
+            started_at = datetime.now(UTC).isoformat()
+            try:
+                found = list(_matching(portal.search(fetcher, one), uf_value, one))
+            except NotImplementedError:
+                return []  # this portal does not do this operation at all
+            except Exception as error:
+                # Recorded rather than raised: the comunas already swept are real
+                # findings, and the other five portals have nothing to do with this.
+                swept.append(Swept(portal.NAME, commune, started_at,
+                                   error=f"{type(error).__name__}: {error}"))
+                return swept
+            swept.append(Swept(portal.NAME, commune, started_at, found))
+        return swept
+    finally:
+        fetcher.close()
+
+
+def _discover(connection: sqlite3.Connection, uf_value: float, query: Query,
+              portals: Mapping[str, ModuleType] | None = None) -> dict[str, int]:
+    """Sweep every portal at once, then write what they found.
+
+    One worker per portal: they are six different hosts, so this costs no host more
+    requests per second than the sequential version did — `Fetcher` keeps its own polite
+    delay inside each thread — and the pass stops taking the sum of six portals.
+    """
+    chosen = PORTALS if portals is None else portals
+    totals = {"new": 0, "price_changed": 0, "unchanged": 0, "portals": 0, "failed": 0}
+    with ThreadPoolExecutor(max_workers=len(chosen)) as pool:
+        sweeps = pool.map(lambda portal: _sweep_portal(portal, query, uf_value),
+                          chosen.values())
+        for swept in [one for portal in sweeps for one in portal]:
+            counts = save(connection, swept.listings)
+            remember_sweep(connection, swept.portal, _slug(swept.commune),
+                           swept.started_at, len(swept.listings), swept.error)
+            for name in ("new", "price_changed", "unchanged"):
+                totals[name] += counts[name]
+            totals["failed" if swept.error else "portals"] += 1
+            if swept.error:
+                print(f"WARNING {swept.portal} "
+                      f"{_slug(swept.commune) or 'todas'}: {swept.error}")
+    # One portal being down is not worth every other portal's alerts, which is what
+    # raising here used to cost. All of them failing is a different thing.
+    if totals["portals"] == 0 and totals["failed"] > 0:
+        raise RuntimeError(f"every sweep failed ({totals['failed']} of them)")
     return totals
 
 
@@ -204,30 +246,6 @@ def _enrich_one(connection: sqlite3.Connection, fetcher: Fetcher, row: sqlite3.R
                    "walk_minutes": minutes, "walk_source": "computed"}
     save_detail(connection, row["portal"], row["external_id"], detail)
     return True
-
-
-def enrich(args: argparse.Namespace) -> None:
-    connection = connect()
-    prefs = Preferences.load(connection)
-    limit = _budget(args.limit, prefs, "DEPAS_ENRICH_LIMIT")
-    # Same two budgets the pass uses, so running this by hand does the same work.
-    pending = pending_detail(connection, limit, prefs.value("DEPAS_REFRESH_LIMIT"))
-
-    fetcher = Fetcher()
-    enriched = 0
-    try:
-        stored_uf(connection, fetcher)
-        for index, row in enumerate(pending, start=1):
-            enriched += _enrich_one(connection, fetcher, row)
-            print(f"\r{index}/{len(pending)} enriched", end="", flush=True)
-        # Its own budget: `--limit` names the detail pages, and used to silently cap
-        # the routing too.
-        refresh_commutes(connection, fetcher, prefs, prefs.value("DEPAS_COMMUTE_LIMIT"))
-        remember_validators(connection, fetcher.validators)
-    finally:
-        fetcher.close()
-        connection.close()
-    print(f"\n{enriched} of {len(pending)} listings enriched")
 
 
 FILTERS = (
@@ -343,87 +361,145 @@ def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) ->
     return posted
 
 
-def watch(args: argparse.Namespace) -> None:
-    """One scheduled pass: scrape the configured communes, then enrich what is new."""
+def _watched_query(prefs: Preferences) -> Query:
+    """What the scheduled work looks for, read from the settings rather than the flags."""
+    communes = [Commune(slug) for slug in prefs.communes()]
+    if not communes:
+        raise ValueError("set DEPAS_COMMUNES to the commune slugs you want watched")
+    return Query(
+        operation="rent",
+        communes=communes,
+        max_price=prefs.max_rent(),  # derived from the budget, not configured
+        min_bedrooms=prefs.value("DEPAS_BEDROOMS_MIN"),
+    )
+
+
+@contextmanager
+def _stage(name: str) -> Iterator[tuple[sqlite3.Connection, Fetcher, Preferences]]:
+    """One stage of the scheduled work, stamped only if it ran the whole way through.
+
+    The stamp goes on at the end on purpose: a 404 in the enrichment once got past every
+    freshness signal there was — listings minutes old, the UF cache current, both
+    containers up for days — while no alert had been posted for 44 hours. Only finishing
+    proves it finished. What is new is that each stage says so for itself, so a stalled
+    enrichment is no longer hidden behind a scrape that keeps succeeding.
+    """
     fetcher = Fetcher()
     connection = connect()
     try:
-        # Inside the try: what this pass scrapes is read from the database, so both are open.
-        prefs = Preferences.load(connection)
-        communes = [Commune(slug) for slug in prefs.communes()]
-        if not communes:
-            raise ValueError("set DEPAS_COMMUNES to the commune slugs you want watched")
-
-        query = Query(
-            operation="rent",
-            communes=communes,
-            max_price=prefs.max_rent(),  # derived from the budget, not configured
-            min_bedrooms=prefs.value("DEPAS_BEDROOMS_MIN"),
-        )
-        # The ranked view prices per m2 straight from this, so cache it before reading it.
-        stored_uf(connection, fetcher)
-        for name, portal in PORTALS.items():
-            counts = _sweep(connection, fetcher, portal, query)
-            if counts is None:
-                continue
-            print(f"scrape {name}: {counts['new']} new, {counts['price_changed']} price changed")
-
-        pending = pending_detail(
-            connection,
-            _budget(args.enrich_limit, prefs, "DEPAS_ENRICH_LIMIT"),
-            _budget(args.refresh_limit, prefs, "DEPAS_REFRESH_LIMIT"))
-        enriched = sum(_enrich_one(connection, fetcher, row) for row in pending)
-        print(f"enrich: {enriched} of {len(pending)} listings")
-        # After the enrichment, so a 404 seen just now counts towards this pass.
-        gone = sweep_delisted(connection, prefs.value("DEPAS_DELIST_AFTER"))
-        print(f"delisted: {gone} listings no sweep has turned up")
-        for quiet in quiet_portals(connection):
-            print(f"WARNING {quiet['portal']}: last sweep saw no listings at all, "
-                  f"where an earlier one saw {quiet['cards_at_best']} — parser or portal?")
-        print(f"from descriptions: {_infer_stored_descriptions(connection)} listings filled")
-        routed = refresh_commutes(
-            connection, fetcher, prefs,
-            _budget(args.commute_limit, prefs, "DEPAS_COMMUTE_LIMIT"))
-        print(f"commutes: {routed} routed")
-        print(f"zone benchmarks: {refresh_zone_benchmarks(connection)} communes")
-        alerts = _budget(args.max_alerts, prefs, "DEPAS_ALERTS_LIMIT")
-        print(f"alerts: {_announce(connection, prefs, alerts)} posted")
-        # Grades move with the pool, so the pinned list is restated once a pass.
-        print(f"lista: {'actualizada' if shortlist.sync(connection, prefs) else 'sin cambios'}")
+        yield connection, fetcher, Preferences.load(connection)
         remember_validators(connection, fetcher.validators)
-        urls, offered = validator_coverage(connection)
-        print(f"http: {offered} of {urls} urls offer a cache validator")
-        remember_watch(connection, None)
+        remember_watch(connection, None, name)
     except Exception as error:
         # Re-raised: supercronic still logs it and the exit code still says it failed.
-        remember_watch(connection, f"{type(error).__name__}: {error}")
+        remember_watch(connection, f"{type(error).__name__}: {error}", name)
         raise
     finally:
         fetcher.close()
         connection.close()
 
 
+def discover(args: argparse.Namespace) -> None:
+    """Sweep every configured comuna on every portal, all six at once."""
+    with _stage("discover") as (connection, fetcher, prefs):
+        # The query first: a misconfigured comuna list must fail before anything is
+        # fetched, and naming `stored_uf` inside the call would have it evaluated first.
+        query = _watched_query(prefs)
+        # The ranked view prices per m2 straight from this, so cache it before reading it.
+        counts = _discover(connection, stored_uf(connection, fetcher), query)
+        print(f"scrape: {counts['new']} new, {counts['price_changed']} price changed, "
+              f"{counts['portals']} sweeps ok, {counts['failed']} failed")
+        gone = sweep_delisted(connection, prefs.value("DEPAS_DELIST_AFTER"))
+        print(f"delisted: {gone} listings no sweep has turned up")
+        for quiet in quiet_portals(connection):
+            print(f"WARNING {quiet['portal']}: last sweep saw no listings at all, "
+                  f"where an earlier one saw {quiet['cards_at_best']} — parser or portal?")
+
+
+def enrich(args: argparse.Namespace) -> None:
+    """Read the detail pages that are due: the new ones first, then the re-reads."""
+    with _stage("enrich") as (connection, fetcher, prefs):
+        # The ranked view prices per m2 straight from this, so cache it before reading it.
+        stored_uf(connection, fetcher)
+        pending = pending_detail(
+            connection,
+            _budget(args.limit, prefs, "DEPAS_ENRICH_LIMIT"),
+            _budget(args.refresh_limit, prefs, "DEPAS_REFRESH_LIMIT"))
+        enriched = sum(_enrich_one(connection, fetcher, row) for row in pending)
+        print(f"enrich: {enriched} of {len(pending)} listings")
+        print(f"from descriptions: {_infer_stored_descriptions(connection)} listings filled")
+        urls, offered = validator_coverage(connection)
+        print(f"http: {offered} of {urls} urls offer a cache validator")
+
+
+def route(args: argparse.Namespace) -> None:
+    """Travel times and the zone benchmarks, both of which the grading reads."""
+    with _stage("route") as (connection, fetcher, prefs):
+        routed = refresh_commutes(
+            connection, fetcher, prefs,
+            _budget(args.limit, prefs, "DEPAS_COMMUTE_LIMIT"))
+        print(f"commutes: {routed} routed")
+        print(f"zone benchmarks: {refresh_zone_benchmarks(connection)} communes")
+
+
+def announce(args: argparse.Namespace) -> None:
+    """Post what is enriched, un-announced and over the bar, then restate the ⭐ list."""
+    with _stage("announce") as (connection, _fetcher, prefs):
+        alerts = _budget(args.limit, prefs, "DEPAS_ALERTS_LIMIT")
+        print(f"alerts: {_announce(connection, prefs, alerts)} posted")
+        # Grades move with the pool, so the pinned list is restated once a pass.
+        print(f"lista: {'actualizada' if shortlist.sync(connection, prefs) else 'sin cambios'}")
+
+
+# Every stage in the order they feed each other, which is what one hourly crontab entry
+# runs. Split them across entries and each keeps its own heartbeat; leave it as one and
+# nothing about the old behaviour changes.
+PASS_STAGES = (discover, enrich, route, announce)
+
+
+def watch(args: argparse.Namespace) -> None:
+    """One scheduled pass: every stage in order, stamped as a whole as well as apart."""
+    connection = connect()
+    try:
+        for stage in PASS_STAGES:
+            stage(args)
+        remember_watch(connection, None)
+    except Exception as error:
+        remember_watch(connection, f"{type(error).__name__}: {error}")
+        raise
+    finally:
+        connection.close()
+
+
+STAGE_LABEL = {"watch": "la pasada horaria", "discover": "el barrido de portales",
+               "enrich": "la lectura de fichas", "route": "el ruteo de viajes",
+               "announce": "la publicación de alertas"}
+
+
 def healthcheck(args: argparse.Namespace) -> None:
-    """Warn the admins when no hourly pass has completed for a while."""
+    """Warn the admins when a stage has gone too long without completing."""
     connection = connect()
     try:
         prefs = Preferences.load(connection)
-        completed, error = stored_watch(connection)
-        cutoff = (datetime.now(UTC) - timedelta(hours=args.stale_hours)).isoformat()
-        if completed is not None and completed >= cutoff:
+        stale = stale_stages(connection, args.stale_hours)
+        if not stale:
+            completed, _ = stored_watch(connection)
             print(f"watch healthy: last completed {completed}")
             return
 
-        # Read on a phone, so the minute rather than the microsecond the stamp carries.
-        since = (f"la última terminó el {completed[:16].replace('T', ' ')} UTC" if completed
-                 else "nunca ha terminado una")
-        warning = (f"⚠️ <b>La pasada horaria no está corriendo</b>\n"
-                   f"Sin pasadas completas en {args.stale_hours} h: {since}.")
-        if error:
-            warning += f"\n\nÚltimo error:\n<code>{escape(error)}</code>"
+        lines = []
+        for stage, completed, error in stale:
+            # Read on a phone, so the minute rather than the microsecond it carries.
+            since = (f"la última terminó el {completed[:16].replace('T', ' ')} UTC"
+                     if completed else "nunca ha terminado una")
+            lines.append(f"• <b>{STAGE_LABEL.get(stage, stage)}</b>: {since}.")
+            if error:
+                lines.append(f"  <code>{escape(error)}</code>")
+        warning = "⚠️ <b>Hay etapas que no están corriendo</b>\n" + "\n".join(lines)
         for admin in prefs.admins():
             reply(str(admin), warning)
-        print(f"watch stale: warned {len(prefs.admins())} admins, last completed {completed}")
+        print(f"watch stale: warned {len(prefs.admins())} admins about "
+              f"{', '.join(stage for stage, _, _ in stale)}")
     finally:
         connection.close()
 
@@ -649,6 +725,11 @@ def config_import_env(args: argparse.Namespace) -> None:
     print(f"imported {len(seeded)} settings from the environment: {', '.join(seeded)}")
 
 
+# What every stage reads off its args. `watch` calls the stages directly, so its own
+# namespace has to carry the same names — None everywhere, meaning "use the setting".
+_STAGE_DEFAULTS = {"limit": None, "refresh_limit": None}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="depas")
     subparsers = parser.add_subparsers(required=True)
@@ -665,23 +746,35 @@ def main() -> None:
     scraper.add_argument("--min-area-m2", type=float)
     scraper.set_defaults(func=scrape)
 
-    enricher = subparsers.add_parser("enrich", help="fetch detail pages for listings missing them")
+    # One stage each, so they can run on their own schedules; `watch` is all four in
+    # order and is what a single crontab entry still gets.
+    discoverer = subparsers.add_parser(
+        "discover", help="sweep every configured comuna on every portal")
+    discoverer.set_defaults(func=discover, **_STAGE_DEFAULTS)
+
+    enricher = subparsers.add_parser("enrich", help="read the detail pages that are due")
     enricher.add_argument("--limit", type=int,
                           help="detail pages this run; default DEPAS_ENRICH_LIMIT")
-    enricher.set_defaults(func=enrich)
+    enricher.add_argument("--refresh-limit", type=int,
+                          help="detail pages re-read; default DEPAS_REFRESH_LIMIT")
+    enricher.set_defaults(func=enrich, **{**_STAGE_DEFAULTS, "limit": None})
 
-    watcher = subparsers.add_parser("watch", help="scheduled pass: scrape then enrich new listings")
-    # No defaults here: the standing budgets live in the settings, where they can be
-    # moved without a redeploy. A flag is a one-off override for this run.
-    watcher.add_argument("--enrich-limit", type=int,
-                         help="detail pages this pass; default DEPAS_ENRICH_LIMIT")
-    watcher.add_argument("--refresh-limit", type=int,
-                         help="detail pages re-read this pass; default DEPAS_REFRESH_LIMIT")
-    watcher.add_argument("--commute-limit", type=int,
-                         help="listings routed this pass; default DEPAS_COMMUTE_LIMIT")
-    watcher.add_argument("--max-alerts", type=int,
-                         help="cards posted this pass; default DEPAS_ALERTS_LIMIT")
-    watcher.set_defaults(func=watch)
+    router = subparsers.add_parser("route", help="travel times and the zone benchmarks")
+    router.add_argument("--limit", type=int,
+                        help="listings routed this run; default DEPAS_COMMUTE_LIMIT")
+    router.set_defaults(func=route, **{**_STAGE_DEFAULTS, "limit": None})
+
+    announcer = subparsers.add_parser("announce", help="post what is over the bar")
+    announcer.add_argument("--limit", type=int,
+                           help="cards posted this run; default DEPAS_ALERTS_LIMIT")
+    announcer.set_defaults(func=announce, **{**_STAGE_DEFAULTS, "limit": None})
+
+    watcher = subparsers.add_parser(
+        "watch", help="scheduled pass: every stage in order")
+    # No numbers here: the standing budgets live in the settings, where they can be moved
+    # without a redeploy. The stages read `limit` and `refresh_limit`, so a pass that
+    # overrides nothing passes None for both and each stage falls back to its setting.
+    watcher.set_defaults(func=watch, **_STAGE_DEFAULTS)
 
     checker = subparsers.add_parser(
         "healthcheck", help="warn the admins if the hourly pass has stopped completing")

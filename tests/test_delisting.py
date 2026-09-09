@@ -1,9 +1,12 @@
 """What a sweep saw, and what that lets us conclude about a listing being gone."""
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
-from depas.models import Listing
+from depas.cli import _discover
+from depas.communes import Commune
+from depas.models import Listing, Query
 from depas.shortlist import format_shortlist, starred
 from depas.store import (
     KEPT,
@@ -192,3 +195,92 @@ def test_a_starred_listing_that_went_away_stays_on_the_list_marked(connection):
 
     assert "ya no está" in rendered
     assert len(starred(connection, prefs())) == 1
+
+
+# -- sweeping every portal at once ------------------------------------------------
+
+
+def _portal(name: str, listings: list[Listing], error: Exception | None = None):
+    """A stand-in portal module: `search` is all `_sweep_portal` ever calls."""
+    def search(fetcher, query):
+        if error is not None:
+            raise error
+        yield from listings
+    return SimpleNamespace(NAME=name, search=search)
+
+
+def test_every_portal_is_swept_and_written(connection):
+    portals = {"a": _portal("a", [_listing("a1")]), "b": _portal("b", [_listing("b1")])}
+
+    counts = _discover(connection, 39_000.0, Query(communes=[Commune("nunoa")]), portals)
+
+    assert (counts["new"], counts["portals"], counts["failed"]) == (2, 2, 0)
+    assert sorted(row["external_id"] for row
+                  in connection.execute("SELECT external_id FROM listings")) == ["a1", "b1"]
+
+
+def test_one_portal_failing_does_not_cost_the_others(connection):
+    """Raising here used to abort the pass, and with it every other portal's alerts."""
+    portals = {"ok": _portal("ok", [_listing("kept")]),
+               "broken": _portal("broken", [], error=RuntimeError("markup moved"))}
+
+    counts = _discover(connection, 39_000.0, Query(communes=[Commune("nunoa")]), portals)
+
+    assert (counts["new"], counts["portals"], counts["failed"]) == (1, 1, 1)
+    assert [row["external_id"] for row
+            in connection.execute("SELECT external_id FROM listings")] == ["kept"]
+
+
+def test_a_failed_sweep_is_recorded_as_no_evidence(connection):
+    """A comuna that was never looked at must not later read as one that came back empty."""
+    portals = {"broken": _portal("broken", [], error=RuntimeError("markup moved")),
+               "ok": _portal("ok", [_listing("kept")])}
+
+    _discover(connection, 39_000.0, Query(communes=[Commune("nunoa")]), portals)
+
+    run = connection.execute(
+        "SELECT ok, cards_seen, error FROM scrape_runs WHERE portal = 'broken'").fetchone()
+    assert (run["ok"], run["cards_seen"]) == (0, 0)
+    assert "markup moved" in run["error"]
+
+
+def test_every_portal_failing_is_still_a_failure(connection):
+    """One portal down is noise; none of them answering is the pass being broken."""
+    portals = {"a": _portal("a", [], error=RuntimeError("down")),
+               "b": _portal("b", [], error=RuntimeError("down"))}
+
+    with pytest.raises(RuntimeError, match="every sweep failed"):
+        _discover(connection, 39_000.0, Query(communes=[Commune("nunoa")]), portals)
+
+
+def test_a_portal_that_does_not_do_this_operation_is_skipped(connection):
+    portals = {"sales-only": _portal("sales-only", [],
+                                     error=NotImplementedError("rentals only"))}
+
+    counts = _discover(connection, 39_000.0, Query(communes=[Commune("nunoa")]), portals)
+
+    assert (counts["portals"], counts["failed"]) == (0, 0)
+    assert connection.execute("SELECT COUNT(*) FROM scrape_runs").fetchone()[0] == 0
+
+
+def test_each_comuna_is_swept_and_recorded_on_its_own(connection):
+    """One comuna's markup breaking must not make the portal's others look swept."""
+    portals = {"a": _portal("a", [_listing("x")])}
+
+    _discover(connection, 39_000.0,
+              Query(communes=[Commune("nunoa"), Commune("providencia")]), portals)
+
+    assert sorted(row["commune"] for row
+                  in connection.execute("SELECT commune FROM scrape_runs")) == [
+        "nunoa", "providencia"]
+
+
+def test_uf_prices_are_normalised_without_a_request(connection):
+    """`_matching` used to normalise through the fetcher, once per portal, over the wire."""
+    in_uf = Listing(portal="a", external_id="uf", url="https://x/uf",
+                    price=20.0, currency="UF")
+    portals = {"a": _portal("a", [in_uf])}
+
+    _discover(connection, 39_000.0, Query(communes=[Commune("nunoa")]), portals)
+
+    assert connection.execute("SELECT price_clp FROM listings").fetchone()[0] == 780_000.0

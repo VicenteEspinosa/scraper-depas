@@ -636,11 +636,30 @@ def clear_notified(connection: sqlite3.Connection, hours: int) -> int:
 # A pass that dies mid-way still updates `last_seen`, so freshness there proves nothing.
 WATCH_COMPLETED, WATCH_ERROR = "watch_completed_at", "watch_error"
 
+# The stages a pass is made of, each able to run on its own schedule. `watch` is all of
+# them in order and keeps the original two keys, so a box upgrading into this does not
+# read as having never completed a pass.
+WATCH = "watch"
+STAGES = (WATCH, "discover", "enrich", "route", "announce")
 
-def remember_watch(connection: sqlite3.Connection, error: str | None) -> None:
-    """Record how a pass ended: the time it finished, or what stopped it."""
-    key, value = ((WATCH_ERROR, error) if error
-                  else (WATCH_COMPLETED, datetime.now(UTC).isoformat()))
+# How long each may go without completing before the admins hear about it. Discovery is
+# the one that must not stall — everything downstream is fed by it — while routing is
+# somebody else's server and allowed to be slow.
+STALE_HOURS = {WATCH: 4, "discover": 4, "enrich": 6, "route": 24, "announce": 6}
+
+
+def _keys(stage: str) -> tuple[str, str]:
+    if stage == WATCH:
+        return WATCH_COMPLETED, WATCH_ERROR
+    return f"{WATCH_COMPLETED}:{stage}", f"{WATCH_ERROR}:{stage}"
+
+
+def remember_watch(connection: sqlite3.Connection, error: str | None,
+                   stage: str = WATCH) -> None:
+    """Record how a stage ended: the time it finished, or what stopped it."""
+    completed, failed = _keys(stage)
+    key, value = ((failed, error) if error
+                  else (completed, datetime.now(UTC).isoformat()))
     connection.execute(
         "INSERT INTO settings (key, value) VALUES (?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -649,10 +668,33 @@ def remember_watch(connection: sqlite3.Connection, error: str | None) -> None:
     connection.commit()
 
 
-def stored_watch(connection: sqlite3.Connection) -> tuple[str | None, str | None]:
-    """When the last pass completed, and what stopped the last one that did not."""
+def stored_watch(connection: sqlite3.Connection,
+                 stage: str = WATCH) -> tuple[str | None, str | None]:
+    """When this stage last completed, and what stopped the last one that did not."""
+    completed, failed = _keys(stage)
     found = dict(connection.execute(
-        "SELECT key, value FROM settings WHERE key IN (?, ?)",
-        (WATCH_COMPLETED, WATCH_ERROR),
+        "SELECT key, value FROM settings WHERE key IN (?, ?)", (completed, failed)
     ).fetchall())
-    return found.get(WATCH_COMPLETED), found.get(WATCH_ERROR)
+    return found.get(completed), found.get(failed)
+
+
+def stale_stages(connection: sqlite3.Connection, hours: int | None = None
+                 ) -> list[tuple[str, str | None, str | None]]:
+    """Every stage that has gone too long without completing, and what stopped it.
+
+    A *sub*-stage nobody runs is not stale: splitting the pass up is opt-in, so a box
+    still on one hourly `watch` must not be warned about four stages that never existed.
+    `watch` itself is always checked, unstamped included — a deploy whose pass has never
+    finished is the case this watchdog was built for.
+    Same isoformat the stamps were written with, so the comparison stays lexicographic.
+    """
+    stale = []
+    for stage in STAGES:
+        completed, error = stored_watch(connection, stage)
+        if stage != WATCH and completed is None and error is None:
+            continue
+        cutoff = (datetime.now(UTC)
+                  - timedelta(hours=hours if hours is not None else STALE_HOURS[stage]))
+        if completed is None or completed < cutoff.isoformat():
+            stale.append((stage, completed, error))
+    return stale

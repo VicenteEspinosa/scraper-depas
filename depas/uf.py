@@ -30,7 +30,13 @@ def to_clp(price: float, currency: str, uf_value: float) -> float:
     return price * uf_value if currency == "UF" else price
 
 
-def normalize(listing: Listing, fetcher: Fetcher) -> Listing:
-    """Fill price_clp so UF- and CLP-priced listings compare; every save path needs it."""
-    listing.price_clp = to_clp(listing.price, listing.currency, uf_in_clp(fetcher))
+def normalize(listing: Listing, uf_value: float) -> Listing:
+    """Fill price_clp so UF- and CLP-priced listings compare; every save path needs it.
+
+    Takes the value rather than the fetcher so that normalising is arithmetic and not a
+    request: `uf_in_clp` caches per Fetcher, so a pass with one Fetcher per portal used
+    to ask the indicator once per portal, and could not be run off the main thread
+    without each worker doing it again.
+    """
+    listing.price_clp = to_clp(listing.price, listing.currency, uf_value)
     return listing

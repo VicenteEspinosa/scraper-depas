@@ -77,6 +77,6 @@ def test_a_failed_pass_does_not_count_as_a_completed_one(connection):
 def test_a_pass_that_dies_records_what_killed_it(connection):
     """The watchdog is only as good as the stamp, so a failing pass has to write one."""
     with pytest.raises(ValueError):  # no communes configured, so the pass dies early
-        watch(Namespace(enrich_limit=1, commute_limit=1, max_alerts=1))
+        watch(Namespace(limit=1, refresh_limit=1))
 
     assert "ValueError: set DEPAS_COMMUNES" in stored_watch(connection)[1]
