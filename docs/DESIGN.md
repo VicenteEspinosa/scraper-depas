@@ -214,6 +214,11 @@ and beat everything. A `/dislike` leaves it for good — never announced again, 
 what the others are measured against. That is not a preference, unlike a trait: there is
 no reading of a `/dislike` that means "rank it lower".
 
+That is also why a detail page that 404s is skipped rather than fatal. Listings are taken
+down between the search and the fetch, and one of them used to end the whole pass before
+it reached the alerts — the row stays unenriched, which already keeps it out of the pool.
+Any other status is the portal, not the listing, and still fails loudly.
+
 `FIELDS` is only what a search card carries. The detail-page columns — gastos comunes,
 coordinates, specs — are owned by `save_detail`, because listing them there would blank
 them on the next re-scrape, the card having nothing to put in their place.
