@@ -259,6 +259,91 @@ each of those days, and `uf_daily` only keeps the days the bot happened to be up
 trail now stores `price_clp` alongside. The backfill converted what it could and left the
 rest NULL rather than pick a rate: a wrong number in a price history is worse than a gap.
 
+## Knowing what is still for rent
+
+`last_seen` was written on every scrape from the first migration and read by nothing, so
+nothing ever noticed a listing going away. An apartment rented three weeks ago stayed in
+the pool, kept voting in its comuna's median UF/m², and kept sitting in the pinned ⭐
+list. `delisted_at` is the column that was missing.
+
+Deciding it is the delicate part, because the evidence is an absence. A listing is
+delisted once `DEPAS_DELIST_AFTER` **believable** sweeps of its portal have started since
+the last one that turned it up, and a sweep is believable only if it finished without
+raising *and* actually saw listings. Both halves matter: a sweep that raised proves
+nothing, and neither does one that came back empty — which is exactly what a portal whose
+markup moved looks like from here, indistinguishable from a comuna with nothing for rent.
+So neither delists anybody. That leaves stale rows around longer than strictly necessary,
+which is the direction to err in: the cost of a false positive is dropping a flat
+somebody starred.
+
+The counting compares `scrape_runs.started_at` against `listings.last_seen`, which works
+because `_sweep` takes the timestamp before scraping and `save` writes `last_seen` during
+it — so the sweep that saw a listing never counts against it.
+
+Two things make it safe to be wrong. **A sweep seeing a listing clears `delisted_at`
+unconditionally**, so a portal outage, or a comuna dropped from the config and later
+restored, heals itself with no intervention. And a 404 on the detail page delists on its
+own, which is the one signal that needs no counting: the portal is saying the page is
+gone. That is also why the 404 branch changed — leaving the row unenriched used to be the
+only way to keep it out of the pool, which did nothing for a row already in it.
+
+`scrape_runs` pays for itself twice. `quiet_portals` compares a portal's latest sweep
+against its best ever and warns when it has gone from plenty to zero, which is the
+failure the healthcheck could never see: `_parse_card` returning None for every card
+raises nothing, saves nothing, and lets the pass stamp `watch_completed_at` and read as
+healthy. Sweeps are recorded per comuna rather than per portal for the same reason one
+comuna's markup breaking must not make the portal's others look swept.
+
+## Reading a detail page twice
+
+The detail page used to be fetched exactly once, ever, so a listing whose rent moved kept
+the `price_per_m2_uf` computed from the old one — while `price` itself was refreshed from
+the search card every hour. The row was being ranked on two prices at once, and worst of
+all on Portal Inmobiliario, the only portal that publishes the figure and the one with
+the most listings.
+
+`price_at_detail` records what the price was when the page was read, so the disagreement
+is visible in SQL. `detail_due_at` is when the page is next worth reading, defaulting to
+the empty string so that a row nobody has read is always due and sorts first.
+
+The two budgets are counted separately on purpose. A listing nobody has read yet must
+never wait behind a re-read, because a month where a thousand rows come due at once would
+otherwise starve the finds — which are the only reason the pass exists. Within the
+re-reads, a price that moved goes before one merely due.
+
+How long a row waits is not a fixed interval but a backoff: `REFRESH_DAYS` doubling for
+each consecutive reading that found nothing new, up to a month. A flat idle for two
+months is worth a monthly look; one that moved yesterday is worth one in three days. The
+same request budget then covers far more listings, and covers the ones that move sooner.
+
+What "found nothing new" means is a digest of the **parsed detail**, not of the HTML. A
+portal page carries CSRF tokens, view counters and render timestamps, so hashing the
+markup would answer "did anything change" with yes every single time. The parsed fields
+are what we care about having moved, and they survive a redesign that moves no data.
+
+`detail_changes` keeps one row per field that actually moved, rather than a snapshot per
+fetch: a listing revisited twenty times with one changed gasto común is twenty readings
+and one row. A first reading is not a change — every column goes from NULL to whatever
+the portal published, and logging forty of those per listing would bury the real ones.
+`price_history` predates this table and migrating it buys nothing, so the `listing_changes`
+view unions the two and readers do not have to know there are two.
+
+What this makes visible for the first time: an entrega date that slips three times means
+the aviso has been unrented for months, and a column that used to be filled and now is
+not is what a broken parser looks like from the inside.
+
+## Whether a conditional GET would pay
+
+`http_cache` records the `ETag` and `Last-Modified` each url offered — validators only,
+never a body, so 20 000 listings come to about 4 MB. Nothing is sent back yet.
+
+The blocker is not the storage, it is the portal interface. `fetch_detail` both fetches
+and parses, and assetplan and toctoc read two urls per listing: a 304 on one of them
+would leave the parser with no body and no way to rebuild the rest. Doing it properly
+means splitting fetching from parsing across all six portals, which is its own change —
+and one worth justifying on evidence rather than on the hope that these portals emit
+validators at all. `validator_coverage` is that evidence, gathered from production.
+
 ## Knowing the pass still runs
 
 `watch` stamps `watch_completed_at` in `settings` as its last act, and records what

@@ -462,8 +462,57 @@ whatever was edited from the chat since.
 | `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. Environment only — it says where the settings live, so it cannot be one of them. |
 | `TELEGRAM_BOT_TOKEN` | From @BotFather. Environment only: a credential does not belong in the table beside the data. |
 | `DEPAS_ADMINS` | Numeric Telegram user ids allowed to change the settings from a chat, comma-separated. Empty is nobody, and being in the alert chat is not enough — a discussion group is joinable. Ids rather than usernames, because a username can be given away and reclaimed. **The seed carries the author's id**, so replace it with yours if you are hosting your own; `@userinfobot` tells you what it is. |
+| `DEPAS_REFRESH_LIMIT` | Detail pages **re-read** per pass, on top of the new ones. A page is re-read when the price moved since it was read, or when its own backoff comes due; the two budgets are separate so a listing nobody has read yet never waits behind a re-read. Default 20, `0` never re-reads. |
+| `DEPAS_DELIST_AFTER` | How many believable sweeps of a portal must fail to turn a listing up before it is marked gone. A sweep counts only if it finished *and* saw listings, so a portal that is down or whose markup moved delists nobody. Default 3. `0` never delists — and it has to be special-cased, since "at least zero sweeps" is true of every row. |
 | `DEPAS_ENRICH_LIMIT`, `DEPAS_COMMUTE_LIMIT`, `DEPAS_ALERTS_LIMIT` | How much work one `watch` pass may do: detail pages fetched, listings routed, cards posted. Defaults 60, 40 and 10 — the numbers the command-line flags used to hardcode. They belong in the table rather than in the crontab because the right figure moves with how many comunas you watch, and moving it should not need a redeploy. `0` switches a stage off. The flags still exist and override the setting for one run. |
 | `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread, which is also where `/like` and `/dislike` are read from; a group takes the cards but leaves them undiscussable, so verdicts have to be replies. Switching between the two is only this value. |
+
+## When a listing comes off the market
+
+A flat that gets rented does not tell you so; it just stops appearing. `last_seen` was
+recorded from the beginning and read by nothing, so an apartment rented three weeks ago
+stayed in the pool, kept skewing its comuna's median price per m², and kept sitting in
+the pinned ⭐ list.
+
+Now every sweep records what it saw, per portal per comuna, and a listing that
+`DEPAS_DELIST_AFTER` believable sweeps have failed to find is marked `delisted_at` and
+drops out of the pool and the rankings. A detail page answering 404 delists on its own —
+that is the portal saying so outright.
+
+One place it does **not** drop out of is the pinned ⭐ list, where it stays marked «ya no
+está» instead. A flat you starred and then lost is something you want told, not
+disappeared: removing it silently answers "what happened to that one?" by losing the
+question.
+
+Being wrong is cheap in both directions. A sweep that finds the listing again clears the
+mark unconditionally, so a portal outage or a comuna you removed and later added back
+sorts itself out. And a sweep that raised, or that came back with no listings at all,
+delists nobody: from the outside, a portal whose markup changed looks exactly like a
+comuna with nothing for rent, so neither is treated as evidence.
+
+That last case gets a warning of its own. `watch` prints one when a portal's latest sweep
+saw nothing where an earlier one saw plenty — the failure that used to be completely
+silent, since a parser returning nothing for every card raises no error and lets the pass
+report success.
+
+## What changed about a listing since we last looked
+
+A detail page used to be read once and never again, so gastos comunes, entrega dates and
+the portal's own UF/m² were frozen at whatever they said the first time — while the rent
+was refreshed hourly from the search card. A listing whose price moved was ranked on a
+price-per-m² computed from the old one.
+
+Pages are re-read now: as soon as the price moves, and otherwise on a backoff that starts
+at three days and doubles for every re-read that finds nothing new, up to a month. A flat
+that has been idle for two months is checked monthly; one that moved yesterday is checked
+in three days.
+
+Every field that actually moves is appended to `detail_changes`, with the current value
+staying on the listing itself. The `listing_changes` view reads that together with the
+price trail, so `depas show "SELECT * FROM listing_changes WHERE external_id = '...'"`
+is the history of one aviso. An entrega date that slips three times means the flat has
+been sitting unrented for months, and a field that used to be published and now is not
+is what a broken parser looks like from the inside.
 
 ## Schema
 
