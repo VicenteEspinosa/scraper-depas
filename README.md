@@ -539,6 +539,16 @@ is never repeated there once per person.
 A listing is only given up on for enrichment when *everybody* who has an opinion has
 turned it down, so one person's dislike cannot stop another from ever seeing the flat.
 
+**A chat you add starts on what turns up from then on.** Everything already in the
+database is written off as already seen, so subscribing does not dump years of listings
+into a new conversation. `depas subscribers add <chat> --catch-up` asks for the backlog
+if that is what you want.
+
+Upgrading keeps every verdict and every "already posted" mark. The old columns are
+renamed to `legacy_*` rather than deleted, so the migration can be checked against the
+original afterwards — `SELECT COUNT(*) FROM listings WHERE legacy_interest IS NOT NULL`
+against `SELECT COUNT(*) FROM user_interest` — or redone.
+
 One caveat worth knowing: **subscribers share one set of preferences.** Every subscriber
 is graded and filtered by the same settings, so they all receive the same cards — with
 their own verdicts and their own ⭐ list. Per-reader criteria is the next change.

@@ -610,16 +610,38 @@ def mark_notified(connection: sqlite3.Connection, chat_id: object, portal: str,
 
 
 def add_subscriber(connection: sqlite3.Connection, chat_id: object,
-                   owner_user_id: int | None = None) -> None:
-    """Start posting cards to a chat. Without an owner it is shared: see `Subscriber`."""
+                   owner_user_id: int | None = None, *, catch_up: bool = False) -> int:
+    """Start posting cards to a chat. Without an owner it is shared: see `Subscriber`.
+
+    A chat starts on what happens next, not on the backlog. Everything already stored is
+    written off as told, because the alternative is what the first version did: a new
+    private chat drawing on years of listings at DEPAS_ALERTS_LIMIT a pass, which is
+    days of cards nobody asked for. `catch_up` is the way to actually want that.
+
+    Only for a chat that was not already subscribed — re-adding one must not silence the
+    listings it was legitimately still waiting to be told about. Returns how many were
+    written off.
+    """
     _chat_sql(chat_id)  # refuse anything that is not a chat id before it is stored
+    fresh = connection.execute(
+        "SELECT 1 FROM subscribers WHERE chat_id = ?", (str(chat_id),)
+    ).fetchone() is None
     connection.execute(
         "INSERT INTO subscribers (chat_id, owner_user_id, added_at) VALUES (?, ?, ?) "
         "ON CONFLICT(chat_id) DO UPDATE SET owner_user_id = excluded.owner_user_id, "
         "enabled = 1",
         (str(chat_id), owner_user_id, datetime.now(UTC).isoformat()),
     )
+    written_off = 0
+    if fresh and not catch_up:
+        written_off = connection.execute(
+            "INSERT INTO subscriber_notifications (chat_id, portal, external_id, notified_at) "
+            "SELECT ?, portal, external_id, ? FROM listings "
+            "WHERE true ON CONFLICT(chat_id, portal, external_id) DO NOTHING",
+            (str(chat_id), datetime.now(UTC).isoformat()),
+        ).rowcount
     connection.commit()
+    return written_off
 
 
 def remove_subscriber(connection: sqlite3.Connection, chat_id: object) -> bool:

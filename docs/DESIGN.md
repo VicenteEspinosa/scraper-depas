@@ -302,6 +302,32 @@ anybody's verdict — one person's `/like` genuinely belongs on more than one li
 A chat id reaches SQL as a literal, since a view cannot take a bound parameter, so
 `_chat_sql` refuses anything that is not a number before it gets there.
 
+**A new chat starts on what happens next, not on the backlog.** Everything already
+stored is written off as told when it subscribes, because the alternative is what the
+first version of this did: a private chat drawing on every listing ever kept, ten a pass,
+which is days of cards nobody asked for. `--catch-up` is how to actually want that. Only
+for a chat that was not subscribed before — re-adding one must not silence the listings
+it was legitimately still waiting on.
+
+**And the migration renames rather than drops.** This is the one migration in the set
+that moves data a person typed — verdicts, and the announcements that stop a card being
+posted twice — and a DROP is unrecoverable on a database that has already run it. So
+`interest` and the rest become `legacy_*`: four dead columns bought in exchange for being
+able to check the backfill against the original, or redo it.
+
+    SELECT COUNT(*) FROM listings WHERE legacy_interest IS NOT NULL;  -- what there was
+    SELECT COUNT(*) FROM user_interest;                               -- what came across
+
+That mattered more than it looked. The announcement backfill can only place a row under
+the chat it was announced in, so a database with no `TELEGRAM_CHAT_ID` configured has
+nowhere to put them — with a DROP that was every card silently eligible to be posted
+again. Renaming turns it into something recoverable, and the "starts on what happens
+next" rule above means the re-announcement never fires in the first place.
+
+One invariant is held by the schema rather than by a test: `subscriber_notifications
+.notified_at` is NOT NULL, so a backfill that tried to write off a listing that had
+never been announced inserts nothing rather than a made-up timestamp.
+
 **What this does not do is per-reader preferences.** Every subscriber is graded and
 filtered by the one set of settings, so they all receive the same cards — useful when you
 and somebody else each want your own copy and your own verdicts, and not yet "two people
