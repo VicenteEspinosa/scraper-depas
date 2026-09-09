@@ -24,6 +24,8 @@ EMPTY = ("⭐ <b>Tu lista</b>\n\nTodavía no marcaste ninguno. Aprieta <b>⭐ Me
 MOST = 30
 LIMIT = 4096
 CARD_LABEL, LISTING_LABEL = "tarjeta", "aviso"
+# Ya no está publicado: arrendado, retirado, o la ficha responde 404.
+GONE = "<i>ya no está</i>"
 
 
 def starred(connection: sqlite3.Connection, prefs: Preferences) -> list[tuple[dict, object]]:
@@ -48,8 +50,11 @@ def _card_link(connection: sqlite3.Connection, row: dict, chat_id: str) -> str |
 def _entry(connection: sqlite3.Connection, row: dict, grade: object, chat_id: str) -> str:
     """One line: what it is, what it costs, and the two ways back to it."""
     commune = (row.get("commune") or "").replace("-", " ").title()
+    # A starred flat that came off the market stays on the list, marked. Dropping it
+    # silently answers "what happened to that one?" by losing the question.
     head = " · ".join(part for part in (
         f"{GRADE_EMOJI.get(grade.letter, '⚪')} <b>{grade.letter} {grade.score}</b>",
+        GONE if row.get("delisted_at") else None,
         escape(commune) or None,
         clp(row.get("net_monthly_clp")),
         f"{row['area']:.0f} m²" if row.get("area") else None,

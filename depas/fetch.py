@@ -13,6 +13,10 @@ class Fetcher:
     def __init__(self, impersonate: str = "chrome", timeout: int = 30, retries: int = 3) -> None:
         self.session = requests.Session(impersonate=impersonate, timeout=timeout)
         self.retries = retries
+        # What each url offered by way of cache validators, so whether a conditional GET
+        # would ever pay against these portals can be answered from data rather than
+        # guessed. Nothing is sent back yet — see docs/DESIGN.md.
+        self.validators: dict[str, tuple[str | None, str | None, int]] = {}
 
     def get(self, url: str, **kwargs: Any) -> requests.Response:
         return self._request("GET", url, **kwargs)
@@ -24,6 +28,9 @@ class Fetcher:
         for attempt in range(self.retries):
             time.sleep(random.uniform(*DELAY_RANGE))
             response = self.session.request(method, url, **kwargs)
+            self.validators[url] = (response.headers.get("etag"),
+                                    response.headers.get("last-modified"),
+                                    response.status_code)
             if response.status_code < 500 and response.status_code != 429:
                 response.raise_for_status()
                 return response

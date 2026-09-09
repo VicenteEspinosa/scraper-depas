@@ -1,8 +1,9 @@
 import json
 import sqlite3
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from pathlib import Path
 from statistics import median
 
@@ -100,8 +101,9 @@ FROM listings;
 # A /dislike is out for good: never announced again, and out of the pool. Not a preference.
 NOT_REJECTED = "COALESCE(interest, 0) >= 0"
 
-# Enriched, an actual unit, and not turned down: an unenriched one would beat everything.
-KEPT = ("detail_fetched_at IS NOT NULL AND is_project = 0 "
+# Enriched, an actual unit, still published, and not turned down: an unenriched one
+# would beat everything, and one already rented is not a candidate however well it grades.
+KEPT = ("detail_fetched_at IS NOT NULL AND is_project = 0 AND delisted_at IS NULL "
         f"AND {NOT_REJECTED}")
 
 
@@ -112,20 +114,149 @@ def pool_query(prefs: Preferences) -> str:
 
 
 # A detail page is the crawl's most expensive request, so it is only ever spent on a
-# listing the pool could accept: `KEPT` wants an enriched, actual unit nobody turned
-# down, and neither a project nor a /dislike can become one however long it waits.
-PENDING_DETAIL = "detail_fetched_at IS NULL AND is_project = 0 AND COALESCE(interest, 0) >= 0"
+# listing the pool could accept: `KEPT` wants an actual unit nobody turned down that is
+# still published, and none of those three can change however long a row waits.
+ELIGIBLE_FOR_DETAIL = ("delisted_at IS NULL AND is_project = 0 "
+                       "AND COALESCE(interest, 0) >= 0")
+
+QUEUED = ("SELECT portal, external_id, url, detail_fetched_at, price, price_at_detail "
+          f"FROM listings WHERE {ELIGIBLE_FOR_DETAIL}")
 
 
-def pending_detail(connection: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
-    """The listings still owed a detail page, newest first."""
-    # Newest first because a budget that runs out should leave the stale ones waiting,
-    # not the finds: the whole point of the pass is to announce what just appeared.
-    return connection.execute(
-        f"SELECT portal, external_id, url FROM listings WHERE {PENDING_DETAIL} "
-        "ORDER BY first_seen DESC LIMIT ?",
-        (limit,),
+def pending_detail(connection: sqlite3.Connection, fresh: int,
+                   refresh: int = 0) -> list[sqlite3.Row]:
+    """The detail pages due: the ones never read first, then the re-reads.
+
+    Two budgets rather than one, because they compete for the same requests and a
+    listing nobody has read yet must never wait behind a re-read. A month where a
+    thousand rows come due at once would otherwise starve the finds, which are the
+    only reason the pass exists.
+    """
+    unread = connection.execute(
+        f"{QUEUED} AND detail_fetched_at IS NULL ORDER BY first_seen DESC LIMIT ?",
+        (fresh,),
     ).fetchall()
+    if refresh <= 0:
+        return unread
+    # A price that moved is read before one merely due: until it is, the listing is
+    # ranked on a UF/m2 computed from the old price while everything else uses today's.
+    due = connection.execute(
+        f"{QUEUED} AND detail_fetched_at IS NOT NULL AND detail_due_at <= ? "
+        "ORDER BY (price_at_detail IS NOT NULL AND price <> price_at_detail) DESC, "
+        "detail_due_at LIMIT ?",
+        (datetime.now(UTC).isoformat(), refresh),
+    ).fetchall()
+    return [*unread, *due]
+
+
+# ── what a sweep saw, and what that lets us conclude ────────────────────────────
+
+
+def remember_sweep(connection: sqlite3.Connection, portal: str, commune: str | None,
+                   started_at: str, cards_seen: int, error: str | None) -> None:
+    """Record one (portal, comuna) sweep: what it saw, and whether it can be believed."""
+    connection.execute(
+        "INSERT INTO scrape_runs "
+        "(portal, commune, started_at, finished_at, cards_seen, ok, error) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (portal, commune, started_at, datetime.now(UTC).isoformat(), cards_seen,
+         int(error is None), error),
+    )
+    connection.commit()
+
+
+def mark_delisted(connection: sqlite3.Connection, portal: str, external_id: str) -> None:
+    """Take one listing out of the pool: rented, withdrawn, or answering 404."""
+    connection.execute(
+        "UPDATE listings SET delisted_at = ? "
+        "WHERE portal = ? AND external_id = ? AND delisted_at IS NULL",
+        (datetime.now(UTC).isoformat(), portal, external_id),
+    )
+    connection.commit()
+
+
+def sweep_delisted(connection: sqlite3.Connection, after: int) -> int:
+    """Delist what `after` believable sweeps of its portal have failed to turn up.
+
+    A sweep only counts as evidence if it finished and actually saw cards. A portal
+    whose markup moved returns zero of them and raises nothing, which is
+    indistinguishable from a comuna with no listings — so neither is allowed to
+    delist anything. That leaves stale rows around longer than necessary, which is
+    the direction to err in: the cost of a false positive is dropping a flat
+    somebody starred.
+    """
+    # Not merely pointless but dangerous: `COUNT(*) >= 0` is true of every row, so
+    # asking for zero sweeps of evidence would delist the whole database.
+    if after <= 0:
+        return 0
+    delisted = connection.execute(
+        "UPDATE listings SET delisted_at = ? WHERE delisted_at IS NULL AND ("
+        "  SELECT COUNT(*) FROM scrape_runs"
+        "   WHERE scrape_runs.portal = listings.portal"
+        "     AND ok = 1 AND cards_seen > 0"
+        "     AND started_at > listings.last_seen) >= ?",
+        (datetime.now(UTC).isoformat(), after),
+    ).rowcount
+    connection.commit()
+    return delisted
+
+
+def quiet_portals(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Portals whose last sweep saw nothing where an earlier one saw plenty.
+
+    `save` cannot tell a portal that changed its markup from a comuna that emptied
+    out: both arrive as no listings at all, and the pass completes either way. This
+    is the comparison that separates them.
+    """
+    return connection.execute(
+        "SELECT portal, MAX(started_at) AS last_swept,"
+        "       SUM(cards_seen) AS cards_this_time,"
+        "       (SELECT MAX(cards_seen) FROM scrape_runs AS before"
+        "         WHERE before.portal = scrape_runs.portal) AS cards_at_best"
+        "  FROM scrape_runs"
+        " WHERE started_at = (SELECT MAX(started_at) FROM scrape_runs AS latest"
+        "                      WHERE latest.portal = scrape_runs.portal)"
+        " GROUP BY portal"
+        " HAVING cards_this_time = 0 AND cards_at_best > 0"
+    ).fetchall()
+
+
+# ── whether a conditional GET would ever pay here ───────────────────────────────
+# Validators only, never a response body: an ETag is ~30 bytes for a page that costs
+# hundreds of kilobytes, so 20 000 listings come to about 4 MB.
+#
+# Sending them back is not wired up yet, and the reason is the portals rather than the
+# storage. `fetch_detail` both fetches and parses, and assetplan and toctoc read two
+# urls per listing — a 304 on one of them would leave the parser with no body and no way
+# to rebuild the rest. Doing it properly means splitting fetching from parsing in the
+# portal interface, which is its own change. This records what the portals offer so that
+# change can be justified, or dropped, on evidence.
+
+
+def remember_validators(connection: sqlite3.Connection,
+                        seen: Mapping[str, tuple[str | None, str | None, int]]) -> int:
+    """Record the cache validators each url offered on this pass."""
+    now = datetime.now(UTC).isoformat()
+    connection.executemany(
+        "INSERT INTO http_cache (url, etag, last_modified, status, fetched_at) "
+        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(url) DO UPDATE SET "
+        "etag = excluded.etag, last_modified = excluded.last_modified, "
+        "status = excluded.status, fetched_at = excluded.fetched_at",
+        [(url, etag, last_modified, status, now)
+         for url, (etag, last_modified, status) in seen.items()],
+    )
+    connection.commit()
+    return len(seen)
+
+
+def validator_coverage(connection: sqlite3.Connection) -> tuple[int, int]:
+    """How many urls we have seen, and how many of them offered a validator at all."""
+    row = connection.execute(
+        "SELECT COUNT(*) AS urls, "
+        "SUM(CASE WHEN etag IS NOT NULL OR last_modified IS NOT NULL THEN 1 ELSE 0 END)"
+        " AS offered FROM http_cache"
+    ).fetchone()
+    return row["urls"], row["offered"] or 0
 
 
 def refresh_zone_benchmarks(connection: sqlite3.Connection) -> int:
@@ -193,18 +324,114 @@ def forget_preference(connection: sqlite3.Connection, name: str) -> object | Non
     return prefs.value(name)
 
 
-def save_detail(
-    connection: sqlite3.Connection, portal: str, external_id: str, detail: dict[str, object]
-) -> None:
-    """Write one listing's detail-page fields onto its existing row."""
-    columns = [name for name in detail if name in DETAIL_COLUMNS or name in ("lat", "lon")]
+def fill_gaps(connection: sqlite3.Connection, portal: str, external_id: str,
+              gaps: Mapping[str, object]) -> None:
+    """Write columns read out of a description the row already carries.
+
+    Deliberately not `save_detail`: nothing was fetched. Routing this through the
+    detail writer would compute the digest from these few columns rather than from a
+    whole page — making the next real reading look like everything changed — and would
+    push `detail_due_at` a backoff into the future for work that touched no portal.
+    The changes are not recorded either: an inferred value is ours, not the portal's.
+    """
+    columns = [name for name in gaps if name in DETAIL_COLUMNS or name in ("lat", "lon")]
+    if not columns:
+        return
     connection.execute(
-        f"UPDATE listings SET {', '.join(f'{name} = ?' for name in columns)}, "
-        "detail_fetched_at = ? "
+        f"UPDATE listings SET {', '.join(f'{name} = ?' for name in columns)} "
         "WHERE portal = ? AND external_id = ?",
-        [*(detail[name] for name in columns), datetime.now(UTC).isoformat(), portal, external_id],
+        [*(gaps[name] for name in columns), portal, external_id],
     )
     connection.commit()
+
+
+def detail_digest(detail: Mapping[str, object]) -> str:
+    """A digest of what a detail page said, not of the page.
+
+    Hashing the HTML would answer "did anything change" with yes every single time: a
+    portal page carries CSRF tokens, view counters and render timestamps. The parsed
+    fields are what we actually care about having changed, and they survive a redesign
+    that moves no data.
+    """
+    payload = json.dumps({name: value for name, value in sorted(detail.items())
+                          if name != "detail_fetched_at"},
+                         sort_keys=True, default=str, ensure_ascii=False)
+    return sha256(payload.encode()).hexdigest()
+
+
+# How long a listing that keeps coming back unchanged is left alone, doubling each time
+# it does. A flat idle for two months is worth a look monthly; one that moved yesterday
+# is worth one in three days, and the same budget then covers far more of them.
+REFRESH_DAYS, MAX_BACKOFF_DOUBLINGS = 3, 3
+
+
+def next_detail_read(unchanged_in_a_row: int) -> str:
+    """When to read this detail page again, given how long it has been standing still."""
+    days = REFRESH_DAYS * 2 ** min(unchanged_in_a_row, MAX_BACKOFF_DOUBLINGS)
+    return (datetime.now(UTC) + timedelta(days=days)).isoformat()
+
+
+def _record_changes(connection: sqlite3.Connection, portal: str, external_id: str,
+                    before: sqlite3.Row | None, detail: Mapping[str, object],
+                    columns: list[str]) -> int:
+    """Append one row per field that actually moved; the current value stays on `listings`."""
+    # A first reading is not a change: every column goes from NULL to whatever the portal
+    # published, and logging forty of those per listing would bury the real ones.
+    if before is None or before["detail_fetched_at"] is None:
+        return 0
+    now = datetime.now(UTC).isoformat()
+    # A sqlite3.Row tests `in` against its values, not its column names, so the names
+    # are taken once and asked as a set.
+    stored = set(before.keys())
+    moved = [(name, before[name], detail[name]) for name in columns
+             if name in stored and before[name] != detail[name]]
+    connection.executemany(
+        "INSERT INTO detail_changes "
+        "(portal, external_id, field, old_value, new_value, changed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [(portal, external_id, name,
+          None if was is None else str(was), None if now_value is None else str(now_value),
+          now)
+         for name, was, now_value in moved],
+    )
+    return len(moved)
+
+
+def save_detail(
+    connection: sqlite3.Connection, portal: str, external_id: str, detail: dict[str, object],
+    *, unchanged: bool = False,
+) -> int:
+    """Write one listing's detail-page fields onto its row, recording what moved.
+
+    `unchanged` is for a page the portal answered 304 to, or whose digest matched: there
+    is nothing to write but the row still earns a longer wait before the next read.
+    """
+    before = connection.execute(
+        "SELECT * FROM listings WHERE portal = ? AND external_id = ?", (portal, external_id)
+    ).fetchone()
+    if before is None:
+        return 0
+    columns = [name for name in detail if name in DETAIL_COLUMNS or name in ("lat", "lon")]
+    changed = 0 if unchanged else _record_changes(
+        connection, portal, external_id, before, detail, columns)
+    # A digest that matched, or a 304, is a listing standing still; anything that moved
+    # resets the count so the next read comes round soon.
+    standing_still = unchanged or (before["detail_fetched_at"] is not None and changed == 0)
+    unchanged_in_a_row = (before["detail_unchanged_count"] + 1) if standing_still else 0
+
+    assignments = [f"{name} = ?" for name in columns] if not unchanged else []
+    connection.execute(
+        f"UPDATE listings SET {''.join(f'{one}, ' for one in assignments)}"
+        "detail_fetched_at = ?, price_at_detail = price, detail_hash = ?, "
+        "detail_unchanged_count = ?, detail_due_at = ? "
+        "WHERE portal = ? AND external_id = ?",
+        [*([] if unchanged else [detail[name] for name in columns]),
+         datetime.now(UTC).isoformat(),
+         before["detail_hash"] if unchanged else detail_digest(detail),
+         unchanged_in_a_row, next_detail_read(unchanged_in_a_row), portal, external_id],
+    )
+    connection.commit()
+    return changed
 
 
 # SQLite caps how many values one statement may bind. No single portal answers with
@@ -259,12 +486,25 @@ def save(connection: sqlite3.Connection, listings: Iterable[Listing]) -> dict[st
             )
             counts["new"] += 1
         else:
+            # delisted_at is cleared unconditionally: a sweep seeing the listing is the
+            # last word on whether it is still published, which is what makes a portal
+            # outage or a comuna dropped and restored heal itself rather than need a fix.
             connection.execute(
-                f"UPDATE listings SET {', '.join(f'{name} = ?' for name in FIELDS)}, last_seen = ? "
+                f"UPDATE listings SET {', '.join(f'{name} = ?' for name in FIELDS)}, "
+                "last_seen = ?, delisted_at = NULL "
                 "WHERE portal = ? AND external_id = ?",
                 [*values, now, *key],
             )
-            counts["price_changed" if previous != listing.price else "unchanged"] += 1
+            moved = previous != listing.price
+            counts["price_changed" if moved else "unchanged"] += 1
+            if moved:
+                # The detail page's UF/m2 was computed from the old price, so the row is
+                # now ranked on two prices at once. Read it again on the next pass.
+                connection.execute(
+                    "UPDATE listings SET detail_due_at = '' "
+                    "WHERE portal = ? AND external_id = ? AND detail_fetched_at IS NOT NULL",
+                    key,
+                )
 
         if key not in stored or previous != listing.price:
             connection.execute(

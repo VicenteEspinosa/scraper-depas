@@ -69,6 +69,12 @@ Ruff is configured in `pyproject.toml` — 100 columns, `E W F I UP B C4 SIM`.
 
 ## House rules that are easy to get wrong
 
+- **Never delete a row from `listings`.** A listing that came off the market is marked
+  with `delisted_at`, never removed. SQLite hands the `rowid` of a deleted last row to
+  the next insert, and that number is what travels in the `callback_data` of every
+  verdict button already posted to Telegram — a delete makes an old button rate a
+  different apartment. This stands until `listings` has an id of its own that is not the
+  `rowid`.
 - **Never edit an applied migration.** `migrations/*.sql` run in filename order and are
   recorded in `schema_migrations`; a column is added by adding `014_*.sql`. Editing `001`
   changes nothing on a database that already ran it.

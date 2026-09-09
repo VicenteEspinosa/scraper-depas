@@ -78,6 +78,8 @@ LABELS = {
     "DEPAS_ENRICH_LIMIT": "📄 Fichas por pasada",
     "DEPAS_COMMUTE_LIMIT": "🧭 Rutas por pasada",
     "DEPAS_ALERTS_LIMIT": "📢 Tarjetas por pasada",
+    "DEPAS_REFRESH_LIMIT": "🔄 Relecturas por pasada",
+    "DEPAS_DELIST_AFTER": "🗑️ Barridos para dar de baja",
 }
 
 # Group key, heading and the settings it holds, in order; each appears exactly once.
@@ -95,8 +97,9 @@ MENU: tuple[tuple[str, str, tuple[str, ...]], ...] = (
                              "DEPAS_FURNISHED", "DEPAS_TOP_FLOOR")),
     ("weights", "⚖️ Pesos", tuple(name for name in BY_NAME if name.endswith("_WEIGHT"))),
     ("bot", "🤖 Bot", ("TELEGRAM_CHAT_ID", "DEPAS_ADMINS")),
-    ("pace", "⏱️ Ritmo", ("DEPAS_ENRICH_LIMIT", "DEPAS_COMMUTE_LIMIT",
-                          "DEPAS_ALERTS_LIMIT")),
+    ("pace", "⏱️ Ritmo", ("DEPAS_ENRICH_LIMIT", "DEPAS_REFRESH_LIMIT",
+                          "DEPAS_COMMUTE_LIMIT", "DEPAS_ALERTS_LIMIT",
+                          "DEPAS_DELIST_AFTER")),
 )
 GROUPS = {key: (heading, names) for key, heading, names in MENU}
 
@@ -124,7 +127,8 @@ UNITS = {"DEPAS_WALK_MAX": " min", "DEPAS_WALK_TARGET": " min",
          "DEPAS_BEDROOMS_MIN": "D", "DEPAS_AMENITIES_TARGET": " de 9",
          "DEPAS_GRADE_MIN": " pts",
          "DEPAS_ENRICH_LIMIT": " fichas", "DEPAS_COMMUTE_LIMIT": " rutas",
-         "DEPAS_ALERTS_LIMIT": " tarjetas"}
+         "DEPAS_ALERTS_LIMIT": " tarjetas", "DEPAS_REFRESH_LIMIT": " relecturas",
+         "DEPAS_DELIST_AFTER": " barridos"}
 # What a weight is ever set to in practice.
 WEIGHT_PRESETS = ("0", "0.5", "1", "1.5", "2", "3")
 # As far ahead as a portal ever publishes an entrega date.
