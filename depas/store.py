@@ -37,7 +37,14 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     seed_from_env(connection)
     # The view is derived, not state: rebuilt every connect so it tracks the code.
     connection.executescript(RANKED_VIEW)
-    sync_lease_income(connection, Preferences.load(connection))
+    try:
+        sync_lease_income(connection, Preferences.load(connection))
+    except ValueError as error:
+        # A stored value only stops parsing when the code that parses it changed, and
+        # `depas config unset` is the repair — which has to be able to open the database.
+        # Raising here would turn one stale row into a crash loop nobody can get out of.
+        print(f"WARNING a stored preference no longer parses; `depas config` can repair it: "
+              f"{error}")
     return connection
 
 

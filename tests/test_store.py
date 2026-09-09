@@ -297,3 +297,26 @@ def test_a_batch_reads_the_stored_prices_in_one_query(tmp_path):
     connection.set_trace_callback(None)
 
     assert len([sql for sql in queries if sql.startswith("SELECT external_id, price")]) == 1
+
+
+def test_a_stored_preference_that_stops_parsing_still_lets_the_database_open(tmp_path):
+    """The repair is `depas config unset`, and that has to be able to connect.
+
+    A value only stops parsing when the code that parses it changed under it, so raising
+    at connect would turn one stale row into a crash loop nobody can get out of.
+    """
+    from depas.store import forget_preference
+
+    path = tmp_path / "test.db"
+    connection = connect(path)
+    connection.execute("INSERT INTO preferences (name, value, updated_at) "
+                       "VALUES ('DEPAS_COMMUNES', 'narnia', 'now')")
+    connection.commit()
+    connection.close()
+
+    reopened = connect(path)  # must not raise
+
+    forget_preference(reopened, "DEPAS_COMMUNES")
+    assert prefs().communes() == []
+    assert connect(path).execute(
+        "SELECT COUNT(*) FROM preferences WHERE name = 'DEPAS_COMMUNES'").fetchone()[0] == 0
