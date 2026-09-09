@@ -66,6 +66,9 @@ Scraping is two-stage, because detail pages are expensive:
   coordinates, the portal's routed walk times, the broker, and its own price
   benchmark. Only touches rows where `detail_fetched_at IS NULL`.
 - **`watch`** — both of the above in one scheduled pass, driven by the stored settings.
+- **`healthcheck`** — warns `DEPAS_ADMINS` by direct message when no `watch` pass
+  has completed in four hours. Runs every four hours from the same crontab, because
+  a `watch` that crashes every hour looks exactly like a quiet market from the chat.
 - **`show`** — filter and rank. Pass raw SQL instead for anything ad hoc.
 - **`resend`** — drop the notified stamp from recent alerts so the next `watch`
   posts them again, which is how listings announced to the wrong chat are moved.
