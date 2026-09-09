@@ -45,6 +45,7 @@ from depas.store import (
     refresh_zone_benchmarks,
     remember_card,
     remember_sweep,
+    remember_validators,
     remember_watch,
     save,
     save_detail,
@@ -52,6 +53,7 @@ from depas.store import (
     stored_watch,
     sweep_delisted,
     sync_lease_income,
+    validator_coverage,
 )
 from depas.telegram import (
     chat_type,
@@ -221,6 +223,7 @@ def enrich(args: argparse.Namespace) -> None:
         # Its own budget: `--limit` names the detail pages, and used to silently cap
         # the routing too.
         refresh_commutes(connection, fetcher, prefs, prefs.value("DEPAS_COMMUTE_LIMIT"))
+        remember_validators(connection, fetcher.validators)
     finally:
         fetcher.close()
         connection.close()
@@ -387,6 +390,9 @@ def watch(args: argparse.Namespace) -> None:
         print(f"alerts: {_announce(connection, prefs, alerts)} posted")
         # Grades move with the pool, so the pinned list is restated once a pass.
         print(f"lista: {'actualizada' if shortlist.sync(connection, prefs) else 'sin cambios'}")
+        remember_validators(connection, fetcher.validators)
+        urls, offered = validator_coverage(connection)
+        print(f"http: {offered} of {urls} urls offer a cache validator")
         remember_watch(connection, None)
     except Exception as error:
         # Re-raised: supercronic still logs it and the exit code still says it failed.

@@ -221,6 +221,44 @@ def quiet_portals(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+# ── whether a conditional GET would ever pay here ───────────────────────────────
+# Validators only, never a response body: an ETag is ~30 bytes for a page that costs
+# hundreds of kilobytes, so 20 000 listings come to about 4 MB.
+#
+# Sending them back is not wired up yet, and the reason is the portals rather than the
+# storage. `fetch_detail` both fetches and parses, and assetplan and toctoc read two
+# urls per listing — a 304 on one of them would leave the parser with no body and no way
+# to rebuild the rest. Doing it properly means splitting fetching from parsing in the
+# portal interface, which is its own change. This records what the portals offer so that
+# change can be justified, or dropped, on evidence.
+
+
+def remember_validators(connection: sqlite3.Connection,
+                        seen: Mapping[str, tuple[str | None, str | None, int]]) -> int:
+    """Record the cache validators each url offered on this pass."""
+    now = datetime.now(UTC).isoformat()
+    connection.executemany(
+        "INSERT INTO http_cache (url, etag, last_modified, status, fetched_at) "
+        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(url) DO UPDATE SET "
+        "etag = excluded.etag, last_modified = excluded.last_modified, "
+        "status = excluded.status, fetched_at = excluded.fetched_at",
+        [(url, etag, last_modified, status, now)
+         for url, (etag, last_modified, status) in seen.items()],
+    )
+    connection.commit()
+    return len(seen)
+
+
+def validator_coverage(connection: sqlite3.Connection) -> tuple[int, int]:
+    """How many urls we have seen, and how many of them offered a validator at all."""
+    row = connection.execute(
+        "SELECT COUNT(*) AS urls, "
+        "SUM(CASE WHEN etag IS NOT NULL OR last_modified IS NOT NULL THEN 1 ELSE 0 END)"
+        " AS offered FROM http_cache"
+    ).fetchone()
+    return row["urls"], row["offered"] or 0
+
+
 def refresh_zone_benchmarks(connection: sqlite3.Connection) -> int:
     """Recompute each commune's median published zone UF/m2 for the other portals to borrow."""
     by_commune: dict[str, list[float]] = defaultdict(list)
