@@ -69,6 +69,11 @@ INSERT OR IGNORE INTO user_interest (user_id, portal, external_id, interest, rat
 SELECT 0, portal, external_id, interest, rated_by, COALESCE(rated_at, datetime('now'))
   FROM listings WHERE interest IS NOT NULL;
 
+-- Announcements move under the chat they were made in. With no chat configured there is
+-- no destination to move them to and nothing is written — which is safe here only because
+-- the column is renamed rather than dropped, and because `add_subscriber` starts a chat
+-- on what happens next rather than on the backlog. Without both of those this branch
+-- would re-announce every listing ever stored the day a chat was finally set.
 INSERT OR IGNORE INTO subscriber_notifications (chat_id, portal, external_id, notified_at)
 SELECT (SELECT value FROM preferences WHERE name = 'TELEGRAM_CHAT_ID'),
        portal, external_id, notified_at
@@ -81,19 +86,30 @@ SELECT (SELECT CAST(value AS TEXT) FROM settings WHERE key = 'shortlist_chat_id'
        (SELECT value FROM settings WHERE key = 'shortlist_message_id')
  WHERE EXISTS (SELECT 1 FROM settings WHERE key = 'shortlist_message_id');
 
--- ── and out of `listings` ───────────────────────────────────────────────────────
--- Left in place they would be state nobody writes and something eventually reads, and
--- `listings_ranked` is SELECT *, so the per-reader columns could not even be named
--- without colliding with them. The indexes go first: SQLite refuses to drop a column an
--- index mentions.
+-- ── and out of the way, but not off the disk ───────────────────────────────────
+-- They cannot keep their names: `listings_ranked` is SELECT *, so the per-reader columns
+-- could not be named without colliding, and left as they are they would be state nobody
+-- writes and something eventually reads.
+--
+-- Renamed rather than dropped, though. This is the one migration in the set that would
+-- otherwise destroy data — verdicts somebody typed and announcements that stop a card
+-- being posted twice — and a DROP is unrecoverable on a database that has already run
+-- it. Renaming costs four columns of dead weight and buys the ability to check the
+-- backfill against the original afterwards, or to redo it:
+--
+--   SELECT COUNT(*) FROM listings WHERE legacy_interest IS NOT NULL;   -- what there was
+--   SELECT COUNT(*) FROM user_interest;                                -- what came across
+--
+-- A later migration drops them once this has run in production and those two agree.
+-- The indexes go first: SQLite refuses to rename a column an index mentions.
 DROP INDEX IF EXISTS idx_listings_rejected;
 DROP INDEX IF EXISTS idx_listings_unnotified;
 DROP INDEX IF EXISTS idx_listings_detail_due;
 
-ALTER TABLE listings DROP COLUMN interest;
-ALTER TABLE listings DROP COLUMN rated_at;
-ALTER TABLE listings DROP COLUMN rated_by;
-ALTER TABLE listings DROP COLUMN notified_at;
+ALTER TABLE listings RENAME COLUMN interest    TO legacy_interest;
+ALTER TABLE listings RENAME COLUMN rated_at    TO legacy_rated_at;
+ALTER TABLE listings RENAME COLUMN rated_by    TO legacy_rated_by;
+ALTER TABLE listings RENAME COLUMN notified_at TO legacy_notified_at;
 
 -- Rebuilt without the interest clause. Whether anybody has turned a listing down is now
 -- a subquery, and a partial index may not contain one — so it moves to the query, where

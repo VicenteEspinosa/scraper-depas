@@ -552,12 +552,16 @@ def subscribers_add(args: argparse.Namespace) -> None:
     """Start posting to a chat: a private conversation, or a channel with its group."""
     connection = connect()
     try:
-        add_subscriber(connection, args.chat_id, args.owner)
+        written_off = add_subscriber(connection, args.chat_id, args.owner,
+                                     catch_up=args.catch_up)
     finally:
         connection.close()
     whose = "compartido: cuenta el veredicto de cualquiera" if args.owner is None \
         else f"privado de {args.owner}: solo su veredicto lo moldea"
     print(f"{args.chat_id} suscrito ({whose})")
+    if written_off:
+        print(f"  {written_off} avisos ya guardados quedan por vistos; este chat empieza "
+              "en lo que venga (--catch-up para recibirlos)")
 
 
 def subscribers_remove(args: argparse.Namespace) -> None:
@@ -870,6 +874,9 @@ def main() -> None:
     sub_adder.add_argument("--owner", type=int,
                            help="Telegram user id whose verdicts shape this chat's pool; "
                                 "omit for a shared chat, where anybody's count")
+    sub_adder.add_argument("--catch-up", action="store_true",
+                           help="also post the backlog; without it the chat starts on "
+                                "what is found from now on")
     sub_adder.set_defaults(func=subscribers_add)
 
     sub_remover = sub_actions.add_parser("remove", help="stop posting to a chat")
