@@ -88,7 +88,8 @@ def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher, portal_name: s
         listing = portal.fetch_standalone(fetcher, url)
         if listing is None:
             return None
-        save(connection, [normalize(listing, fetcher)])
+        # The stored value rather than a fresh request: the pass has already cached it.
+        save(connection, [normalize(listing, stored_uf(connection, fetcher))])
 
     row = connection.execute(
         "SELECT * FROM listings WHERE portal = ? AND external_id = ?", key
