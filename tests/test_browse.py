@@ -18,8 +18,18 @@ from depas.browse import (
 from depas.configure import DATA_LIMIT
 from depas.models import Listing
 from depas.preferences import Preferences, set_preference
-from depas.store import LIKE, connect, save, save_detail, set_interest
+from depas.store import (
+    LIKE,
+    Subscriber,
+    connect,
+    save,
+    save_detail,
+    set_interest,
+)
 from depas.telegram import DISLIKE_BUTTON, LIKE_BUTTON
+
+# The browser is private and admin-only, so a person is always on the other side.
+SHARED = Subscriber("-100777")
 
 ADMIN = 467291452
 STRANGER = 111111
@@ -111,7 +121,7 @@ def test_the_last_screen_offers_no_way_further(connection, posted):
 
 def test_an_index_past_the_end_lands_on_the_last(connection):
     """The pool shrinks under a keyboard: a stale index must not raise."""
-    text, _ = screen(connection, Preferences.from_env(), 99, POOL)
+    text, _ = screen(connection, Preferences.from_env(), 99, POOL, SHARED)
 
     assert "3 de 3" in text
 
@@ -122,7 +132,7 @@ def test_a_star_from_the_browser_is_the_same_star(connection, posted):
 
     assert rated == 1
     assert connection.execute(
-        "SELECT interest FROM listings WHERE rowid = 1").fetchone()["interest"] == LIKE
+        "SELECT interest FROM user_interest").fetchone()["interest"] == LIKE
     assert posted["toasts"] == ["⭐ anotado"]
 
 
@@ -135,7 +145,9 @@ def test_a_discarded_listing_leaves_the_pool_it_was_browsed_in(connection, poste
 
 def test_the_starred_view_shows_only_what_was_starred(connection, posted):
     """The shortlist is the other half of browsing: the same message, filtered."""
-    set_interest(connection, "pi", "1", LIKE, "vicente")
+    # Under the admin who browses: a verdict belongs to a person, and the browser shows
+    # the person their own.
+    set_interest(connection, "pi", "1", LIKE, "vicente", ADMIN)
 
     _press(connection, f"{GO}:0:{STARRED}")
 
@@ -174,4 +186,4 @@ def test_a_press_is_authorised_every_time(connection, posted):
 
     assert posted["toasts"] == [DENIED]
     assert connection.execute(
-        "SELECT interest FROM listings WHERE rowid = 1").fetchone()["interest"] is None
+        "SELECT interest FROM user_interest").fetchone() is None

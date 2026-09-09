@@ -514,6 +514,35 @@ is the history of one aviso. An entrega date that slips three times means the fl
 been sitting unrented for months, and a field that used to be published and now is not
 is what a broken parser looks like from the inside.
 
+## More than one reader
+
+Cards go to **subscribers**, and a subscriber is a place rather than a person: a private
+conversation with the bot, or a channel — whose linked discussion group carries the
+comments, which is how this bot's own instance runs. `depas subscribers` manages them:
+
+```bash
+depas subscribers                      # every chat cards go to, and whose pool each shows
+depas subscribers add -1001234567890   # shared: anybody's verdict counts for it
+depas subscribers add 467291452 --owner 467291452   # private: only that person's does
+```
+
+Until you add one, whatever `TELEGRAM_CHAT_ID` says stands in, so nothing changes by
+upgrading — and a shared channel keeps behaving exactly as it did, because a shared
+subscriber counts anybody's verdict.
+
+The split that makes this work: **a verdict belongs to a person, an announcement belongs
+to a chat.** Your `/dislike` no longer empties somebody else's pool, and two people can
+disagree about the same flat and each see their own ⭐ list. But a card posted in a
+channel has been posted — that is a fact about the channel, not about each reader — so it
+is never repeated there once per person.
+
+A listing is only given up on for enrichment when *everybody* who has an opinion has
+turned it down, so one person's dislike cannot stop another from ever seeing the flat.
+
+One caveat worth knowing: **subscribers share one set of preferences.** Every subscriber
+is graded and filtered by the same settings, so they all receive the same cards — with
+their own verdicts and their own ⭐ list. Per-reader criteria is the next change.
+
 ## The pass, and its four stages
 
 One hourly `depas watch` does everything in order and is still supported. But the work is

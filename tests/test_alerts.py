@@ -63,9 +63,11 @@ def test_listings_below_the_minimum_grade_are_never_reconsidered(connection, sen
     posted = _announce(connection, prefs(), limit=10)
 
     assert posted < 4
+    # Every candidate stamped for this subscriber, over the bar or not.
     assert connection.execute(
-        "SELECT COUNT(*) FROM listings WHERE notified_at IS NULL"
-    ).fetchone()[0] == 0
+        "SELECT COUNT(*) FROM listings"
+    ).fetchone()[0] == connection.execute(
+        "SELECT COUNT(*) FROM subscriber_notifications").fetchone()[0]
 
 
 BREAKDOWN_ROW = {"commune": "nunoa", "area": 50.0, "net_monthly_clp": 600_000,
@@ -552,8 +554,9 @@ def test_un_stamping_announces_the_listings_again(connection, sent):
 def test_un_stamping_leaves_older_alerts_where_they_are(connection, sent):
     """The window is the whole point: a re-point moves the last batch, not the archive."""
     _announce(connection, prefs(), limit=10)
-    connection.execute("UPDATE listings SET notified_at = ? WHERE external_id = '0'",
-                       ((datetime.now(UTC) - timedelta(days=2)).isoformat(),))
+    connection.execute(
+        "UPDATE subscriber_notifications SET notified_at = ? WHERE external_id = '0'",
+        ((datetime.now(UTC) - timedelta(days=2)).isoformat(),))
 
     cleared = clear_notified(connection, hours=6)
 

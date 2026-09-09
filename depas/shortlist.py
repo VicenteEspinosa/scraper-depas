@@ -5,7 +5,13 @@ from datetime import datetime
 from depas.commute import SANTIAGO
 from depas.grade import Scale
 from depas.preferences import Preferences
-from depas.store import LIKE, remember_shortlist, stored_shortlist
+from depas.store import (
+    LIKE,
+    Subscriber,
+    remember_shortlist,
+    stored_shortlist,
+    subscribers,
+)
 from depas.telegram import (
     GRADE_EMOJI,
     clp,
@@ -28,11 +34,12 @@ CARD_LABEL, LISTING_LABEL = "tarjeta", "aviso"
 GONE = "<i>ya no está</i>"
 
 
-def starred(connection: sqlite3.Connection, prefs: Preferences) -> list[tuple[dict, object]]:
-    """Every listing you marked interesting, best first, graded as it is graded today."""
+def starred(connection: sqlite3.Connection, prefs: Preferences,
+            subscriber: Subscriber) -> list[tuple[dict, object]]:
+    """What this subscriber marked interesting, best first, graded as it is graded today."""
     scale = Scale(prefs)
     rows = [dict(row) for row in connection.execute(
-        "SELECT * FROM listings_ranked WHERE interest = ?", (LIKE,))]
+        f"SELECT * FROM ({subscriber.view()}) WHERE interest = ?", (LIKE,))]
     return sorted(((row, scale.grade(row)) for row in rows),
                   key=lambda pair: pair[1].score, reverse=True)
 
@@ -72,9 +79,10 @@ def _more(left_out: int) -> str:
 
 
 def format_shortlist(connection: sqlite3.Connection, prefs: Preferences,
-                     chat_id: str) -> str:
-    """Render the ⭐ set as the one message that is kept pinned, best first."""
-    found = starred(connection, prefs)
+                     subscriber: Subscriber) -> str:
+    """Render this subscriber's ⭐ set as the message it keeps pinned, best first."""
+    chat_id = subscriber.chat_id
+    found = starred(connection, prefs, subscriber)
     if not found:
         return EMPTY
     when = datetime.now(SANTIAGO).strftime("%d/%m %H:%M")
@@ -97,21 +105,34 @@ def format_shortlist(connection: sqlite3.Connection, prefs: Preferences,
     return "\n".join(lines)
 
 
-def sync(connection: sqlite3.Connection, prefs: Preferences) -> bool:
-    """Rewrite the pinned list in place, posting and pinning it the first time."""
+def sync(connection: sqlite3.Connection, prefs: Preferences,
+         subscriber: Subscriber | None = None) -> bool:
+    """Rewrite the pinned list in place, posting and pinning it the first time.
+
+    Without a subscriber it does every one of them, which is what a pass wants; the bot
+    passes the chat a verdict came from, since that is the only list it changed.
+    """
+    if subscriber is None:
+        # A loop rather than all(): that would short-circuit, and one subscriber whose
+        # list cannot be updated must not cost every later subscriber theirs.
+        updated = True
+        for one in subscribers(connection, prefs):
+            updated = sync(connection, prefs, one) and updated
+        return updated
     # Total on purpose: the list is a convenience, and a verdict is what actually matters.
     # Nothing that happens to it may cost the press or the command that triggered it.
     try:
-        return _sync(connection, prefs)
+        return _sync(connection, prefs, subscriber)
     except (RuntimeError, ValueError) as error:
         print(f"could not update the pinned list: {error}")
         return False
 
 
-def _sync(connection: sqlite3.Connection, prefs: Preferences) -> bool:
-    chat_id = prefs.chat_id()
-    text = format_shortlist(connection, prefs, chat_id)
-    stored = stored_shortlist(connection)
+def _sync(connection: sqlite3.Connection, prefs: Preferences,
+          subscriber: Subscriber) -> bool:
+    chat_id = subscriber.chat_id
+    text = format_shortlist(connection, prefs, subscriber)
+    stored = stored_shortlist(connection, chat_id)
     # A chat that has changed leaves the old message where it was: it is not ours to move.
     if stored and stored[0] == str(chat_id):
         # An edit that changes nothing is refused by Telegram, which is not a failure.

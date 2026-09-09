@@ -87,6 +87,11 @@ Ruff is configured in `pyproject.toml` — 100 columns, `E W F I UP B C4 SIM`.
 - **Parsers are tested against real saved HTML** in `tests/fixtures/`, so a portal
   changing its markup fails loudly instead of silently returning nothing. Add a fixture
   rather than a mock.
+- **A verdict is keyed by person, an announcement by chat.** `user_interest` takes a
+  Telegram user id and `subscriber_notifications` a chat id, and they are not
+  interchangeable: keying an announcement by person repeats the card in a shared channel,
+  and keying a verdict by chat makes one reader's opinion everybody's. Read either through
+  `Subscriber.view()` rather than joining by hand.
 - **`callback_data` caps at 64 bytes** and Telegram silently drops the whole keyboard
   past it. Buttons carry a `rowid`, never a portal and an external id.
 - **Settings live in the database, not the environment.** Only `TELEGRAM_BOT_TOKEN` and

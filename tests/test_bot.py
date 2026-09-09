@@ -15,7 +15,14 @@ from depas.bot import (
     run,
 )
 from depas.models import Listing
-from depas.store import connect, pool_query, remember_card, save, save_detail
+from depas.store import (
+    Subscriber,
+    connect,
+    pool_query,
+    remember_card,
+    save,
+    save_detail,
+)
 from tests.support import prefs
 
 
@@ -256,8 +263,17 @@ def _comment(text, **extra):
 
 
 def _verdict(connection):
+    """The verdict on the fixture listing, as the shared channel sees it.
+
+    A row rather than None even when nobody has said anything, so the assertions can go
+    on reading ["interest"]: a verdict lives in its own table now, and "no opinion" is
+    the absence of a row rather than a NULL in one.
+    """
     return connection.execute(
-        "SELECT interest, rated_by FROM listings WHERE external_id = 'MLC-1'").fetchone()
+        "SELECT interest, rated_by FROM ("
+        "  SELECT verdict.interest, verdict.rated_by FROM user_interest AS verdict"
+        "   WHERE verdict.external_id = 'MLC-1' ORDER BY verdict.rated_at DESC LIMIT 1)"
+        " UNION ALL SELECT NULL, NULL LIMIT 1").fetchone()
 
 
 def test_a_like_in_the_thread_marks_that_apartment(announced, answers):
@@ -273,7 +289,7 @@ def test_a_dislike_takes_the_listing_out_of_the_pool(announced, answers):
     _handle(announced, None, _comment("/dislike"), prefs())
 
     assert _verdict(announced)["interest"] == -1
-    assert announced.execute(pool_query(prefs())).fetchall() == []
+    assert announced.execute(pool_query(prefs(), Subscriber(str(CHANNEL)))).fetchall() == []
 
 
 def test_the_card_itself_is_redrawn_with_the_verdict(announced, answers):
