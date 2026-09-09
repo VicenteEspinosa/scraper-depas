@@ -682,3 +682,16 @@ def test_prose_states_the_move_in_date_when_the_spec_table_does_not(today):
     assert infer_from_description(
         "Depto luminoso. Disponible desde el 15 de octubre.")["available_from"] == "2026-10-15"
     assert "available_from" not in infer_from_description("Bodega disponible en el subterráneo.")
+
+
+def test_a_quote_in_the_url_cannot_end_the_link_early(connection):
+    """`href="…"` is an attribute: a url carrying a quote would close it and break the card."""
+    from depas.grade import Scale
+
+    row = {"commune": "nunoa", "bedrooms": 2, "area": 50.0, "net_monthly_clp": 600_000,
+           "price_clp": 500_000, "common_expenses": 100_000,
+           "url": 'https://x/1"onclick="x', "walk_minutes": 5}
+
+    card = format_listing(row, Scale(prefs()).grade(row), prefs())
+
+    assert 'href="https://x/1&quot;onclick=&quot;x"' in card

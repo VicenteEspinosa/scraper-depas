@@ -24,10 +24,22 @@ def bot_token() -> str:
     return token
 
 
+def bot_id() -> int | None:
+    """The bot's own user id, which is the part of the token before the colon."""
+    head, _, _ = bot_token().partition(":")
+    return int(head) if head.isdigit() else None
+
+
 def call(method: str, **params: Any) -> Any:
     """Invoke one Bot API method, raising with Telegram's own message on failure."""
     response = requests.post(f"{API}/bot{bot_token()}/{method}", json=params, timeout=TIMEOUT)
-    payload = response.json()
+    try:
+        payload = response.json()
+    except ValueError:
+        # An outage answers with an HTML error page, which is a blip to survive rather
+        # than a JSONDecodeError nothing upstream expects.
+        raise RuntimeError(
+            f"telegram {method} answered HTTP {response.status_code} with no JSON") from None
     if not payload.get("ok"):
         # Telegram puts the actionable part in `parameters`: a migrated chat's new id.
         detail = payload.get("parameters") or ""
@@ -134,7 +146,10 @@ def clp(amount: float | None) -> str:
 
 
 def escape(text: str) -> str:
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    """Text safe inside Telegram HTML, in an attribute as well as between tags."""
+    # The quote matters for `href="…"`: a url carrying one would end the attribute early.
+    return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;"))
 
 
 def _station(name: str) -> str:

@@ -14,8 +14,11 @@ NAME = "portalinmobiliario"
 BASE = "https://www.portalinmobiliario.com"
 # MercadoLibre's property vertical: same item ids and markup, so its links parse too.
 LISTING_HOSTS = ("portalinmobiliario.com", "mercadolibre.cl")
+# The host is the portal or a subdomain of it, and nothing else: `[\w.-]*` used to let
+# `miportalinmobiliario.com` through, and a link the bot fetches and posts as a card is a
+# link everybody in the chat will trust.
 LISTING_URL = re.compile(
-    r"https?://[\w.-]*(?:portalinmobiliario\.com|mercadolibre\.cl)/\S*?MLC-\d+\S*"
+    r"https?://(?:[\w-]+\.)*(?:portalinmobiliario\.com|mercadolibre\.cl)/\S*?MLC-\d+\S*"
 )
 
 
