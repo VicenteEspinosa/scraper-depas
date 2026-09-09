@@ -7,3 +7,4 @@ PORTALS: dict[str, ModuleType] = {
     module.NAME: module
     for module in (portalinmobiliario, houm, goplaceit, toctoc, chilepropiedades, assetplan)
 }
+

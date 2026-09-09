@@ -80,6 +80,8 @@ LABELS = {
     "DEPAS_ALERTS_LIMIT": "📢 Tarjetas por pasada",
     "DEPAS_REFRESH_LIMIT": "🔄 Relecturas por pasada",
     "DEPAS_DELIST_AFTER": "🗑️ Barridos para dar de baja",
+    "DEPAS_SWEEP_QUIET_PAGES": "📄 Páginas vacías que cortan",
+    "DEPAS_DEEP_SWEEP_HOURS": "🔍 Horas entre barridos profundos",
 }
 
 # Group key, heading and the settings it holds, in order; each appears exactly once.
@@ -99,7 +101,8 @@ MENU: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("bot", "🤖 Bot", ("TELEGRAM_CHAT_ID", "DEPAS_ADMINS")),
     ("pace", "⏱️ Ritmo", ("DEPAS_ENRICH_LIMIT", "DEPAS_REFRESH_LIMIT",
                           "DEPAS_COMMUTE_LIMIT", "DEPAS_ALERTS_LIMIT",
-                          "DEPAS_DELIST_AFTER")),
+                          "DEPAS_DELIST_AFTER", "DEPAS_SWEEP_QUIET_PAGES",
+                          "DEPAS_DEEP_SWEEP_HOURS")),
 )
 GROUPS = {key: (heading, names) for key, heading, names in MENU}
 
@@ -128,7 +131,8 @@ UNITS = {"DEPAS_WALK_MAX": " min", "DEPAS_WALK_TARGET": " min",
          "DEPAS_GRADE_MIN": " pts",
          "DEPAS_ENRICH_LIMIT": " fichas", "DEPAS_COMMUTE_LIMIT": " rutas",
          "DEPAS_ALERTS_LIMIT": " tarjetas", "DEPAS_REFRESH_LIMIT": " relecturas",
-         "DEPAS_DELIST_AFTER": " barridos"}
+         "DEPAS_DELIST_AFTER": " barridos",
+         "DEPAS_SWEEP_QUIET_PAGES": " páginas", "DEPAS_DEEP_SWEEP_HOURS": " h"}
 # What a weight is ever set to in practice.
 WEIGHT_PRESETS = ("0", "0.5", "1", "1.5", "2", "3")
 # As far ahead as a portal ever publishes an entrega date.

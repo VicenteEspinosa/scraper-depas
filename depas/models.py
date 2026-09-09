@@ -41,3 +41,18 @@ class Query:
     min_bedrooms: int | None = None
     min_area_m2: float | None = None
     max_pages: int = 5
+    # The external ids this portal has already stored, so a paginating portal can tell a
+    # page of nothing new from a page of finds. Plain data rather than a callback: a
+    # portal has no database and should not grow one.
+    known: frozenset[str] = field(default_factory=frozenset)
+    # Consecutive pages of nothing new before the sweep stops. 0 reads every page, which
+    # is what a deep sweep passes and what a portal whose ordering we do not trust gets.
+    quiet_pages: int = 0
+
+    def nothing_new(self, page: list["Listing"]) -> bool:
+        """Whether a whole page of results was already stored.
+
+        A method rather than a helper in `depas.portals` because that package imports
+        every portal module, so a portal importing back out of it is a cycle.
+        """
+        return bool(page) and all(one.external_id in self.known for one in page)

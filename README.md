@@ -462,10 +462,30 @@ whatever was edited from the chat since.
 | `DEPAS_DB_PATH` | SQLite location. Defaults to `depas.db`. Environment only — it says where the settings live, so it cannot be one of them. |
 | `TELEGRAM_BOT_TOKEN` | From @BotFather. Environment only: a credential does not belong in the table beside the data. |
 | `DEPAS_ADMINS` | Numeric Telegram user ids allowed to change the settings from a chat, comma-separated. Empty is nobody, and being in the alert chat is not enough — a discussion group is joinable. Ids rather than usernames, because a username can be given away and reclaimed. **The seed carries the author's id**, so replace it with yours if you are hosting your own; `@userinfobot` tells you what it is. |
+| `DEPAS_SWEEP_QUIET_PAGES` | Consecutive pages of nothing new that end a portal's sweep. Default 2; `0` reads every page always, which is what to use if you do not trust the portal's ordering. |
+| `DEPAS_DEEP_SWEEP_HOURS` | How often a portal is read to the bottom regardless of the cutoff. Default 24 — the safety net that turns a wrong ordering guess into a delay rather than a loss. `0` makes every sweep deep. |
 | `DEPAS_REFRESH_LIMIT` | Detail pages **re-read** per pass, on top of the new ones. A page is re-read when the price moved since it was read, or when its own backoff comes due; the two budgets are separate so a listing nobody has read yet never waits behind a re-read. Default 20, `0` never re-reads. |
 | `DEPAS_DELIST_AFTER` | How many believable sweeps of a portal must fail to turn a listing up before it is marked gone. A sweep counts only if it finished *and* saw listings, so a portal that is down or whose markup moved delists nobody. Default 3. `0` never delists — and it has to be special-cased, since "at least zero sweeps" is true of every row. |
 | `DEPAS_ENRICH_LIMIT`, `DEPAS_COMMUTE_LIMIT`, `DEPAS_ALERTS_LIMIT` | How much work one `watch` pass may do: detail pages fetched, listings routed, cards posted. Defaults 60, 40 and 10 — the numbers the command-line flags used to hardcode. They belong in the table rather than in the crontab because the right figure moves with how many comunas you watch, and moving it should not need a redeploy. `0` switches a stage off. The flags still exist and override the setting for one run. |
 | `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread, which is also where `/like` and `/dislike` are read from; a group takes the cards but leaves them undiscussable, so verdicts have to be replies. Switching between the two is only this value. |
+
+## Not re-reading pages that hold nothing new
+
+The two portals that paginate are read only as deep as they need to be: once
+`DEPAS_SWEEP_QUIET_PAGES` pages in a row bring nothing the database has not already
+stored, that portal's sweep stops. Consecutive on purpose — a single stale page between
+finds does not end it.
+
+That only works if a portal returns its newest listings first, which both appear to do
+and neither promises. So it is not taken on faith:
+
+- Every `DEPAS_DEEP_SWEEP_HOURS` a portal is read all the way down anyway, so the worst
+  a wrong guess costs is a day's delay rather than a listing lost for good.
+- Each sweep records the deepest page a listing it had never seen turned up on. While
+  that stays inside the cutoff, stopping early cannot have dropped anything — and
+  `depas discover` prints a warning the first time it does not, naming the portal.
+
+Setting either to `0` restores the old behaviour of reading every page, every time.
 
 ## When a listing comes off the market
 

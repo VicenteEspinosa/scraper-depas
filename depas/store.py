@@ -230,16 +230,71 @@ def pending_detail(connection: sqlite3.Connection, fresh: int,
 
 
 def remember_sweep(connection: sqlite3.Connection, portal: str, commune: str | None,
-                   started_at: str, cards_seen: int, error: str | None) -> None:
+                   started_at: str, cards_seen: int, error: str | None, *,
+                   pages_read: int | None = None, deep: bool = False,
+                   deepest_new_page: int | None = None) -> None:
     """Record one (portal, comuna) sweep: what it saw, and whether it can be believed."""
     connection.execute(
         "INSERT INTO scrape_runs "
-        "(portal, commune, started_at, finished_at, cards_seen, ok, error) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "(portal, commune, started_at, finished_at, cards_seen, ok, error, "
+        " pages_read, deep, deepest_new_page) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (portal, commune, started_at, datetime.now(UTC).isoformat(), cards_seen,
-         int(error is None), error),
+         int(error is None), error, pages_read, int(deep), deepest_new_page),
     )
     connection.commit()
+
+
+def known_ids(connection: sqlite3.Connection, portal: str) -> frozenset[str]:
+    """Every external id already stored for a portal, so a page of nothing new is visible.
+
+    Handed to the portal as plain data: a portal has no database and should not grow one
+    just to know whether it is looking at something it has seen before.
+    """
+    return frozenset(row[0] for row in connection.execute(
+        "SELECT external_id FROM listings WHERE portal = ?", (portal,)))
+
+
+def swept_deep_at(connection: sqlite3.Connection, portal: str) -> str | None:
+    """When this portal last had every page read, whatever the cutoff would have said."""
+    row = connection.execute(
+        "SELECT MAX(started_at) FROM scrape_runs WHERE portal = ? AND deep = 1 AND ok = 1",
+        (portal,),
+    ).fetchone()
+    return row[0]
+
+
+def due_a_deep_sweep(connection: sqlite3.Connection, portal: str, hours: int) -> bool:
+    """Whether it is this portal's turn to be read to the bottom.
+
+    The safety net under the cutoff: even if the ordering assumption is wrong, a listing
+    hiding behind known ones is found within `hours` rather than never. `hours` of 0
+    makes every sweep deep, which is the pre-cutoff behaviour.
+    """
+    if hours <= 0:
+        return True
+    last = swept_deep_at(connection, portal)
+    if last is None:
+        return True
+    return last < (datetime.now(UTC) - timedelta(hours=hours)).isoformat()
+
+
+def cutoff_safety(connection: sqlite3.Connection, quiet_pages: int) -> list[sqlite3.Row]:
+    """Portals where a deep sweep found something new past where the cutoff would stop.
+
+    This is the assumption under test. Cutting a sweep short once a page brings nothing
+    new is only sound if the portal returns the newest listings first — nobody documents
+    that, so instead of trusting it, every deep sweep records the deepest page a listing
+    we had never seen turned up on. While that stays under the cutoff the ordering holds.
+    A row here means it does not, and the cutoff has been dropping listings.
+    """
+    return connection.execute(
+        "SELECT portal, MAX(deepest_new_page) AS deepest, COUNT(*) AS sweeps "
+        "  FROM scrape_runs "
+        " WHERE deep = 1 AND ok = 1 AND deepest_new_page IS NOT NULL "
+        " GROUP BY portal HAVING deepest >= ?",
+        (quiet_pages,),
+    ).fetchall()
 
 
 def mark_delisted(connection: sqlite3.Connection, portal: str, external_id: str) -> None:

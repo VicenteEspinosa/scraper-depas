@@ -44,16 +44,24 @@ def search(fetcher: Fetcher, query: Query) -> Iterator[Listing]:
 
 def _search_commune(fetcher: Fetcher, query: Query, commune: Commune | None) -> Iterator[Listing]:
     place = commune.value if commune is not None else REGION
+    quiet = 0
     for page in range(query.max_pages):
         url = f"{BASE}/propiedades/{OPERATION_PATH[query.operation]}/departamento/{place}/{page}"
         cards = HTMLParser(fetcher.get(url).text).css(CARD)
         # paging past the last result answers 200 with no cards rather than 404
         if not cards:
             return
+        found = []
         for card in cards:
             listing = _parse_card(card)
             if listing is not None:
-                yield listing
+                # Which page it came from, for the check that the ordering holds.
+                listing.extra["page"] = page
+                found.append(listing)
+        yield from found
+        quiet = quiet + 1 if query.nothing_new(found) else 0
+        if query.quiet_pages and quiet >= query.quiet_pages:
+            return
 
 
 def _parse_card(card: Node) -> Listing | None:

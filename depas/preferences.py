@@ -330,6 +330,17 @@ SETTINGS: tuple[Setting, ...] = (
             "ficha se relee cuando el precio se movió o cuando le toca; sube esto si la "
             "base quedó desactualizada. En 0 nunca se relee nada.",
             example="20", default="20"),
+    Setting("DEPAS_SWEEP_QUIET_PAGES", _budget,
+            "Cuántas páginas seguidas sin ningún aviso nuevo cortan el barrido de un "
+            "portal. Sirve solo si el portal devuelve lo más reciente primero; en 0 se "
+            "leen todas las páginas siempre, que es lo seguro si dudas del orden.",
+            example="2", default="2"),
+    Setting("DEPAS_DEEP_SWEEP_HOURS", _budget,
+            "Cada cuántas horas un portal se lee hasta el fondo pese al corte. Es la red "
+            "de seguridad: si el orden no es por fecha, un aviso escondido detrás de los "
+            "conocidos aparece dentro de este plazo en vez de nunca. En 0 toda pasada es "
+            "profunda y el corte queda sin efecto.",
+            example="24", default="24"),
     Setting("DEPAS_DELIST_AFTER", _budget,
             "Cuántos barridos creíbles del portal tienen que no encontrar un aviso para "
             "darlo de baja. Un barrido cuenta solo si terminó y vio avisos, así que un "
