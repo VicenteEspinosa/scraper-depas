@@ -43,6 +43,13 @@ Seeding happens once. After that the database is the configuration and `.env` is
 history, or a preference cleared from the chat would come back on the next restart;
 `depas config import-env --force` is the deliberate re-import.
 
+A stored value is validated on the way in, so the only way it can fail to parse later is
+the code changing under it — a commune slug leaving the enum, a disposition renamed. That
+case is a warning, not an exception: `connect` skips mirroring the lease income and the
+bot keeps the last `Preferences` that did load. Raising would have been the crash loop
+`config check` exists to prevent for `.env`, only worse: `depas config unset`, the
+repair, needs a `connect` that does not raise before it can run.
+
 `depas config check` parses every setting `.env` declares and touches nothing else. It
 is worth its own pass because a value only reaches the table through a parser: a `.env`
 that no longer validates stops the process at `connect`, which on a box that restarts
@@ -98,6 +105,12 @@ home — correctly, since it is what `/compare` reads. An incomplete one is park
 
 Authorisation is checked on every press rather than only when the menu is opened: the
 menu is a message, and in a group anybody can reach the buttons on somebody else's.
+
+The prompt being read back by its first line has a cost: the first line is text, and
+anybody in the group can post text. So the message being answered also has to have been
+written by the bot — its user id is the part of the token before the colon, which is why
+no second credential or lookup is needed to know it. Without the check, an imitation
+prompt for `DEPAS_ADMINS` and an admin who replied to it would have been an admin added.
 
 ## Grading
 
@@ -433,6 +446,14 @@ database, so SQLite keeps the single writer it is happiest with and none of this
 to think about transactions or `SQLITE_BUSY`. A sweep comes back as a `Swept` — plain
 objects — and the main thread saves it and records the evidence.
 
+The UF is read from the indicator once a day and cached in `uf_daily`. The indicator
+being down used to fail the whole sweep, because a listing quoted in UF cannot be stored
+without one — but the UF moves by a fraction of a percent a day, so the last cached value
+is a fine price for today. `stored_uf` falls back to it, and deliberately does not write
+it down under today's date, so tomorrow's pass asks again. With nothing cached at all the
+outage is still an error: a wrong UF would misprice every UF listing, and there is no
+right one to be had.
+
 Each worker gets its own `Fetcher`, because a `curl_cffi` session is not built to be
 shared. That is also why `normalize` now takes the UF value rather than the fetcher:
 `uf_in_clp` caches per Fetcher, so six fetchers meant six requests to the indicator, and
@@ -471,6 +492,12 @@ and gets four hours, routing is somebody else's server and gets a day.
 A *sub*-stage nobody runs is not stale, since splitting the pass up is opt-in and a box
 on one hourly `watch` runs none of them. `watch` itself is always checked, unstamped
 included: a deploy whose pass has never finished is the case the watchdog was built for.
+
+The per-stage patience was declared and then not used: `--stale-hours` had a default of
+four, so every stage was held to four hours and `route`'s day never applied. The flag
+now defaults to nothing, which is what lets `STALE_HOURS` speak, and passing a number
+still means what it did — one patience for everything. The test reads the parser rather
+than calling the function, because the bug was in a default nobody passed.
 
 ## Cutting the pagination short without trusting the portal
 
@@ -516,6 +543,23 @@ What this does *not* save much of any more: the sweep going parallel already cut
 pass's wall clock by about six, so what is left is requests — roughly half of the listing
 sweep. Worth having, not worth being wrong about, which is why the safety net is bigger
 than the optimisation.
+
+## A copy before the code changes
+
+`depas backup`, `scripts/deploy-remote.sh`.
+
+Every migration so far has been additive or has renamed rather than dropped, and the one
+that moved data — the pool per subscriber — kept the originals as `legacy_*` columns so
+the backfill could be checked against them. That is the discipline; a backup is what
+stands behind it when the discipline slips. The deploy takes one after the image is
+built and before the containers restart, which is the last moment the file still has the
+schema the old code left.
+
+Through SQLite's own backup API rather than `cp`: the database is in WAL mode and the old
+containers are still writing, so a plain copy could catch the main file and the `-wal`
+mid-checkpoint. And deliberately not through `connect()`, which would apply the very
+migrations the copy is meant to predate — the command opens the file raw and touches
+nothing but the destination.
 
 ## Knowing the pass still runs
 
@@ -568,6 +612,18 @@ message it replied to, and the `[id]` the card's own header prints — which is 
 covers a card posted before any of this was recorded. Only the header is searched: a
 bracketed number in a title or a description would otherwise rate some unrelated
 listing.
+
+A pasted link is recognised by a per-portal pattern, and the pattern is strict about the
+host: the portal's domain, or a subdomain of it, and nothing that merely *ends* in it.
+The bot fetches what it recognises and posts the result as a card with a «Ver aviso»
+link, so a pattern that let `miportalinmobiliario.com` through would have let anybody in
+the group have the bot vouch for a page of their own.
+
+Telegram's own failures come back as JSON with `ok: false`, which `call` turns into a
+`RuntimeError` the polling loop survives. An outage does not: it answers with an HTML
+error page, and the `JSONDecodeError` that followed was not on the list of things the
+loop caught, so a bad hour at Telegram was a restart of the bot on every poll. `call`
+now reports that as the same `RuntimeError`.
 
 Alert requirements are re-applied even where the scrape already checked them, because
 enrichment overwrites card values (bedrooms among them) with the detail page's and a
