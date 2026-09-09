@@ -1,0 +1,35 @@
+depas/cli.py
+  s_8ca4f48722c18b::t_6f89ae64caf00f 5,41,45,51,54,320-324
+  s_8ca4f48722c18b::t_3d9c0bdb825dc4 330-340,344-354,603-607
+  s_8ca4f48722c18b::t_3d306319987667 341-343
+deploy/crontab
+  s_8ca4f48722c18b::t_b7ea2d4590468a 7-10
+README.md
+  s_8ca4f48722c18b::t_a3eb818ab0e223 69-71
+docs/DESIGN.md
+  s_8ca4f48722c18b::t_a3eb818ab0e223 226-231,236-242
+tests/test_healthcheck.py
+  s_8ca4f48722c18b::t_0d1b3c59532611 1-5,7-13,18-26,31-43,45-52,54-74
+  s_8ca4f48722c18b::t_b53295f4031a18 6,75-76,80-81
+  s_8ca4f48722c18b::t_64e5d8eda436e5 14-17,27-30,44,53,78
+  s_8ca4f48722c18b::t_23825922526205 77,79,82
+depas/store.py
+  s_8ca4f48722c18b::t_dc80799db6fc85 344-352,355-369
+  s_8ca4f48722c18b::t_3d306319987667 353-354
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2bc4e56a0b8114e85ea6ec792e80b3cd264fa35a",
+  "prompts": {},
+  "sessions": {
+    "s_8ca4f48722c18b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab0fc3d4-7ad4-4144-ae9f-3f60c9f299ee",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
