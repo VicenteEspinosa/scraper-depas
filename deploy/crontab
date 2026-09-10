@@ -18,13 +18,17 @@
 # batches, which spreads the requests instead of firing 60 at the top of the hour.
 2,12,22,32,42,52 * * * * depas enrich
 
-# Travel times and the zone benchmarks. Transitous is somebody else's server, and
-# nothing downstream needs this to be minutes fresh.
-21,51 * * * * depas route
+# Travel times and the zone benchmarks. Transitous is somebody else's server, so this
+# stays sequential and modest — but twice an hour meant a listing with nothing left to
+# wait for but its travel time waited up to thirty minutes for it, which was the second
+# biggest delay in the chain after discovery.
+6,21,36,51 * * * * depas route
 
-# Alerts and the pinned ⭐ list. Four times an hour, so a listing enriched at :12 is
-# announced at :15 rather than waiting for the next whole pass.
-15,30,45,0 * * * * depas announce
+# Alerts, the corrections to cards already posted, and the pinned ⭐ list. Every five
+# minutes: a pass with nothing to post asks Telegram nothing at all, so frequency here
+# is free, and it is frequency rather than batch size that decides how long a listing
+# waits — the batch only decides how fast a backlog drains.
+*/5 * * * * depas announce
 
 # Watchdog: warn the admins by DM about any stage that has stopped completing. Each
 # stage stamps its own heartbeat, so a stalled enrichment is no longer hidden behind
