@@ -35,11 +35,17 @@
 # biggest delay in the chain after discovery.
 6,21,36,51 * * * * depas route
 
-# Alerts, the corrections to cards already posted, and the pinned ⭐ list. Every five
+# Alerts, the redraws of cards already posted, and the pinned ⭐ list. Every five
 # minutes: a pass with nothing to post asks Telegram nothing at all, so frequency here
 # is free, and it is frequency rather than batch size that decides how long a listing
 # waits — the batch only decides how fast a backlog drains.
 */5 * * * * depas announce
+
+# The one message a day that names every card that moved: a rebaja shows on the card
+# within five minutes, and the notification about it arrives at breakfast. The clock
+# lives here rather than in the code — this entry is the whole of "10:00", and TZ is
+# America/Santiago, so it follows Chilean daylight saving on its own.
+0 10 * * * depas resumen
 
 # Watchdog: warn the admins by DM about any stage that has stopped completing. Each
 # stage stamps its own heartbeat, so a stalled enrichment is no longer hidden behind

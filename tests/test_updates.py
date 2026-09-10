@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from depas import updates
-from depas.cli import _announce, _report_updates
+from depas.cli import _announce, _correct_cards, _send_resumen
 from depas.models import Listing
 from depas.store import (
     DISLIKE,
@@ -80,8 +80,20 @@ def _later(connection, table: str, column: str) -> None:
     connection.commit()
 
 
+def _correct(connection, limit: int = 10) -> int:
+    """The half that runs every pass: the card redrawn and its thread told."""
+    return updates.correct(connection, prefs(), Subscriber(CHAT), limit)
+
+
+def _resumen(connection, limit: int = 10) -> int:
+    """The half that runs at 10:00: the one message that names everything that moved."""
+    return updates.digest(connection, prefs(), Subscriber(CHAT), limit)
+
+
 def _sync(connection, limit: int = 10) -> int:
-    return updates.sync(connection, prefs(), Subscriber(CHAT), limit)
+    """A whole day of it, in the order the crontab runs the two: cards, then the resumen."""
+    _correct(connection, limit)
+    return _resumen(connection, limit)
 
 
 def _one_of_many(external_id: str, price: int, url: str | None = None) -> Listing:
@@ -261,6 +273,66 @@ def test_a_card_already_posted_is_edited_its_thread_told_and_the_digest_sent(
     assert "El arriendo bajó de $1.000.000 a $920.000" in thread[1]
     assert "Cambió lo que ya te mandé" in digest[1]
     assert "El arriendo bajó de $1.000.000 a $920.000" in digest[1]
+
+
+def test_the_card_is_fixed_by_the_pass_and_the_feed_hears_nothing_yet(connection,
+                                                                     telegram):
+    """The whole point of the split: a rebaja shows on the card within five minutes.
+
+    No resumen goes out for it, because that one is a message in the feed and there is
+    exactly one of those a day.
+    """
+    _announced(connection, 1_000_000)
+    _later(connection, "price_history", "seen_at")
+    _later(connection, "subscriber_notifications", "notified_at")
+    save(connection, [_listing(920_000)])
+
+    assert _correct(connection) == 1
+
+    assert telegram["edits"] == [500]
+    assert [text for chat, text in telegram["replies"] if "ya te mandé" in text] == []
+
+
+def test_a_card_fixed_hours_earlier_is_still_named_in_the_resumen(connection, telegram):
+    """The two watermarks are separate: what the card already says is still news at 10:00."""
+    _announced(connection, 1_000_000)
+    _later(connection, "price_history", "seen_at")
+    _later(connection, "subscriber_notifications", "notified_at")
+    save(connection, [_listing(920_000)])
+    _correct(connection)
+
+    assert _resumen(connection) == 1
+
+    resumen = [text for chat, text in telegram["replies"] if "ya te mandé" in text][0]
+    assert "El arriendo bajó de $1.000.000 a $920.000" in resumen
+
+
+def test_a_card_is_fixed_once_however_many_passes_run_before_the_resumen(connection,
+                                                                        telegram):
+    """Otherwise a pending rebaja is a thread comment every five minutes until 10:00."""
+    _announced(connection, 1_000_000)
+    _later(connection, "price_history", "seen_at")
+    _later(connection, "subscriber_notifications", "notified_at")
+    save(connection, [_listing(920_000)])
+
+    assert [_correct(connection) for _ in range(4)] == [1, 0, 0, 0]
+
+    assert telegram["edits"] == [500]
+    assert len(telegram["replies"]) == 1
+
+
+def test_the_resumen_gathers_a_day_of_passes_into_one_message(connection, telegram):
+    """Three flats that moved in three different passes are one message the next morning."""
+    _three_announced(connection)
+    _rebaja_all(connection)
+    for _ in range(3):
+        _correct(connection, limit=1)
+
+    assert _resumen(connection) == 3
+
+    resumenes = [text for chat, text in telegram["replies"] if "ya te mandé" in text]
+    assert len(resumenes) == 1
+    assert "3 avisos" in resumenes[0]
 
 
 def test_the_digest_is_one_message_for_every_listing_that_moved(connection, telegram):
@@ -513,10 +585,10 @@ def test_a_late_card_is_never_also_reported_as_a_correction(connection, telegram
     save_detail(connection, "pi", "7", {"walk_minutes": 6})
 
     _announce(connection, prefs(), limit=10)
-    reported = _report_updates(connection, prefs(),
-                               type("Args", (), {"updates_limit": 10})())
+    args = type("Args", (), {"updates_limit": 10})()
 
-    assert reported == 0
+    assert _correct_cards(connection, prefs(), args) == 0
+    assert _send_resumen(connection, prefs(), args) == 0
     assert [text for chat, text in telegram["replies"] if "ya te mandé" in text] == []
 
 
@@ -533,10 +605,10 @@ def test_a_second_subscriber_is_told_on_its_own_account(connection, telegram):
     _later(connection, "subscriber_notifications", "notified_at")
     save(connection, [_listing(920_000)])
 
-    reported = _report_updates(connection, prefs(),
-                              type("Args", (), {"updates_limit": 10})())
+    named = _send_resumen(connection, prefs(),
+                          type("Args", (), {"updates_limit": 10})())
 
-    assert reported == 2
+    assert named == 2
     assert {chat for chat, text in telegram["replies"] if "ya te mandé" in text} == {
         CHAT, "-2002"}
 
@@ -615,6 +687,36 @@ def test_a_listing_stamped_without_a_card_is_not_given_a_watermark(tmp_path):
 
     assert [row["external_id"] for row
             in database.execute("SELECT external_id FROM update_notifications")] == ["told"]
+
+
+def _at_021(tmp_path):
+    """A database as it stands before the split: one watermark, moved by both halves."""
+    database = _at_017(tmp_path)
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        version = int(path.name.split("_")[0])
+        if not 17 < version <= 21:
+            continue
+        database.executescript(path.read_text())
+        database.execute("INSERT INTO schema_migrations VALUES (?, datetime('now'))",
+                         (version,))
+    database.execute("UPDATE update_notifications SET through = '2026-09-05T09:00:00'")
+    database.commit()
+    return database
+
+
+def test_what_the_card_already_said_counts_as_already_resumido(tmp_path):
+    """A NULL here would owe the first resumen after the deploy months of history.
+
+    Until the split both halves moved together, so what is drawn on the card is exactly
+    what the last resumen named.
+    """
+    database = _at_021(tmp_path)
+
+    migrate(database)
+
+    mark = database.execute(
+        "SELECT through, digested_through FROM update_notifications").fetchone()
+    assert mark["digested_through"] == mark["through"] == "2026-09-05T09:00:00"
 
 
 def test_a_digest_too_long_for_telegram_is_cut_rather_than_lost(connection, telegram):
