@@ -539,21 +539,34 @@ def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) ->
     return posted
 
 
-def _report_updates(connection: sqlite3.Connection, prefs: Preferences,
-                    args: argparse.Namespace) -> int:
-    """Correct the cards every subscriber already has, each with its own budget.
+def _correct_cards(connection: sqlite3.Connection, prefs: Preferences,
+                   args: argparse.Namespace) -> int:
+    """Redraw the cards every subscriber already has, each with its own budget.
 
     Per subscriber for the same reason the alerts are: one destination refusing a card —
     a bot removed from a channel — must not cost the others theirs.
     """
     limit = _budget(args.updates_limit, prefs, "DEPAS_UPDATES_LIMIT")
-    reported = 0
+    corrected = 0
     for subscriber in subscribers(connection, prefs):
         try:
-            reported += updates.sync(connection, prefs, subscriber, limit)
+            corrected += updates.correct(connection, prefs, subscriber, limit)
         except (RuntimeError, ValueError) as error:
-            print(f"WARNING could not report changes to {subscriber.chat_id}: {error}")
-    return reported
+            print(f"WARNING could not correct cards in {subscriber.chat_id}: {error}")
+    return corrected
+
+
+def _send_resumen(connection: sqlite3.Connection, prefs: Preferences,
+                  args: argparse.Namespace) -> int:
+    """Post each subscriber the one message a day naming every card of theirs that moved."""
+    limit = _budget(args.updates_limit, prefs, "DEPAS_UPDATES_LIMIT")
+    named = 0
+    for subscriber in subscribers(connection, prefs):
+        try:
+            named += updates.digest(connection, prefs, subscriber, limit)
+        except (RuntimeError, ValueError) as error:
+            print(f"WARNING could not post the resumen to {subscriber.chat_id}: {error}")
+    return named
 
 
 def _watched_query(prefs: Preferences) -> Query:
@@ -688,15 +701,27 @@ def announce(args: argparse.Namespace) -> None:
         alerts = _budget(args.limit, prefs, "DEPAS_ALERTS_LIMIT")
         print(f"alerts: {_announce(connection, prefs, alerts)} posted")
         # After the new cards: a listing being announced for the first time this pass
-        # carries its own explanation, and must not also be reported as a correction.
-        print(f"cambios: {_report_updates(connection, prefs, args)} avisos corregidos")
+        # carries its own explanation, and must not also be corrected on top of that.
+        print(f"cambios: {_correct_cards(connection, prefs, args)} tarjetas corregidas")
         # Grades move with the pool, so the pinned list is restated once a pass.
         print(f"lista: {'actualizada' if shortlist.sync(connection, prefs) else 'sin cambios'}")
 
 
+def resumen(args: argparse.Namespace) -> None:
+    """The one message a day naming every card that moved, at 10:00 in Santiago.
+
+    Its own stage rather than part of `announce` because it is the one thing here that
+    runs on the clock instead of on the work: the cron entry is what says 10:00, so
+    nothing in the code has to ask what time it is or whether today's already went out.
+    """
+    with _stage("resumen") as (connection, _fetcher, prefs):
+        print(f"resumen: {_send_resumen(connection, prefs, args)} avisos nombrados")
+
+
 # Every stage in the order they feed each other, which is what one hourly crontab entry
 # runs. Split them across entries and each keeps its own heartbeat; leave it as one and
-# nothing about the old behaviour changes.
+# nothing about the old behaviour changes. `resumen` is not one of them: it is daily, and
+# an hourly pass running it would be a resumen an hour.
 PASS_STAGES = (discover, enrich, route, announce)
 
 
@@ -721,7 +746,8 @@ def watch(args: argparse.Namespace) -> None:
 
 STAGE_LABEL = {"discover": "el barrido de portales",
                "enrich": "la lectura de fichas", "route": "el ruteo de viajes",
-               "announce": "la publicación de alertas"}
+               "announce": "la publicación de alertas",
+               "resumen": "el resumen diario de cambios"}
 
 
 def healthcheck(args: argparse.Namespace) -> None:
@@ -1122,6 +1148,13 @@ def main() -> None:
                            help="already-posted listings corrected this run; "
                                 "default DEPAS_UPDATES_LIMIT")
     announcer.set_defaults(func=announce, **{**_STAGE_DEFAULTS, "limit": None})
+
+    summariser = subparsers.add_parser(
+        "resumen", help="the one message a day naming every card that moved")
+    summariser.add_argument("--updates-limit", type=int,
+                            help="listings named in the resumen; "
+                                 "default DEPAS_UPDATES_LIMIT")
+    summariser.set_defaults(func=resumen, **_STAGE_DEFAULTS)
 
     watcher = subparsers.add_parser(
         "watch", help="scheduled pass: every stage in order")

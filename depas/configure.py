@@ -80,7 +80,7 @@ LABELS = {
     "DEPAS_COMMUTE_LIMIT": "🧭 Rutas por pasada",
     "DEPAS_ALERTS_LIMIT": "📢 Tarjetas por pasada",
     "DEPAS_REFRESH_LIMIT": "🔄 Relecturas por pasada",
-    "DEPAS_UPDATES_LIMIT": "✏️ Correcciones por pasada",
+    "DEPAS_UPDATES_LIMIT": "✏️ Cambios avisados por corrida",
     "DEPAS_PRICE_CHANGE_MIN": "💸🔻 Cambio de precio mín.",
     "DEPAS_DELIST_AFTER": "🗑️ Barridos para dar de baja",
     "DEPAS_SWEEP_QUIET_PAGES": "📄 Páginas vacías que cortan",

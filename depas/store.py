@@ -12,6 +12,7 @@ from depas.commute import from_listing
 from depas.config import DEFAULT_COMMON_EXPENSES, db_path
 from depas.detail import DETAIL_COLUMNS
 from depas.fetch import Fetcher
+from depas.grade import Grade
 from depas.models import Listing
 from depas.preferences import Preferences, clear_preference, seed_from_env, set_preference
 from depas.traits import EXCLUDE
@@ -786,23 +787,12 @@ def mark_notified(connection: sqlite3.Connection, chat_id: object, portal: str,
     connection.commit()
 
 
-def reported_through(connection: sqlite3.Connection, chat_id: object, portal: str,
-                     external_id: str) -> str | None:
-    """The newest change about this listing this chat has already been told about."""
-    row = connection.execute(
-        "SELECT through FROM update_notifications "
-        "WHERE chat_id = ? AND portal = ? AND external_id = ?",
-        (str(chat_id), portal, external_id),
-    ).fetchone()
-    return row["through"] if row else None
+def mark_card_corrected(connection: sqlite3.Connection, chat_id: object, portal: str,
+                        external_id: str, through: str) -> None:
+    """Move this chat's card watermark up to the newest change now drawn on the card.
 
-
-def mark_updates_reported(connection: sqlite3.Connection, chat_id: object, portal: str,
-                          external_id: str, through: str, grade: object = None) -> None:
-    """Move this chat's watermark up to the newest change it has now been told about.
-
-    Written after the message rather than before: a pass that dies in between repeats a
-    notice next time, which beats a watermark for a message nobody ever received.
+    Written after the edit rather than before: a pass that dies in between redraws a card
+    next time, which beats a watermark for a correction nobody ever saw.
     """
     connection.execute(
         "INSERT INTO update_notifications "
@@ -811,15 +801,32 @@ def mark_updates_reported(connection: sqlite3.Connection, chat_id: object, porta
         "through = excluded.through, reported_at = excluded.reported_at",
         (str(chat_id), portal, external_id, through, datetime.now(UTC).isoformat()),
     )
-    # The grade the reader now has in front of them, so the next notice compares against
-    # what they last saw rather than against the grade the card first went out with.
-    if grade is not None:
-        connection.execute(
-            "UPDATE subscriber_notifications SET grade_letter = ?, grade_score = ? "
-            "WHERE chat_id = ? AND portal = ? AND external_id = ?",
-            (getattr(grade, "letter", None), getattr(grade, "score", None),
-             str(chat_id), portal, external_id),
-        )
+    connection.commit()
+
+
+def mark_digest_sent(connection: sqlite3.Connection, chat_id: object, portal: str,
+                     external_id: str, through: str, grade: Grade) -> None:
+    """Move this chat's resumen watermark up to the newest change the resumen named.
+
+    The row may not exist yet — a card corrected and digested in the same minute is one
+    insert — and then both watermarks are this change: a resumen that named it says the
+    card carries it too.
+    """
+    connection.execute(
+        "INSERT INTO update_notifications (chat_id, portal, external_id, through, "
+        "digested_through, reported_at) VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(chat_id, portal, external_id) DO UPDATE SET "
+        "digested_through = excluded.digested_through, reported_at = excluded.reported_at",
+        (str(chat_id), portal, external_id, through, through,
+         datetime.now(UTC).isoformat()),
+    )
+    # The grade the reader has been told, so the next resumen compares against what it
+    # last said rather than against the grade the card first went out with.
+    connection.execute(
+        "UPDATE subscriber_notifications SET grade_letter = ?, grade_score = ? "
+        "WHERE chat_id = ? AND portal = ? AND external_id = ?",
+        (grade.letter, grade.score, str(chat_id), portal, external_id),
+    )
     connection.commit()
 
 
@@ -1080,17 +1087,20 @@ def held_stage_locks(connection: sqlite3.Connection) -> list[sqlite3.Row]:
 # what the watchdog alerts on -- see `stale_stages`.
 WATCH_COMPLETED, WATCH_ERROR = "watch_completed_at", "watch_error"
 
-# The stages a pass is made of, each on its own schedule and each stamping its own
-# heartbeat. `watch` is not one of them: it runs these four in order, and every one of
-# them stamps itself either way, so the four cover both crontab layouts and `watch`'s own
-# stamp says nothing they have not already said.
+# Every stage that stamps its own heartbeat. The first four are what a pass is made of,
+# each on its own schedule; `resumen` is the daily one and belongs here for the same
+# reason as the rest — it is the message the reader would miss if it stopped. `watch` is
+# not one of them: it runs the four in order, and every one of them stamps itself either
+# way, so these cover both crontab layouts and `watch`'s own stamp says nothing they
+# have not already said.
 WATCH = "watch"
-STAGES = ("discover", "enrich", "route", "announce")
+STAGES = ("discover", "enrich", "route", "announce", "resumen")
 
 # How long each may go without completing before the admins hear about it. Discovery is
 # the one that must not stall — everything downstream is fed by it — while routing is
-# somebody else's server and allowed to be slow.
-STALE_HOURS = {"discover": 4, "enrich": 6, "route": 24, "announce": 6}
+# somebody else's server and allowed to be slow. The resumen runs once a day, so its
+# patience is a day and the slack for a box that was down at 10:00.
+STALE_HOURS = {"discover": 4, "enrich": 6, "route": 24, "announce": 6, "resumen": 26}
 
 
 def _keys(stage: str) -> tuple[str, str]:

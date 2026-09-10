@@ -1,6 +1,7 @@
-"""The pass as four stages: each stamps its own heartbeat, and the watchdog reads all."""
+"""Every stage stamps its own heartbeat, the watchdog reads them all, and cron runs them."""
 from argparse import Namespace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -126,8 +127,23 @@ def test_a_healthy_box_warns_nobody(connection, warned):
 # -- the stages and the pass agree ------------------------------------------------
 
 
-def test_the_pass_runs_every_stage_the_watchdog_knows(connection):
-    """A stage added to one and not the other is a stage nobody notices stalling."""
+CRONTAB = Path(__file__).resolve().parents[1] / "deploy" / "crontab"
+
+
+def test_every_stage_of_the_pass_is_one_the_watchdog_knows():
+    """A stage added to the pass and not to the watchdog is one nobody notices stalling."""
     named = {stage.__name__ for stage in PASS_STAGES}
 
-    assert named == set(STAGES)
+    assert named <= set(STAGES)
+
+
+def test_every_watched_stage_is_one_cron_actually_runs():
+    """The other way a stage goes unnoticed: watched, alerted on, and never scheduled.
+
+    `resumen` is the case in point — it is daily rather than part of the hourly pass, so
+    the crontab is the only thing that runs it at all.
+    """
+    scheduled = {line.split()[-1] for line in CRONTAB.read_text().splitlines()
+                 if line and not line.startswith("#")}
+
+    assert set(STAGES) <= scheduled

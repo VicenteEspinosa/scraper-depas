@@ -493,7 +493,7 @@ whatever was edited from the chat since.
 | `DEPAS_DELIST_AFTER` | How many believable sweeps of a portal must fail to turn a listing up before it is marked gone. A sweep counts only if it finished *and* saw listings, so a portal that is down or whose markup moved delists nobody. Default 3. `0` never delists — and it has to be special-cased, since "at least zero sweeps" is true of every row. |
 | `DEPAS_ENRICH_LIMIT`, `DEPAS_COMMUTE_LIMIT`, `DEPAS_ALERTS_LIMIT` | How much work one `watch` pass may do: detail pages fetched, listings routed, cards posted. Defaults 250, 40 and 25. The detail read is spread across the six portals at once, so 250 is about 40 per portal and a couple of minutes of the ten between runs — reading them in single file is what used to make 60 the sensible number. Routing stays at 40: one third-party host, still sequential. They belong in the table rather than in the crontab because the right figure moves with how many comunas you watch, and moving it should not need a redeploy. `0` switches a stage off. The flags still exist and override the setting for one run. |
 | `DEPAS_ENRICH_ROUNDS` | How many times the detail read may repeat inside one run while the unread queue is still filling its whole budget. Default 3, so a backlog drains at up to 750 pages a run instead of waiting ten minutes per batch — and only while there is a backlog, which is what a standing higher limit could not express. `1` reads one batch and stops. Rounds × limit has to fit the window between runs; if it does not, the stage lock makes the next run a clean no-op rather than two processes fighting. |
-| `DEPAS_UPDATES_LIMIT` | Listings **already posted** that get corrected per pass when they change: the card edited, its thread told what moved, and one digest naming all of them. Default 10, `0` reports no changes at all. What the budget pushes out is not stamped, so it goes out next pass. |
+| `DEPAS_UPDATES_LIMIT` | Listings **already posted** that change state per run when they move: the card edited and its thread told by the pass that saw it, and the 10:00 resumen naming all of them. Default 40, `0` reports no changes at all. What the budget pushes out is not stamped, so it goes out on the next run. |
 | `DEPAS_PRICE_CHANGE_MIN` | How far the arriendo or the gasto común has to move before it is worth a notice. Default 10000, `0` reports any peso. A flat published in UF has its CLP figure rewritten every day by the exchange rate, so «el arriendo subió de $635.567 a $635.694» is arithmetic and not news. What falls under the floor is not discarded but **folded**: the next move is measured from the last figure you were actually told, so a hundred pesos a day still arrives as one real rebaja once it adds up. Only money is held to it — a dormitorio that became two is one unit and the whole news of the listing. |
 | `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread, which is also where `/like` and `/dislike` are read from; a group takes the cards but leaves them undiscussable, so verdicts have to be replies. Switching between the two is only this value. |
 
@@ -576,12 +576,15 @@ A card used to be a one-off: posted once and left there, saying for good whateve
 rent was that day. So a card aged silently, and a flat that got rented sat in the chat
 looking available. Every pass now says what moved, in one of two ways.
 
-**A card you already have** gets three things. The card itself is edited in place with
-today's figures and today's grade; its Comments thread gets the diff; and one message per
-pass — not one per listing — names every aviso that moved, with a link back to each card:
+**A card you already have** gets three things, on two different clocks. The pass that
+sees the change — every five minutes — edits the card in place with today's figures and
+today's grade and puts the diff in its Comments thread, because the card is your own copy
+of the listing and one still asking last week's rent misinforms whoever opens it. Then at
+**10:00** one message names every aviso that moved in the last day, with a link back to
+each card. One notification a day rather than one per listing per pass:
 
 ```
-🔄 Cambió lo que ya te mandé · 3 avisos · 10/09 14:20
+🔄 Cambió lo que ya te mandé · 3 avisos · 10/09 10:00
 
 🟢 A 88 · era B 79 · Nunoa · $920.000
     tarjeta · aviso · [713]
@@ -610,10 +613,18 @@ and a vuelta count too, and are recorded in `delisting_events` — `delisted_at`
 state and says only the last one, so until now a listing could leave the pool and come
 back with nothing anywhere saying it had happened.
 
-Two budgets bound it. `DEPAS_UPDATES_LIMIT` caps the listings corrected per pass, because
-two hundred moved prices is two hundred edits and ten minutes of channel; and the digest
-is capped separately at Telegram's 4096 characters, which it rejects a message for rather
-than trimming. Whatever either one pushes out is not stamped, so it goes out next pass.
+Two budgets bound it. `DEPAS_UPDATES_LIMIT` caps how many listings change state per run,
+because two hundred moved prices is two hundred edits and ten minutes of channel; and the
+resumen is capped separately at Telegram's 4096 characters, which it rejects a message for
+rather than trimming. Whatever either one pushes out is not stamped: an uncorrected card
+is redrawn by the next pass, and a listing the resumen could not fit is named in the next
+day's.
+
+The two halves keep their own watermark in `update_notifications` — `through` for what the
+card already says, `digested_through` for what a resumen has already named — because they
+run on different clocks. One column could not say both: moved by the edit it would swallow
+the resumen, and moved by the resumen it would re-edit the same card and re-comment its
+thread every five minutes until the next morning.
 
 A price move also has to be big enough to be worth saying. `DEPAS_PRICE_CHANGE_MIN`
 (default 10000) is the floor: a flat published in UF has its CLP arriendo and gasto común
@@ -662,7 +673,7 @@ One caveat worth knowing: **subscribers share one set of preferences.** Every su
 is graded and filtered by the same settings, so they all receive the same cards — with
 their own verdicts and their own ⭐ list. Per-reader criteria is the next change.
 
-## The pass, and its four stages
+## The pass, and its stages
 
 One hourly `depas watch` does everything in order and is still supported. But the work is
 four stages that feed each other, and run as separate crontab entries they stop waiting
@@ -673,7 +684,13 @@ on one another:
 | `depas discover` | Sweeps every comuna in `DEPAS_COMMUNES` across all six portals **at once**, then delists what no believable sweep turned up. |
 | `depas enrich` | Reads the detail pages that are due — the new ones first, then the re-reads. |
 | `depas route` | Travel times and the zone benchmarks. |
-| `depas announce` | Posts what is over the bar and restates the pinned ⭐ list. |
+| `depas announce` | Posts what is over the bar, redraws the cards whose listing moved, and restates the pinned ⭐ list. |
+
+`depas resumen` is a fifth, and the only one that runs on the clock rather than on the
+work: **10:00 America/Santiago**, once, naming every card that moved since the last one.
+It is not part of `depas watch` — an hourly pass running it would be a resumen an hour —
+so the crontab entry is the whole of "10:00", and nothing in the code asks what time it
+is or whether today's already went out.
 
 `deploy/crontab` runs them at staggered minutes. The enrichment gets six goes an hour in
 small batches rather than one big one — the same number of requests, spread out, so a
@@ -722,9 +739,9 @@ failure is recorded and the pass carries on. All six failing still fails the pas
 
 **Each stage keeps its own heartbeat**, and `depas healthcheck` warns about any that has
 stopped completing, with its own patience per stage — discovery feeds everything
-downstream and gets four hours, routing is somebody else's server and gets a day. That
-closes the gap a single "the pass ran" stamp left: a stalled enrichment used to hide
-behind a scrape that kept succeeding.
+downstream and gets four hours, routing is somebody else's server and gets a day, and the
+daily resumen gets twenty-six hours. That closes the gap a single "the pass ran" stamp
+left: a stalled enrichment used to hide behind a scrape that kept succeeding.
 
 ## Schema
 

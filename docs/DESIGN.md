@@ -442,9 +442,30 @@ The shape of the telling follows from who the reader is, which is why there are 
 messages and not one. **A card already posted** is a message that is now wrong, so it is
 corrected — edited in place, with the diff in its thread where whoever is looking at it
 will be. But an edit notifies nobody, and a rebaja nobody hears about is a rebaja nobody
-acts on, so one digest per pass names everything that moved with a link back to each
-card. One message rather than one per listing: ten notifications about ten rebajas is how
-a chat gets muted, and muting the chat costs the alerts too.
+acts on, so a resumen names everything that moved with a link back to each card. One
+message rather than one per listing: ten notifications about ten rebajas is how a chat
+gets muted, and muting the chat costs the alerts too.
+
+The two are on different clocks, and that is the whole of the second decision. Correcting
+is silent, so it may as well be immediate: the pass that sees the rebaja redraws the card
+five minutes later, and whoever opens it reads the rent the flat is actually asking. The
+resumen is the loud half, so it goes out **once a day, at 10:00 in Santiago** — because
+what makes a chat unbearable is not how much a message says but how often one arrives, and
+a resumen of a day is not meaningfully harder to read than a resumen of five minutes. The
+clock lives in `deploy/crontab` and nowhere else: one entry is the whole of "10:00", so
+nothing in the code asks the time or keeps a record of whether today's already went out,
+and Chilean daylight saving is the container's `TZ` problem rather than ours.
+
+Two clocks need two watermarks, which is what `update_notifications.digested_through` is
+for. `through` is what the card already says and moves every pass; `digested_through` is
+what a resumen has already named and moves once a day. One column could not carry both:
+moved on the edit it would swallow the resumen entirely, and moved on the resumen it would
+leave a change pending for a day — re-editing the card and re-commenting its thread every
+five minutes until the next morning. A NULL in either means nothing has happened on that
+side since the card went out, which is why `notified_at` is the fallback for both, and why
+the migration copies `through` into the new column rather than leaving it empty: until the
+split the two moved together, so what is drawn on the card is exactly what the last
+resumen named.
 
 **A card about to be posted** is not wrong about anything; the question it raises is
 different. A flat first seen three weeks ago arriving today looks like the criteria
@@ -455,17 +476,19 @@ exactly what `listing_changes` records. When none of them moved, the note says s
 wait was ours, and the detail queue being newest-first is the likeliest reason of the
 set. Naming the real cause beats asserting a plausible one.
 
-Both readings need a floor, and the floor is different for each. What has already been
-told is `COALESCE(update_notifications.through, subscriber_notifications.notified_at)` —
-the newest change already in a message, or failing that when the card went out, since a
+Both readings need a floor, and the floor is different for each. What is already on the
+card is `COALESCE(update_notifications.through, subscriber_notifications.notified_at)` —
+the newest change already drawn there, or failing that when the card went out, since a
 card is not stale about anything that happened before it. That also settles the ordering
 inside a pass for free: a listing announced minutes ago has a floor of now, so nothing
 about it is old enough to also report as a correction. What a *first* card explains is
 everything since `first_seen`, because the reader has seen none of it.
 
-The watermark is written after the message rather than before. A pass that dies in
+Either watermark is written after the message rather than before. A pass that dies in
 between repeats a notice next time, which is the failure worth having: a swallowed one
-never comes back.
+never comes back. The one exception is a card Telegram refuses to edit — too old, deleted
+by hand — which is stamped anyway: it will be refused every pass, and retrying it is a
+thread comment every five minutes for as long as the change is pending.
 
 Three fields are excluded from counting as changes, and it is worth saying why they are
 excluded rather than filtered at the source. `published_days_ago` and `published_label`
@@ -478,7 +501,7 @@ to draw it is at the notification.
 The same distinction, in a different shape, is what `DEPAS_PRICE_CHANGE_MIN` draws. A
 flat published in UF has no CLP price of its own: the number the portal shows is today's
 UF times a constant, so it is rewritten every single day without a landlord touching
-anything, and a digest of «el arriendo subió de $635.567 a $635.694» four times over is
+anything, and a resumen of «el arriendo subió de $635.567 a $635.694» four times over is
 the whole feature turned into noise. Converting back to UF before comparing would fix
 the pretty case and only that one — the portals also round, restate a gasto común to the
 peso, and quote in pesos flats that are really priced in UF — so the floor is put on the
@@ -619,9 +642,12 @@ being watched. A stalled enrichment is no longer hidden behind a scrape that kee
 succeeding. Each stage has its own patience too — discovery feeds everything downstream
 and gets four hours, routing is somebody else's server and gets a day.
 
-What the watchdog checks is those four, unstamped included: a deploy whose pass has
-never finished is the case it was built for, and a stage that has never once completed is
-the loudest form of that.
+What the watchdog checks is those four plus the daily `resumen`, unstamped included: a
+deploy whose pass has never finished is the case it was built for, and a stage that has
+never once completed is the loudest form of that. `resumen` is watched but is not part of
+`watch` — it runs on the clock rather than on the work, and an hourly pass running it
+would be a resumen an hour — so its patience is twenty-six hours: a day, plus slack for a
+box that happened to be down at 10:00.
 
 `watch` is not among them, and the first version of this had that backwards. It checked
 `watch` always and skipped a stage that had never been stamped — which read as careful

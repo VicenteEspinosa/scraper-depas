@@ -3,10 +3,12 @@
 Two different messages come out of the same reading, because a change means two different
 things depending on whether the reader has seen the flat already:
 
-  * **A card already posted** gets edited in place, its thread gets the diff, and one
-    digest per pass names every listing that moved with a link back to its own card. One
-    message rather than one per listing: a rebaja is worth knowing about, and ten
-    separate notifications about ten of them is how a chat gets muted.
+  * **A card already posted** gets edited in place and its thread gets the diff, by the
+    pass that saw the change: a card is the reader's own copy of the listing, and one
+    still asking last week's rent misinforms whoever opens it. Then one resumen a day
+    names every listing that moved with a link back to its own card. One message a day
+    rather than one per listing per pass: a rebaja is worth knowing about, and a
+    notification every five minutes is how a chat gets muted.
   * **A card about to be posted for the first time** carries the diff as the answer to
     the question the reader would otherwise ask — why is a flat first seen three weeks
     ago arriving now. Announcing is gated on requirements the *listing* can cross on its
@@ -24,7 +26,7 @@ from typing import Any
 from depas.bot import card_anchor, refresh_card
 from depas.commute import SANTIAGO
 from depas.commute import as_text as commute_text
-from depas.grade import Scale
+from depas.grade import Grade, Scale
 from depas.preferences import Preferences
 from depas.shortlist import CARD_LABEL, LISTING_LABEL
 from depas.store import (
@@ -32,7 +34,8 @@ from depas.store import (
     GONE_UNSEEN,
     Subscriber,
     listing_events,
-    mark_updates_reported,
+    mark_card_corrected,
+    mark_digest_sent,
 )
 from depas.telegram import GRADE_EMOJI, clp, escape, message_link, reply
 
@@ -355,7 +358,7 @@ class Update:
     card: dict[str, Any]
     changes: list[Change]
     events: list[sqlite3.Row]
-    grade: Any
+    grade: Grade
     was_letter: str | None
     was_score: int | None
 
@@ -422,12 +425,12 @@ LIMIT = 4096
 
 
 def _more(left_out: int) -> str:
-    return f"\n…y {left_out} más que cambiaron; salen en la pasada siguiente."
+    return f"\n…y {left_out} más que cambiaron; salen en el resumen de mañana."
 
 
 def format_digest(candidates: list[Update], chat_id: str,
                   beyond_budget: int = 0) -> tuple[str, list[Update]]:
-    """The one message per pass that names every card that moved, newest movement first.
+    """The one message a day that names every card that moved, newest movement first.
 
     Hands back the updates it actually named as well as the message, because those are
     the ones the reader has been told about and so the only ones that may be stamped —
@@ -503,12 +506,19 @@ def format_arrival_note(reason: str, changes: list[Change]) -> str:
 
 # ── reading what to tell, and telling it ────────────────────────────────────────
 
+# The two clocks a change is measured against, because it reaches the reader twice: the
+# card is redrawn by the pass that saw the change, the resumen names it the next morning.
+# A NULL in either means nothing has happened on that side since the card went out, which
+# is what `notified_at` says and why it is the fallback for both.
+ON_THE_CARD = "mark.through"
+IN_A_RESUMEN = "mark.digested_through"
+
 # What a chat has been told about a listing, and everything after it. Cards it never got
 # are not in it: a listing stamped without being posted — below the bar — has no message
 # to correct and no reader who ever saw it, so a change to it is not news.
 CHANGED_SINCE = """
 SELECT told.portal, told.external_id, told.grade_letter, told.grade_score,
-       COALESCE(mark.through, told.notified_at) AS floor
+       COALESCE({watermark}, told.notified_at) AS floor
   FROM subscriber_notifications AS told
   LEFT JOIN update_notifications AS mark
          ON mark.chat_id = told.chat_id AND mark.portal = told.portal
@@ -521,8 +531,8 @@ SELECT told.portal, told.external_id, told.grade_letter, told.grade_score,
 
 # Cheap enough to ask of every card a chat holds, and it keeps the expensive reading —
 # pairing up the price trail, rendering — to the handful that actually moved.
-SOMETHING_MOVED = f"""
-SELECT * FROM ({CHANGED_SINCE}) AS held
+SOMETHING_MOVED = """
+SELECT * FROM ({changed_since}) AS held
  WHERE EXISTS (SELECT 1 FROM detail_changes AS moved
                 WHERE moved.portal = held.portal
                   AND moved.external_id = held.external_id
@@ -538,9 +548,9 @@ SELECT * FROM ({CHANGED_SINCE}) AS held
 """
 
 
-def pending(connection: sqlite3.Connection, prefs: Preferences,
-            subscriber: Subscriber) -> list[Update]:
-    """Every card this chat holds whose listing has moved since it was last told, newest first.
+def pending(connection: sqlite3.Connection, prefs: Preferences, subscriber: Subscriber,
+            watermark: str) -> list[Update]:
+    """Every card this chat holds whose listing has moved past `watermark`, newest first.
 
     Read through the subscriber rather than `listings_ranked`, so the grade on the notice
     is the grade the card itself would be redrawn with — a listing somebody in the chat
@@ -548,8 +558,9 @@ def pending(connection: sqlite3.Connection, prefs: Preferences,
     """
     scale = Scale(prefs)
     threshold = prefs.value("DEPAS_PRICE_CHANGE_MIN") or 0
+    query = SOMETHING_MOVED.format(changed_since=CHANGED_SINCE.format(watermark=watermark))
     updates = []
-    for held in connection.execute(SOMETHING_MOVED, (subscriber.chat_id,)).fetchall():
+    for held in connection.execute(query, (subscriber.chat_id,)).fetchall():
         key = (held["portal"], held["external_id"])
         row = connection.execute(
             f"SELECT * FROM ({subscriber.view()}) WHERE portal = ? AND external_id = ?", key
@@ -578,35 +589,49 @@ def pending(connection: sqlite3.Connection, prefs: Preferences,
     return sorted(updates, key=lambda one: one.through, reverse=True)
 
 
-def sync(connection: sqlite3.Connection, prefs: Preferences,
-         subscriber: Subscriber, limit: int) -> int:
-    """Tell one chat what changed about the cards it already has, and correct them.
+def correct(connection: sqlite3.Connection, prefs: Preferences,
+            subscriber: Subscriber, limit: int) -> int:
+    """Redraw every card of this chat whose listing has moved, and say what in its thread.
 
-    Three things per listing, in the order that leaves the chat consistent if it stops
-    half way: the card is edited first, so the digest never links to a card still saying
-    the old price; the diff goes in its thread, where whoever is looking at the card is;
-    and the digest goes last, as the one message that says any of this happened.
+    Every pass, not once a day: the card is the reader's own copy of the listing and a
+    stale one misinforms whoever opens it, while the diff belongs under the card, where
+    whoever is looking at it is. The resumen in the feed is the once-a-day half.
     """
-    found = pending(connection, prefs, subscriber)
+    corrected = 0
+    for update in pending(connection, prefs, subscriber, ON_THE_CARD)[:limit]:
+        _correct(connection, prefs, update)
+        # Stamped whether Telegram took the edit or not. A card it refuses — too old,
+        # deleted by hand — will be refused every pass, and retrying it every five
+        # minutes is a thread comment every five minutes for as long as it is pending.
+        mark_card_corrected(connection, subscriber.chat_id, update.row["portal"],
+                            update.row["external_id"], update.through)
+        corrected += 1
+    return corrected
+
+
+def digest(connection: sqlite3.Connection, prefs: Preferences,
+           subscriber: Subscriber, limit: int) -> int:
+    """The one message a day naming every card of this chat that moved since the last one.
+
+    The cards it links to were already corrected by the pass that saw the change, so this
+    never points at a card still saying the old price.
+    """
+    found = pending(connection, prefs, subscriber, IN_A_RESUMEN)
     if not found:
         return 0
-    # Written before anything is sent: what the digest could not fit is not corrected
-    # either, so a card is never edited without the message that says why it changed.
-    digest, told = format_digest(found[:limit], subscriber.chat_id,
-                                 max(0, len(found) - limit))
+    resumen, told = format_digest(found[:limit], subscriber.chat_id,
+                                  max(0, len(found) - limit))
     if not told:
         return 0
-    for update in told:
-        _correct(connection, prefs, update)
     try:
-        reply(subscriber.chat_id, digest)
+        reply(subscriber.chat_id, resumen)
     except (RuntimeError, ValueError) as error:
-        # Nothing is stamped, so the next pass says all of it again rather than never.
+        # Nothing is stamped, so tomorrow says all of it again rather than never.
         print(f"could not post the digest to {subscriber.chat_id}: {error}")
         return 0
     for update in told:
-        mark_updates_reported(connection, subscriber.chat_id, update.row["portal"],
-                              update.row["external_id"], update.through, update.grade)
+        mark_digest_sent(connection, subscriber.chat_id, update.row["portal"],
+                         update.row["external_id"], update.through, update.grade)
     return len(told)
 
 
