@@ -6,18 +6,21 @@ from curl_cffi.requests.exceptions import RequestException
 from depas.bot import (
     DISCARDED_BREAKDOWN,
     GONE,
+    GONE_BREAKDOWN,
     NO_CARD,
     _handle,
     _handle_callback,
     _offset,
     _remember_offset,
     find_links,
+    refresh_card,
     run,
 )
 from depas.models import Listing
 from depas.store import (
     Subscriber,
     connect,
+    mark_delisted,
     pool_query,
     remember_card,
     save,
@@ -269,6 +272,10 @@ def _comment(text, **extra):
             "from": {"username": "vicente"}, "text": text, **extra}
 
 
+def _card(connection):
+    return dict(connection.execute("SELECT * FROM card_messages").fetchone())
+
+
 def _verdict(connection):
     """The verdict on the fixture listing, as the shared channel sees it.
 
@@ -469,6 +476,37 @@ def test_a_discarded_listing_loses_its_breakdown(announced, answers):
     chat, message, text = answers.explained[-1]
     assert (chat, message) == (str(GROUP), BREAKDOWN)
     assert text == DISCARDED_BREAKDOWN
+
+
+def test_a_delisted_listing_loses_its_card_and_its_breakdown(announced, answers):
+    """A flat off the market stops being a candidate, so the card that was there to
+    decide with says so and keeps only what identifies it."""
+    mark_delisted(announced, "portalinmobiliario", "MLC-1")
+
+    refresh_card(announced, _card(announced), prefs())
+
+    _, _, text, _ = answers.edited[-1]
+    assert text.startswith("⚫ ")
+    assert "ya no está publicado" in text
+    assert "gastos comunes" not in text
+    assert answers.explained[-1][2] == GONE_BREAKDOWN
+
+
+def test_a_listing_that_came_back_gets_its_whole_card_back(announced, answers):
+    """A baja is sometimes a portal outage; the card has to survive being wrong."""
+    mark_delisted(announced, "portalinmobiliario", "MLC-1")
+    refresh_card(announced, _card(announced), prefs())
+    save(announced, [Listing(portal="portalinmobiliario", external_id="MLC-1",
+                             url="https://portalinmobiliario.com/MLC-1-x-_JM",
+                             price=600_000, currency="CLP", price_clp=600_000,
+                             area_m2=50.0)])
+
+    refresh_card(announced, _card(announced), prefs())
+
+    _, _, text, _ = answers.edited[-1]
+    assert "ya no está publicado" not in text
+    assert "gastos comunes" in text
+    assert answers.explained[-1][2].startswith("📊 ")
 
 
 def test_undoing_a_verdict_brings_the_breakdown_back(announced, answers, pressed):

@@ -268,6 +268,7 @@ def _card_subscriber(connection: sqlite3.Connection, card: dict) -> Subscriber:
 
 # A discarded card keeps only what says which listing it was, and so does its breakdown.
 DISCARDED_BREAKDOWN = "🚫 descartado"
+GONE_BREAKDOWN = "⚫ ya no está publicado"
 
 
 def card_anchor(card: dict) -> tuple[str, int]:
@@ -279,6 +280,8 @@ def card_anchor(card: dict) -> tuple[str, int]:
 
 
 def _breakdown_text(row: dict, prefs: Preferences) -> str:
+    if row.get("delisted_at"):
+        return GONE_BREAKDOWN
     return (DISCARDED_BREAKDOWN if row.get("interest") == DISLIKE
             else format_breakdown(Scale(prefs).grade(row), prefs))
 

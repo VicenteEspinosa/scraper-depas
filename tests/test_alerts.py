@@ -202,6 +202,46 @@ def test_a_discarded_card_is_cut_down_to_what_identifies_it():
     ]
 
 
+def test_a_delisted_card_says_so_and_keeps_the_link():
+    """A flat off the market is cut down the way a discarded one is, plus the line that
+    says why — and the link, which is how you check the baja yourself."""
+    from depas.grade import Scale
+
+    row = {"id": 7, "commune": "nunoa", "title": "Depto luminoso", "bedrooms": 2,
+           "bathrooms": 1, "area": 50.0, "floor": 8, "age": 5.0, "net_monthly_clp": 600_000,
+           "price_clp": 500_000, "common_expenses": 100_000, "url": "https://x/1",
+           "nearest_station": "Ñuble", "walk_minutes": 5, "has_pool": 1,
+           "published_days_ago": 3}
+    scale = Scale(prefs())
+
+    gone = format_listing(row | {"delisted_at": "2026-09-01"}, scale.grade(row), prefs())
+
+    assert gone.startswith("⚫ ")
+    assert gone.splitlines()[1:] == [
+        "<i>Depto luminoso</i>",
+        "🏠 2D · 1B · 50 m² · piso 8 · 5 años",
+        "💰 <b>$600.000</b> neto al mes",
+        "⚫ <i>ya no está publicado</i>",
+        "",
+        '<a href="https://x/1">Ver aviso →</a>',
+    ]
+
+
+def test_a_listing_that_came_back_is_drawn_whole_again():
+    """`delisted_at` is a state, so a vuelta clearing it is all a revival takes."""
+    from depas.grade import Scale
+
+    row = {"id": 7, "commune": "nunoa", "title": "Depto luminoso", "bedrooms": 2,
+           "bathrooms": 1, "area": 50.0, "net_monthly_clp": 600_000, "price_clp": 500_000,
+           "common_expenses": 100_000, "url": "https://x/1", "delisted_at": None}
+    scale = Scale(prefs())
+
+    back = format_listing(row, scale.grade(row), prefs())
+
+    assert "ya no está" not in back
+    assert "gastos comunes" in back
+
+
 def test_a_listing_with_a_photo_is_sent_as_one(monkeypatch):
     """sendPhoto carries the card as a caption; without an image it falls back to text."""
     calls = []
