@@ -79,6 +79,7 @@ LABELS = {
     "DEPAS_COMMUTE_LIMIT": "🧭 Rutas por pasada",
     "DEPAS_ALERTS_LIMIT": "📢 Tarjetas por pasada",
     "DEPAS_REFRESH_LIMIT": "🔄 Relecturas por pasada",
+    "DEPAS_UPDATES_LIMIT": "✏️ Correcciones por pasada",
     "DEPAS_DELIST_AFTER": "🗑️ Barridos para dar de baja",
     "DEPAS_SWEEP_QUIET_PAGES": "📄 Páginas vacías que cortan",
     "DEPAS_DEEP_SWEEP_HOURS": "🔍 Horas entre barridos profundos",
@@ -101,6 +102,7 @@ MENU: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("bot", "🤖 Bot", ("TELEGRAM_CHAT_ID", "DEPAS_ADMINS")),
     ("pace", "⏱️ Ritmo", ("DEPAS_ENRICH_LIMIT", "DEPAS_REFRESH_LIMIT",
                           "DEPAS_COMMUTE_LIMIT", "DEPAS_ALERTS_LIMIT",
+                          "DEPAS_UPDATES_LIMIT",
                           "DEPAS_DELIST_AFTER", "DEPAS_SWEEP_QUIET_PAGES",
                           "DEPAS_DEEP_SWEEP_HOURS")),
 )
@@ -131,6 +133,7 @@ UNITS = {"DEPAS_WALK_MAX": " min", "DEPAS_WALK_TARGET": " min",
          "DEPAS_GRADE_MIN": " pts",
          "DEPAS_ENRICH_LIMIT": " fichas", "DEPAS_COMMUTE_LIMIT": " rutas",
          "DEPAS_ALERTS_LIMIT": " tarjetas", "DEPAS_REFRESH_LIMIT": " relecturas",
+         "DEPAS_UPDATES_LIMIT": " avisos",
          "DEPAS_DELIST_AFTER": " barridos",
          "DEPAS_SWEEP_QUIET_PAGES": " páginas", "DEPAS_DEEP_SWEEP_HOURS": " h"}
 # What a weight is ever set to in practice.

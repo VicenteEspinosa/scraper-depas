@@ -325,6 +325,11 @@ SETTINGS: tuple[Setting, ...] = (
             "Máximo de tarjetas publicadas por pasada. Lo que pasa el corte y no "
             "alcanza a salir no se pierde: sale en la siguiente.",
             example="10", default="10"),
+    Setting("DEPAS_UPDATES_LIMIT", _budget,
+            "Cuántos avisos ya publicados se corrigen por pasada cuando cambian: la "
+            "tarjeta se edita, el hilo dice qué cambió y un solo mensaje los resume. Lo "
+            "que no alcanza sale en la siguiente. En 0 no se avisa ningún cambio.",
+            example="10", default="10"),
     Setting("DEPAS_REFRESH_LIMIT", _budget,
             "Cuántas fichas ya leídas se releen por pasada, aparte de las nuevas. Una "
             "ficha se relee cuando el precio se movió o cuando le toca; sube esto si la "
