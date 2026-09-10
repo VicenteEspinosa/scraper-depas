@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from curl_cffi.requests.exceptions import HTTPError
 
-from depas.cli import _budget, _enrich, _infer_stored_descriptions
+from depas.cli import _budget, _enrich, _infer_stored_descriptions, enrich
 from depas.detail import INFERRED_VERSION, infer_from_description
 from depas.models import Listing
 from depas.store import connect, pending_detail, save
@@ -219,10 +219,149 @@ def test_a_budget_falls_back_to_its_setting(connection, monkeypatch):
     assert _budget(3, preferences, "DEPAS_ENRICH_LIMIT") == 3
 
 
-def test_the_budgets_have_the_numbers_the_flags_used_to_carry(connection):
-    """Nobody's box changes behaviour just by upgrading into settings-held budgets."""
+def test_the_budgets_are_what_a_parallel_read_makes_affordable(connection):
+    """Deliberate numbers now, not the ones the command-line flags used to hardcode.
+
+    The detail read is spread across the six portals, so 250 a pass is about 40 per
+    portal and a couple of minutes of the ten between runs — the ceiling stopped being
+    the clock. Routing stays where it was: it is one third-party host and sequential.
+    """
     unset = prefs()
 
     assert (_budget(None, unset, "DEPAS_ENRICH_LIMIT"),
             _budget(None, unset, "DEPAS_COMMUTE_LIMIT"),
-            _budget(None, unset, "DEPAS_ALERTS_LIMIT")) == (60, 40, 10)
+            _budget(None, unset, "DEPAS_ALERTS_LIMIT")) == (250, 40, 25)
+
+
+def test_a_box_that_set_its_own_budget_keeps_it(connection, monkeypatch):
+    """Raising a default must never overrule a number somebody chose on purpose."""
+    monkeypatch.setenv("DEPAS_ENRICH_LIMIT", "40")
+
+    assert _budget(None, prefs(), "DEPAS_ENRICH_LIMIT") == 40
+
+
+# -- the rounds, and who gets the budget ------------------------------------------
+
+
+@pytest.fixture
+def staged(connection, tmp_path, monkeypatch):
+    """`enrich` end to end: it opens its own connection, and asks nothing of the network."""
+    monkeypatch.setenv("DEPAS_DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr("depas.cli.stored_uf", lambda connection, fetcher: 39_000.0)
+    return connection
+
+
+def _stage_args(**overrides):
+    return SimpleNamespace(**{"limit": None, "refresh_limit": None, "rounds": None,
+                             **overrides})
+
+
+def _queue(connection: sqlite3.Connection, how_many: int, portal: str = "houm") -> None:
+    """Listings waiting for a first read, each seen a minute after the one before it.
+
+    Distinct `first_seen` values on purpose: `save` stamps one batch with a single
+    timestamp, and "newest first" over a tie is whatever order SQLite feels like.
+    """
+    save(connection, [Listing(portal=portal, external_id=f"q{n:03}",
+                              url=f"https://{portal}/q{n}", price=500_000, currency="CLP",
+                              price_clp=500_000.0, area_m2=50.0) for n in range(how_many)])
+    connection.executemany(
+        "UPDATE listings SET first_seen = ? WHERE portal = ? AND external_id = ?",
+        [(f"2026-09-01T{n // 60:02}:{n % 60:02}:00+00:00", portal, f"q{n:03}")
+         for n in range(how_many)])
+    connection.commit()
+
+
+def test_a_full_queue_is_read_again_within_the_same_run(staged, monkeypatch):
+    """A backlog drains in one slot instead of waiting ten minutes per batch."""
+    _queue(staged, 7)
+    monkeypatch.setattr("depas.portals.houm.fetch_detail", _reading(floor=5))
+    monkeypatch.setattr("depas.portals.portalinmobiliario.fetch_detail", _reading(floor=5))
+    monkeypatch.setenv("DEPAS_ENRICH_LIMIT", "3")
+    monkeypatch.setenv("DEPAS_ENRICH_ROUNDS", "3")
+
+    enrich(_stage_args())
+
+    read = staged.execute(
+        "SELECT COUNT(*) FROM listings WHERE detail_fetched_at IS NOT NULL").fetchone()[0]
+    assert read == 8  # three rounds of three, and the queue held eight
+
+
+def test_a_queue_that_emptied_stops_early(staged, monkeypatch):
+    """The rounds are for a backlog: with none, asking the portals again is waste."""
+    reads = []
+    monkeypatch.setattr("depas.portals.portalinmobiliario.fetch_detail",
+                        lambda fetcher, url: reads.append(url) or {"floor": 5})
+    monkeypatch.setenv("DEPAS_ENRICH_ROUNDS", "5")
+
+    enrich(_stage_args())
+
+    assert reads == ["https://x/1"]  # one page, one round
+
+
+def test_re_reads_alone_never_trigger_another_round(staged, monkeypatch):
+    """Measured on the unread half: there are always re-reads due, and they are not urgent.
+
+    Counting the batch as a whole would read as "behind" on every pass and spend every
+    round of every hour on work nobody was waiting for.
+    """
+    monkeypatch.setattr("depas.portals.portalinmobiliario.fetch_detail", _reading(floor=5))
+    monkeypatch.setenv("DEPAS_ENRICH_LIMIT", "1")
+    monkeypatch.setenv("DEPAS_REFRESH_LIMIT", "1")
+    monkeypatch.setenv("DEPAS_ENRICH_ROUNDS", "4")
+    enrich(_stage_args())  # reads it once
+    staged.execute("UPDATE listings SET detail_due_at = ''")  # and it is due again
+    staged.commit()
+
+    reads = []
+    monkeypatch.setattr("depas.portals.portalinmobiliario.fetch_detail",
+                        lambda fetcher, url: reads.append(url) or {"floor": 5})
+    enrich(_stage_args())
+
+    assert len(reads) == 1  # the re-read, and no second round on the strength of it
+
+
+def test_the_oldest_rows_get_a_share_of_every_batch(connection):
+    """Newest first is not a queue: every arrival goes in front of what is waiting.
+
+    Without this slice the oldest rows fall further back with each pass, which is how a
+    card for a flat first seen in July turns up in September.
+    """
+    _queue(connection, 40)
+
+    batch = pending_detail(connection, 10)
+
+    waiting = sorted(row["external_id"] for row in batch)
+    assert "q000" in waiting  # the very oldest, which newest-first would never reach
+    assert "q039" in waiting  # and the newest, which is still most of the batch
+    assert len(batch) == 10
+
+
+def test_the_share_never_costs_the_batch_a_slot(connection):
+    """A small queue where the two ends meet comes back one row each, not twice."""
+    _queue(connection, 4)
+
+    batch = pending_detail(connection, 10)
+
+    assert len(batch) == len({row["external_id"] for row in batch}) == 5
+
+
+def test_the_share_is_a_floor_and_not_a_carve_out(connection):
+    """With fewer old rows waiting than the share reserves, the newest fill the rest.
+
+    Getting this wrong spends a full budget on a partial batch — and worse, makes the
+    round look like it caught up, so a backlog stops draining while it is still there.
+    """
+    _queue(connection, 30)
+    # Only two rows are genuinely old, where a fifth of ten would reserve two slots.
+    connection.execute("UPDATE listings SET first_seen = '2026-01-01T00:00:00+00:00' "
+                       "WHERE external_id IN ('q000', 'q001')")
+    connection.commit()
+
+    batch = pending_detail(connection, 10)
+
+    assert len(batch) == 10
+    waiting = {row["external_id"] for row in batch}
+    assert {"q000", "q001"} <= waiting  # the old ones still go in
+    assert "q029" in waiting            # and the newest still lead the rest
