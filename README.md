@@ -148,7 +148,7 @@ costo        ██████████  95
 antigüedad   █████████·  92
 precio zona  █████████·  91
 comodidades  ████████··  80
-metraje      ████······  45  ← lo más flojo
+metraje      ████······  45
 
 ❓ sin puntaje: viajes · entrega
 ```
