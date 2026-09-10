@@ -654,12 +654,26 @@ on one another:
 `deploy/crontab` runs them at staggered minutes. The enrichment gets six goes an hour in
 small batches rather than one big one — the same number of requests, spread out, so a
 backlog clears six times faster without asking any portal for more per second — and
-alerts go out four times an hour, so a listing enriched at :12 is announced at :15 instead
-of waiting for the next whole pass.
+alerts go out every five minutes, because a pass with nothing to post asks Telegram
+nothing at all. **Frequency is what decides how long a listing waits; the batch size only
+decides how fast a backlog drains.** That is worth keeping straight when a card feels
+late: raising `DEPAS_ALERTS_LIMIT` does nothing for a listing whose detail page has not
+been read yet.
 
-The six portals are swept in parallel because they are six different hosts; each worker
-keeps the same polite delay, so no single portal sees more requests per second than
-before. Posting is paced the same way: Telegram's limit is per chat — twenty messages a
+The six portals are both swept **and read** in parallel, because they are six different
+hosts and `Fetcher`'s polite delay is there for the host rather than for the process; each
+worker keeps that delay, so no single portal sees more requests per second than before.
+Reading the detail pages was the last stage still going in single file, and it is the
+expensive one: with the real shape of the queue — Portal Inmobiliario is about 40% of it —
+one batch now takes 2.4× less wall clock. That headroom is what makes `DEPAS_ENRICH_LIMIT`
+worth raising: the ceiling is no longer the ten minutes between runs.
+
+A detail page that fails is that listing's problem and no longer the stage's. It used to
+be: any status but 404 was re-raised, so a page answering 403 for good aborted the pass at
+the same point every time and everything older than it in the queue went unread. Now it is
+counted, warned about, and held out of the queue for an hour — not delisted, since a page
+failing is about the page. All of them failing still fails the stage, because that is a
+portal that moved its markup rather than one bad listing. Posting is paced the same way: Telegram's limit is per chat — twenty messages a
 minute to a group or channel, about one a second to a private conversation — so a card in
 the channel and its thread comment in the linked group no longer wait for each other, and
 a 429 is waited out for exactly as long as Telegram asks rather than costing the chat the
