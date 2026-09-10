@@ -415,7 +415,10 @@ def format_digest(candidates: list[Update], chat_id: str,
     budget = LIMIT - len(header) - len(_more(count))
     for update in candidates:
         entry = _digest_entry(update, chat_id)
-        if budget - len(entry) - 2 < 0:
+        # The first one goes in whatever it costs. An entry nothing will ever fit around
+        # would otherwise be retried at the head of every pass and told in none of them,
+        # and one over-long message beats a listing that can never be reported at all.
+        if told and budget - len(entry) - 2 < 0:
             break
         budget -= len(entry) + 2
         told.append(update)
@@ -429,21 +432,42 @@ def format_digest(candidates: list[Update], chat_id: str,
     return "\n".join(lines), told
 
 
+def _bulleted(told: list[str], budget: int) -> list[str]:
+    """As many of these as fit, and a line saying how many did not.
+
+    Every message here is built from a list that has no natural length: a listing stored
+    for two months has a history to match, and Telegram rejects what it cannot fit rather
+    than trimming it — so an unbudgeted note is not a long note but no note at all.
+    """
+    kept: list[str] = []
+    for line in told:
+        bullet = f"• {line}"
+        if budget - len(bullet) - 1 < 0:
+            break
+        budget -= len(bullet) + 1
+        kept.append(bullet)
+    if len(kept) < len(told):
+        kept.append(f"• …y {len(told) - len(kept)} cambios más")
+    return kept
+
+
 def format_thread_note(update: Update) -> str:
     """The diff that hangs under the card itself, where whoever is looking at it will be."""
-    lines = [THREAD_TITLE, "", *[f"• {one}" for one in update.lines()]]
     nota = update.nota()
-    if nota:
-        lines += ["", nota]
-    return "\n".join(lines)
+    head = [THREAD_TITLE, ""]
+    tail = ["", nota] if nota else []
+    spent = sum(len(one) + 1 for one in head + tail)
+    return "\n".join([*head, *_bulleted(update.lines(), LIMIT - spent), *tail])
 
 
 def format_arrival_note(reason: str, changes: list[Change]) -> str:
     """Why a card for an old listing is arriving now, posted under the card itself."""
-    lines = [ARRIVED_TITLE, "", reason]
-    if changes:
-        lines += ["", SINCE_FIRST_SEEN, *[f"• {one}" for one in changes]]
-    return "\n".join(lines)
+    head = [ARRIVED_TITLE, "", reason]
+    if not changes:
+        return "\n".join(head)
+    head += ["", SINCE_FIRST_SEEN]
+    spent = sum(len(one) + 1 for one in head)
+    return "\n".join([*head, *_bulleted([str(one) for one in changes], LIMIT - spent)])
 
 
 # ── reading what to tell, and telling it ────────────────────────────────────────
@@ -505,6 +529,11 @@ def pending(connection: sqlite3.Connection, prefs: Preferences,
         ).fetchone()
         if row is None or card is None:
             continue  # a card outliving its listing is not a change to report
+        if (row["interest"] or 0) < 0:
+            # A /dislike is out for good — never announced again, and out of the pool.
+            # A rebaja on a flat somebody turned down is not news, it is that verdict
+            # being argued with.
+            continue
         changes = changes_for(connection, *key, held["floor"])
         events = listing_events(connection, *key, since=held["floor"])
         if not changes and not events:
