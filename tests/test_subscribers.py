@@ -154,9 +154,10 @@ def test_each_destination_is_told_once(connection, monkeypatch):
     add_subscriber(connection, CHANNEL, catch_up=True)
     add_subscriber(connection, "-2002", owner_user_id=ANA, catch_up=True)
     posted = []
-    monkeypatch.setattr("depas.cli._post_card",
-                        lambda conn, p, dest, row, text: posted.append((dest, row["external_id"])))
-    monkeypatch.setattr("depas.cli.time.sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        "depas.cli._post_card",
+        lambda conn, p, dest, row, text, note=None: posted.append(
+            (dest, row["external_id"])))
 
     _announce(connection, prefs(), limit=10)
 
@@ -173,10 +174,9 @@ def test_a_destination_that_refuses_does_not_cost_the_others(connection, monkeyp
     monkeypatch.setenv("DEPAS_GRADE_MIN", "0")
     add_subscriber(connection, CHANNEL, catch_up=True)
     add_subscriber(connection, "-2002", catch_up=True)
-    monkeypatch.setattr("depas.cli.time.sleep", lambda seconds: None)
     posted = []
 
-    def refuses(conn, p, dest, row, text):
+    def refuses(conn, p, dest, row, text, note=None):
         if dest == CHANNEL:
             raise RuntimeError("bot is not a member of the channel")
         posted.append(dest)
@@ -204,9 +204,9 @@ def test_a_new_chat_is_not_told_the_backlog(connection, monkeypatch):
     """The first version drew on years of listings at DEPAS_ALERTS_LIMIT a pass."""
     monkeypatch.setenv("DEPAS_GRADE_MIN", "0")
     posted = []
-    monkeypatch.setattr("depas.cli._post_card",
-                        lambda conn, p, dest, row, text: posted.append(row["external_id"]))
-    monkeypatch.setattr("depas.cli.time.sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        "depas.cli._post_card",
+        lambda conn, p, dest, row, text, note=None: posted.append(row["external_id"]))
 
     written_off = add_subscriber(connection, CHANNEL)
 
@@ -220,9 +220,9 @@ def test_what_turns_up_after_subscribing_is_told(connection, monkeypatch):
     monkeypatch.setenv("DEPAS_GRADE_MIN", "0")
     add_subscriber(connection, CHANNEL)
     posted = []
-    monkeypatch.setattr("depas.cli._post_card",
-                        lambda conn, p, dest, row, text: posted.append(row["external_id"]))
-    monkeypatch.setattr("depas.cli.time.sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        "depas.cli._post_card",
+        lambda conn, p, dest, row, text, note=None: posted.append(row["external_id"]))
 
     save(connection, [Listing(portal="houm", external_id="fresh", url="https://x/f",
                               price=500_000, currency="CLP", price_clp=500_000.0,

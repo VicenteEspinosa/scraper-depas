@@ -13,6 +13,7 @@ from depas.store import (
     LIKE,
     Subscriber,
     connect,
+    listing_events,
     mark_delisted,
     quiet_portals,
     remember_sweep,
@@ -285,3 +286,60 @@ def test_uf_prices_are_normalised_without_a_request(connection):
     _discover(connection, 39_000.0, Query(communes=[Commune("nunoa")]), portals)
 
     assert connection.execute("SELECT price_clp FROM listings").fetchone()[0] == 780_000.0
+
+
+# ── the history behind the column ───────────────────────────────────────────────
+
+
+def test_a_404_is_recorded_as_the_evidence_it_is(connection):
+    """`delisted_at` holds a state; this is what concluded it and when."""
+    _enrol(connection, "removed")
+    mark_delisted(connection, "houm", "removed")
+
+    events = listing_events(connection, "houm", "removed")
+    assert [(one["event"], one["reason"]) for one in events] == [("delisted", "404")]
+
+
+def test_a_second_404_on_a_listing_already_down_is_the_same_baja(connection):
+    """Recorded once, so a reader is told once rather than every pass that re-reads it."""
+    _enrol(connection, "removed")
+    mark_delisted(connection, "houm", "removed")
+    mark_delisted(connection, "houm", "removed")
+
+    assert len(listing_events(connection, "houm", "removed")) == 1
+
+
+def test_the_sweep_says_which_listings_it_concluded_were_gone(connection):
+    """The count was all the caller needed; the history wants to know which ones."""
+    an_hour_ago = _enrol(connection, "vanished")
+    _sweeps(connection, 3, since=an_hour_ago)
+
+    assert sweep_delisted(connection, 3) == 1
+
+    events = listing_events(connection, "houm", "vanished")
+    assert [(one["event"], one["reason"]) for one in events] == [("delisted", "unseen")]
+
+
+def test_a_listing_a_sweep_sees_again_is_recorded_as_back(connection):
+    """The direction that reads as a false positive: a sweep that could not see it.
+
+    Without this the vuelta was silent — a listing could leave the pool and come back
+    with nothing anywhere saying it had happened, which is exactly the question a card
+    for an apartment first seen weeks ago raises.
+    """
+    _enrol(connection, "back")
+    mark_delisted(connection, "houm", "back")
+
+    save(connection, [_listing("back")])
+
+    events = listing_events(connection, "houm", "back")
+    assert [one["event"] for one in events] == ["delisted", "relisted"]
+
+
+def test_a_sweep_seeing_a_listing_that_was_never_down_records_nothing(connection):
+    """Every pass re-saves every listing; only a state that changed is history."""
+    _enrol(connection, "steady")
+
+    save(connection, [_listing("steady")])
+
+    assert listing_events(connection, "houm", "steady") == []
