@@ -485,7 +485,8 @@ whatever was edited from the chat since.
 | `DEPAS_DEEP_SWEEP_HOURS` | How often a portal is read to the bottom regardless of the cutoff. Default 24 — the safety net that turns a wrong ordering guess into a delay rather than a loss. `0` makes every sweep deep. |
 | `DEPAS_REFRESH_LIMIT` | Detail pages **re-read** per pass, on top of the new ones. A page is re-read when the price moved since it was read, or when its own backoff comes due; the two budgets are separate so a listing nobody has read yet never waits behind a re-read. Default 20, `0` never re-reads. |
 | `DEPAS_DELIST_AFTER` | How many believable sweeps of a portal must fail to turn a listing up before it is marked gone. A sweep counts only if it finished *and* saw listings, so a portal that is down or whose markup moved delists nobody. Default 3. `0` never delists — and it has to be special-cased, since "at least zero sweeps" is true of every row. |
-| `DEPAS_ENRICH_LIMIT`, `DEPAS_COMMUTE_LIMIT`, `DEPAS_ALERTS_LIMIT` | How much work one `watch` pass may do: detail pages fetched, listings routed, cards posted. Defaults 60, 40 and 10 — the numbers the command-line flags used to hardcode. They belong in the table rather than in the crontab because the right figure moves with how many comunas you watch, and moving it should not need a redeploy. `0` switches a stage off. The flags still exist and override the setting for one run. |
+| `DEPAS_ENRICH_LIMIT`, `DEPAS_COMMUTE_LIMIT`, `DEPAS_ALERTS_LIMIT` | How much work one `watch` pass may do: detail pages fetched, listings routed, cards posted. Defaults 250, 40 and 25. The detail read is spread across the six portals at once, so 250 is about 40 per portal and a couple of minutes of the ten between runs — reading them in single file is what used to make 60 the sensible number. Routing stays at 40: one third-party host, still sequential. They belong in the table rather than in the crontab because the right figure moves with how many comunas you watch, and moving it should not need a redeploy. `0` switches a stage off. The flags still exist and override the setting for one run. |
+| `DEPAS_ENRICH_ROUNDS` | How many times the detail read may repeat inside one run while the unread queue is still filling its whole budget. Default 3, so a backlog drains at up to 750 pages a run instead of waiting ten minutes per batch — and only while there is a backlog, which is what a standing higher limit could not express. `1` reads one batch and stops. Rounds × limit has to fit the window between runs; if it does not, the stage lock makes the next run a clean no-op rather than two processes fighting. |
 | `DEPAS_UPDATES_LIMIT` | Listings **already posted** that get corrected per pass when they change: the card edited, its thread told what moved, and one digest naming all of them. Default 10, `0` reports no changes at all. What the budget pushes out is not stamped, so it goes out next pass. |
 | `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread, which is also where `/like` and `/dislike` are read from; a group takes the cards but leaves them undiscussable, so verdicts have to be replies. Switching between the two is only this value. |
 
@@ -667,6 +668,22 @@ Reading the detail pages was the last stage still going in single file, and it i
 expensive one: with the real shape of the queue — Portal Inmobiliario is about 40% of it —
 one batch now takes 2.4× less wall clock. That headroom is what makes `DEPAS_ENRICH_LIMIT`
 worth raising: the ceiling is no longer the ten minutes between runs.
+
+**Newest first is not a queue.** Every arrival goes in *front* of what is waiting, so an
+old row does not advance as time passes — it falls back. A fifth of every unread batch is
+therefore spent on the rows that have waited longest, as a floor: after a flood (a comuna
+added, the budget raised, a portal read to the bottom for the first time) the oldest could
+otherwise wait weeks, which is how a card for a flat first seen in July turns up in
+September. The share is a floor and not a carve-out — when fewer old rows are waiting than
+it reserves, the newest fill the rest of the budget.
+
+**One stage at a time.** `stage_locks` holds a row while a stage runs, so its own crontab
+entry firing again mid-run is a clean no-op rather than two writers meeting. Nothing
+enforced this before, and nothing needed to while a batch took two minutes of a ten-minute
+window — but the batch is bigger now and may repeat while there is work left. A lock older
+than thirty minutes is not a lock: one nobody released — OOM, SIGKILL, the container
+restarted mid-run — would wedge the stage far worse than the overlap it prevents, and
+`depas healthcheck` says when a stale stage is one that is still holding its lock.
 
 A detail page that fails is that listing's problem and no longer the stage's. It used to
 be: any status but 404 was re-raised, so a page answering 403 for good aborted the pass at

@@ -314,17 +314,26 @@ SETTINGS: tuple[Setting, ...] = (
     # number moves with how many comunas are watched rather than with what you want.
     Setting("DEPAS_ENRICH_LIMIT", _budget,
             "Cuántas fichas de detalle baja cada pasada. Es el gasto más caro del "
-            "crawl, así que subirlo acelera las alertas y castiga al portal. En 0 no "
-            "se enriquece nada y el pool deja de crecer.",
-            example="60", default="60"),
+            "crawl, pero se reparte entre los seis portales a la vez, así que el costo "
+            "por portal es una fracción de este número. En 0 no se enriquece nada y el "
+            "pool deja de crecer.",
+            example="250", default="250"),
+    Setting("DEPAS_ENRICH_ROUNDS", _budget,
+            "Cuántas veces seguidas puede repetirse la lectura de fichas dentro de una "
+            "misma corrida mientras la cola siga llena. Sirve para vaciar un atraso "
+            "—una comuna nueva, un portal leído hasta el fondo— sin pedirle a los "
+            "portales esa velocidad el resto del tiempo. En 1 se lee un lote y nada más.",
+            example="3", default="3"),
     Setting("DEPAS_COMMUTE_LIMIT", _budget,
             "Cuántos avisos se rutean por pasada. Transitous es un servidor ajeno, "
             "así que conviene no exigirle de más.",
             example="40", default="40"),
     Setting("DEPAS_ALERTS_LIMIT", _budget,
             "Máximo de tarjetas publicadas por pasada. Lo que pasa el corte y no "
-            "alcanza a salir no se pierde: sale en la siguiente.",
-            example="10", default="10"),
+            "alcanza a salir no se pierde: sale en la siguiente. Este número no decide "
+            "cuánto espera un aviso —eso lo decide cada cuánto corre la pasada— sino "
+            "qué tan rápido drena una cola acumulada.",
+            example="25", default="25"),
     Setting("DEPAS_UPDATES_LIMIT", _budget,
             "Cuántos avisos ya publicados se corrigen por pasada cuando cambian: la "
             "tarjeta se edita, el hilo dice qué cambió y un solo mensaje los resume. Lo "
@@ -334,7 +343,7 @@ SETTINGS: tuple[Setting, ...] = (
             "Cuántas fichas ya leídas se releen por pasada, aparte de las nuevas. Una "
             "ficha se relee cuando el precio se movió o cuando le toca; sube esto si la "
             "base quedó desactualizada. En 0 nunca se relee nada.",
-            example="20", default="20"),
+            example="60", default="60"),
     Setting("DEPAS_SWEEP_QUIET_PAGES", _budget,
             "Cuántas páginas seguidas sin ningún aviso nuevo cortan el barrido de un "
             "portal. Sirve solo si el portal devuelve lo más reciente primero; en 0 se "
@@ -349,8 +358,10 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("DEPAS_DELIST_AFTER", _budget,
             "Cuántos barridos creíbles del portal tienen que no encontrar un aviso para "
             "darlo de baja. Un barrido cuenta solo si terminó y vio avisos, así que un "
-            "portal caído no da de baja a nadie. En 0 nunca se dan de baja.",
-            example="3", default="3"),
+            "portal caído no da de baja a nadie. Ojo que cuenta barridos y no horas: si "
+            "cambias cada cuánto corre `depas discover`, este número tiene que moverse "
+            "con él o la paciencia real cambia sola. En 0 nunca se dan de baja.",
+            example="9", default="9"),
 )
 
 BY_NAME: Mapping[str, Setting] = {setting.name: setting for setting in SETTINGS}
