@@ -17,7 +17,7 @@ The module owns its own messages, the way `shortlist` does: the rendering lives 
 reading that produces it, and `announce` only says when.
 """
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -187,7 +187,7 @@ def _number(value: str | None) -> float | None:
 
 
 def changes_for(connection: sqlite3.Connection, portal: str, external_id: str,
-                since: str | None) -> list[Change]:
+                since: str | None, threshold: int = 0) -> list[Change]:
     """Every reportable move of one listing after `since`, oldest first.
 
     The price trail and the detail changes are two tables because they are written by
@@ -195,6 +195,10 @@ def changes_for(connection: sqlite3.Connection, portal: str, external_id: str,
     the detail page — and `listing_changes` unions them for reading. It leaves the price's
     old value NULL, though, since a trail of prices has no old column, so the pairing up
     happens here where a rebaja can be stated as one.
+
+    `threshold` is read over the whole history and not only over what is after `since`:
+    the drift it folds up has to be measured from the last figure the reader was actually
+    given, which is usually older than the watermark.
     """
     where = "portal = ? AND external_id = ?"
     parameters: list[object] = [portal, external_id]
@@ -206,8 +210,35 @@ def changes_for(connection: sqlite3.Connection, portal: str, external_id: str,
         if row["field"] not in NOT_A_CHANGE
     ]
     changes += _price_moves(connection, portal, external_id)
-    kept = [one for one in changes if since is None or one.changed_at > since]
-    return sorted(kept, key=lambda one: one.changed_at)
+    told = _worth_telling(sorted(changes, key=lambda one: one.changed_at), threshold)
+    return [one for one in told if since is None or one.changed_at > since]
+
+
+def _worth_telling(changes: list[Change], threshold: int) -> list[Change]:
+    """Money moves under `threshold` folded into the next one of the same field.
+
+    A flat published in UF has its CLP figures rewritten every day by the UF moving, so
+    an arriendo "subió de $635.567 a $635.694" is the exchange rate and not the landlord.
+    Folded rather than dropped, and folded against the last figure told rather than the
+    last one seen: a hundred pesos a day is still fifteen thousand in five months, and
+    that is a real rebaja nobody would want swallowed a peso at a time.
+    """
+    if threshold <= 0:
+        return changes
+    kept: list[Change] = []
+    held: dict[str, Change] = {}
+    for change in changes:
+        if change.field not in MONEY:
+            kept.append(change)
+            continue
+        # Against the oldest unreported figure, which is the last one the reader saw.
+        since_told = replace(change, old=held.pop(change.field, change).old)
+        was, now = _number(since_told.old), _number(since_told.new)
+        if was is not None and now is not None and abs(now - was) < threshold:
+            held[change.field] = since_told
+            continue
+        kept.append(since_told)
+    return kept
 
 
 def _price_moves(connection: sqlite3.Connection, portal: str,
@@ -516,6 +547,7 @@ def pending(connection: sqlite3.Connection, prefs: Preferences,
     discarded reads as discarded here too.
     """
     scale = Scale(prefs)
+    threshold = prefs.value("DEPAS_PRICE_CHANGE_MIN") or 0
     updates = []
     for held in connection.execute(SOMETHING_MOVED, (subscriber.chat_id,)).fetchall():
         key = (held["portal"], held["external_id"])
@@ -534,7 +566,7 @@ def pending(connection: sqlite3.Connection, prefs: Preferences,
             # A rebaja on a flat somebody turned down is not news, it is that verdict
             # being argued with.
             continue
-        changes = changes_for(connection, *key, held["floor"])
+        changes = changes_for(connection, *key, held["floor"], threshold)
         events = listing_events(connection, *key, since=held["floor"])
         if not changes and not events:
             continue  # a price re-recorded at the same figure is not a move

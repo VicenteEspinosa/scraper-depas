@@ -488,6 +488,7 @@ whatever was edited from the chat since.
 | `DEPAS_ENRICH_LIMIT`, `DEPAS_COMMUTE_LIMIT`, `DEPAS_ALERTS_LIMIT` | How much work one `watch` pass may do: detail pages fetched, listings routed, cards posted. Defaults 250, 40 and 25. The detail read is spread across the six portals at once, so 250 is about 40 per portal and a couple of minutes of the ten between runs — reading them in single file is what used to make 60 the sensible number. Routing stays at 40: one third-party host, still sequential. They belong in the table rather than in the crontab because the right figure moves with how many comunas you watch, and moving it should not need a redeploy. `0` switches a stage off. The flags still exist and override the setting for one run. |
 | `DEPAS_ENRICH_ROUNDS` | How many times the detail read may repeat inside one run while the unread queue is still filling its whole budget. Default 3, so a backlog drains at up to 750 pages a run instead of waiting ten minutes per batch — and only while there is a backlog, which is what a standing higher limit could not express. `1` reads one batch and stops. Rounds × limit has to fit the window between runs; if it does not, the stage lock makes the next run a clean no-op rather than two processes fighting. |
 | `DEPAS_UPDATES_LIMIT` | Listings **already posted** that get corrected per pass when they change: the card edited, its thread told what moved, and one digest naming all of them. Default 10, `0` reports no changes at all. What the budget pushes out is not stamped, so it goes out next pass. |
+| `DEPAS_PRICE_CHANGE_MIN` | How far the arriendo or the gasto común has to move before it is worth a notice. Default 10000, `0` reports any peso. A flat published in UF has its CLP figure rewritten every day by the exchange rate, so «el arriendo subió de $635.567 a $635.694» is arithmetic and not news. What falls under the floor is not discarded but **folded**: the next move is measured from the last figure you were actually told, so a hundred pesos a day still arrives as one real rebaja once it adds up. Only money is held to it — a dormitorio that became two is one unit and the whole news of the listing. |
 | `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread, which is also where `/like` and `/dislike` are read from; a group takes the cards but leaves them undiscussable, so verdicts have to be replies. Switching between the two is only this value. |
 
 ## Not re-reading pages that hold nothing new
@@ -599,6 +600,14 @@ Two budgets bound it. `DEPAS_UPDATES_LIMIT` caps the listings corrected per pass
 two hundred moved prices is two hundred edits and ten minutes of channel; and the digest
 is capped separately at Telegram's 4096 characters, which it rejects a message for rather
 than trimming. Whatever either one pushes out is not stamped, so it goes out next pass.
+
+A price move also has to be big enough to be worth saying. `DEPAS_PRICE_CHANGE_MIN`
+(default 10000) is the floor: a flat published in UF has its CLP arriendo and gasto común
+rewritten daily by the exchange rate, and four avisos of a hundred pesos each is the
+digest turned into noise. Anything under it is held rather than dropped, and the next
+move is measured from the last figure you were told — so drift that adds up to a real
+rebaja arrives as one, months later, instead of vanishing a peso at a time. It applies to
+money only; every other field is news at any size.
 
 ## More than one reader
 

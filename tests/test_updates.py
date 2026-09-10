@@ -149,6 +149,88 @@ def test_a_gasto_comun_that_moved_is_told_as_money(connection):
     assert [str(one) for one in changed] == ["El gasto común subió de $80.000 a $95.000"]
 
 
+# ── money that only drifted ─────────────────────────────────────────────────────
+
+# What DEPAS_PRICE_CHANGE_MIN defaults to, which is what these tests are written around.
+FLOOR = 10_000
+
+
+def _priced_on(connection, trail: list[tuple[int, int]]) -> None:
+    """A price trail written by hand: `(pesos, days ago)`, oldest first.
+
+    Directly rather than through `save`, because drift is a story about a sequence of
+    days and the timestamps are the point — every row would otherwise land on the
+    same second and the trail would be read in whatever order SQLite felt like.
+    """
+    for price, days_ago in trail:
+        when = (datetime.now(UTC) - timedelta(days=days_ago)).isoformat()
+        connection.execute(
+            "INSERT INTO price_history "
+            "(portal, external_id, price, currency, price_clp, seen_at) "
+            "VALUES ('pi', '7', ?, 'CLP', ?, ?)", (float(price), float(price), when))
+    connection.commit()
+
+
+def test_a_price_that_only_drifted_with_the_uf_is_not_worth_a_notice(connection):
+    """A flat published in UF has its CLP figure rewritten daily by the exchange rate."""
+    _priced_on(connection, [(635_567, 2), (635_694, 1)])
+
+    assert updates.changes_for(connection, "pi", "7", None, FLOOR) == []
+
+
+def test_drift_is_measured_against_the_last_figure_told_and_not_the_last_one_seen(
+        connection):
+    """A hundred pesos a day is still a real rebaja by the fifth month, not nothing."""
+    _priced_on(connection, [(635_567, 4), (635_694, 3), (640_000, 2), (646_100, 1)])
+
+    changed = updates.changes_for(connection, "pi", "7", None, FLOOR)
+
+    assert [str(one) for one in changed] == ["El arriendo subió de $635.567 a $646.100"]
+
+
+def test_a_gasto_comun_nudge_is_held_to_the_same_floor(connection):
+    """The same UF rewrite lands on the gastos comunes, and reads the same way."""
+    _announced(connection)
+    save_detail(connection, "pi", "7", {"common_expenses": 80_030})
+
+    assert updates.changes_for(connection, "pi", "7", None, FLOOR) == []
+
+
+def test_the_floor_is_only_for_money(connection):
+    """A dormitorio that became two is one unit and the whole news of the listing."""
+    _announced(connection)
+    save_detail(connection, "pi", "7", {"common_expenses": 80_000, "bedrooms": 2})
+
+    changed = updates.changes_for(connection, "pi", "7", None, FLOOR)
+
+    assert [str(one) for one in changed] == ["Los dormitorios ahora dicen 2"]
+
+
+def test_a_pass_with_nothing_but_drift_says_nothing_at_all(connection, telegram):
+    """The whole point: four avisos of a hundred pesos each is a digest nobody wants."""
+    _announced(connection, 635_567)
+    _later(connection, "price_history", "seen_at")
+    _later(connection, "subscriber_notifications", "notified_at")
+    save(connection, [_listing(635_694)])
+
+    assert _sync(connection) == 0
+    assert telegram["replies"] == []
+
+
+def test_drift_left_untold_is_still_told_once_it_adds_up(connection, telegram):
+    """Nothing is stamped while it is under the floor, so the arrears are still there."""
+    _announced(connection, 635_567)
+    _later(connection, "price_history", "seen_at")
+    _later(connection, "subscriber_notifications", "notified_at")
+    save(connection, [_listing(635_694)])
+    assert _sync(connection) == 0
+
+    save(connection, [_listing(650_000)])
+
+    assert _sync(connection) == 1
+    assert "El arriendo subió de $635.567 a $650.000" in telegram["replies"][-1][1]
+
+
 def test_a_flag_has_no_direction(connection):
     """An apartment that turned out to be amoblado did not have its amoblado subir."""
     assert str(Change("furnished", "0", "1", "x")) == "El amoblado cambió de no a sí"
