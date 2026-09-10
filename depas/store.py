@@ -216,9 +216,15 @@ def pending_detail(connection: sqlite3.Connection, fresh: int,
     thousand rows come due at once would otherwise starve the finds, which are the
     only reason the pass exists.
     """
+    now = datetime.now(UTC).isoformat()
+    # `detail_due_at` gates the unread half too, not just the re-reads. It defaults to
+    # the empty string, which sorts before every timestamp, so a row nobody has touched
+    # is still due now — the only rows this holds back are the ones a failed read
+    # deferred, which would otherwise take a slot every ten minutes forever.
     unread = connection.execute(
-        f"{QUEUED} AND detail_fetched_at IS NULL ORDER BY first_seen DESC LIMIT ?",
-        (fresh,),
+        f"{QUEUED} AND detail_fetched_at IS NULL AND detail_due_at <= ? "
+        "ORDER BY first_seen DESC LIMIT ?",
+        (now, fresh),
     ).fetchall()
     if refresh <= 0:
         return unread
@@ -228,7 +234,7 @@ def pending_detail(connection: sqlite3.Connection, fresh: int,
         f"{QUEUED} AND detail_fetched_at IS NOT NULL AND detail_due_at <= ? "
         "ORDER BY (price_at_detail IS NOT NULL AND price <> price_at_detail) DESC, "
         "detail_due_at LIMIT ?",
-        (datetime.now(UTC).isoformat(), refresh),
+        (now, refresh),
     ).fetchall()
     return [*unread, *due]
 
@@ -554,6 +560,20 @@ def detail_digest(detail: Mapping[str, object]) -> str:
 # it does. A flat idle for two months is worth a look monthly; one that moved yesterday
 # is worth one in three days, and the same budget then covers far more of them.
 REFRESH_DAYS, MAX_BACKOFF_DOUBLINGS = 3, 3
+
+
+def defer_detail(connection: sqlite3.Connection, portal: str, external_id: str,
+                 wait: timedelta) -> None:
+    """Hold a listing whose page could not be read out of the queue for a while.
+
+    Not a delisting: the page failing is about the page, and the listing may well still
+    be for rent. It just must not spend a slot every pass while it is broken.
+    """
+    connection.execute(
+        "UPDATE listings SET detail_due_at = ? WHERE portal = ? AND external_id = ?",
+        ((datetime.now(UTC) + wait).isoformat(), portal, external_id),
+    )
+    connection.commit()
 
 
 def next_detail_read(unchanged_in_a_row: int) -> str:
