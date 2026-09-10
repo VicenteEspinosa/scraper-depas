@@ -348,6 +348,42 @@ def test_a_late_card_with_nothing_moved_blames_the_queue_it_waited_in(connection
     assert "21 días" in note
 
 
+def test_a_late_card_that_was_waiting_on_its_commute_says_that(connection, telegram):
+    """Routing is its own stage with its own budget, so it is its own kind of wait.
+
+    A listing can be enriched for weeks and still out of the pool because nothing has
+    computed its travel time yet, which `json_extract(commute, ...) <= ?` reads as false.
+    """
+    save(connection, [_listing()])
+    save_detail(connection, "pi", "7", {"walk_minutes": 6})
+    _stored_weeks_ago(connection)
+    connection.execute("UPDATE listings SET detail_fetched_at = first_seen")
+    connection.execute(
+        "INSERT INTO detail_changes (portal, external_id, field, old_value, new_value,"
+        " changed_at) VALUES ('pi', '7', 'commute', NULL, ?, ?)",
+        ('{"oficina": 32}', datetime.now(UTC).isoformat()))
+    connection.commit()
+
+    _announce(connection, prefs(), limit=10)
+
+    note = [text for chat, text in telegram["replies"] if "aparece recién ahora" in text][0]
+    assert "cambió el viaje" in note
+    assert "El viaje ahora dice oficina 32 min" in note
+
+
+def test_the_budget_at_zero_switches_the_whole_thing_off(connection, telegram):
+    """Every other budget in the table means "none of this" at zero, and so does this one."""
+    _announced(connection, 1_000_000)
+    _later(connection, "price_history", "seen_at")
+    _later(connection, "subscriber_notifications", "notified_at")
+    save(connection, [_listing(920_000)])
+
+    assert _sync(connection, limit=0) == 0
+
+    assert telegram["replies"] == []
+    assert telegram["edits"] == []
+
+
 def test_a_late_card_for_a_listing_that_came_back_says_so(connection, telegram):
     """Out of the pool entirely is a reason no change to its fields can explain."""
     save(connection, [_listing()])
@@ -445,19 +481,33 @@ def test_a_card_already_announced_keeps_its_stamp_and_gains_no_grade(tmp_path):
     assert (stamped["grade_letter"], stamped["grade_score"]) == (None, None)
 
 
-def test_nothing_is_owed_a_change_notice_the_day_the_feature_lands(tmp_path):
-    """`update_notifications` starts empty and every card's floor is when it went out.
+def test_a_card_already_posted_starts_on_what_happens_next(tmp_path):
+    """Otherwise the first pass after the deploy reports months of accumulated history.
 
-    So the first pass after the deploy reports what has moved since each card was
-    posted — not the whole history of every listing, which would be one enormous
-    digest about apartments the reader has long since stopped caring about.
+    True, all of it, and none of it news: price movements drip-fed ten an hour and a
+    «ya no está» for every flat that came off the market back in July.
     """
     database = _at_017(tmp_path)
 
     migrate(database)
 
-    assert database.execute("SELECT COUNT(*) FROM update_notifications").fetchone()[0] == 0
-    assert database.execute("SELECT COUNT(*) FROM delisting_events").fetchone()[0] == 0
+    through = database.execute("SELECT through FROM update_notifications").fetchone()
+    assert through["through"] > "2026-09-01T11:00:00"  # after the card, so nothing is owed
+    # And it is comparable with what the code writes: an ISO timestamp carrying its zone.
+    assert datetime.fromisoformat(through["through"]).tzinfo is not None
+
+
+def test_a_listing_stamped_without_a_card_is_not_given_a_watermark(tmp_path):
+    """There is no message to correct and nobody who ever saw it: it cannot be reported."""
+    database = _at_017(tmp_path)
+    database.execute(
+        "INSERT INTO subscriber_notifications (chat_id, portal, external_id, notified_at)"
+        " VALUES (?, 'houm', 'never-posted', '2026-09-01T11:00:00')", (CHAT,))
+
+    migrate(database)
+
+    assert [row["external_id"] for row
+            in database.execute("SELECT external_id FROM update_notifications")] == ["told"]
 
 
 def test_a_digest_too_long_for_telegram_is_cut_rather_than_lost(connection, telegram):

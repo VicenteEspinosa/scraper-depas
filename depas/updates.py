@@ -23,6 +23,7 @@ from typing import Any
 
 from depas.bot import card_anchor, refresh_card
 from depas.commute import SANTIAGO
+from depas.commute import as_text as commute_text
 from depas.grade import Scale
 from depas.preferences import Preferences
 from depas.shortlist import CARD_LABEL, LISTING_LABEL
@@ -85,8 +86,9 @@ YES_NO = frozenset({"furnished", "pets_allowed", "has_elevator", "has_concierge"
 
 # A text field's old and new value are not worth quoting in full: a rewritten description
 # is a paragraph, and the reader wants to know that it moved, not to diff it in a chat.
-LONG = frozenset({"description", "features", "transit", "commute", "title", "image_url",
-                  "url"})
+LONG = frozenset({"description", "features", "transit", "title", "image_url", "url"})
+# Stored as JSON, and the reader wants the minutes: `{"oficina": 32}` is «oficina 32 min».
+JOURNEYS = frozenset({"commute"})
 DATES = frozenset({"available_from"})
 
 # Both numbers of each verb, because "los estacionamientos subió" is not Spanish and the
@@ -126,6 +128,10 @@ class Change:
             return "no" if value in ("0", "0.0", "False") else "sí"
         if self.field in DATES:
             return self._date(value)
+        if self.field in JOURNEYS:
+            # The unit goes at the end, the way the card writes it: «oficina 32 min».
+            travel = commute_text(value)
+            return f"{escape(travel)} min" if travel else "—"
         number = _number(value)
         if number is None:
             return escape(value)

@@ -469,12 +469,23 @@ def refresh_commutes(connection: sqlite3.Connection, fetcher: Fetcher,
     ).fetchall()
     stale = [row for row in rows
              if not row["commute"] or set(json.loads(row["commute"])) != wanted][:limit]
+    now = datetime.now(UTC).isoformat()
     for row in stale:
+        routed = json.dumps(from_listing(fetcher, row["lat"], row["lon"], places))
         connection.execute(
-            "UPDATE listings SET commute = ? WHERE rowid = ?",
-            (json.dumps(from_listing(fetcher, row["lat"], row["lon"], places)),
-             row["rowid"]),
-        )
+            "UPDATE listings SET commute = ? WHERE rowid = ?", (routed, row["rowid"]))
+        # Recorded like a detail field even though no detail page was read: a listing
+        # can be waiting on nothing but this to clear DEPAS_COMMUTE_MAX, and without a
+        # row here the announcement has no way to say that is what it was waiting for.
+        if row["commute"] != routed:
+            listing = connection.execute(
+                "SELECT portal, external_id FROM listings WHERE rowid = ?",
+                (row["rowid"],)).fetchone()
+            connection.execute(
+                "INSERT INTO detail_changes "
+                "(portal, external_id, field, old_value, new_value, changed_at) "
+                "VALUES (?, ?, 'commute', ?, ?, ?)",
+                (listing["portal"], listing["external_id"], row["commute"], routed, now))
     connection.commit()
     return len(stale)
 
