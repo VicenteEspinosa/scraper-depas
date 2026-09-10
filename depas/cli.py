@@ -44,6 +44,7 @@ from depas.store import (
     due_a_deep_sweep,
     fill_gaps,
     forget_preference,
+    held_stage_locks,
     known_ids,
     mark_delisted,
     mark_notified,
@@ -53,6 +54,7 @@ from depas.store import (
     quiet_portals,
     refresh_commutes,
     refresh_zone_benchmarks,
+    release_stage_lock,
     remember_card,
     remember_sweep,
     remember_validators,
@@ -66,6 +68,7 @@ from depas.store import (
     subscribers,
     sweep_delisted,
     sync_lease_income,
+    take_stage_lock,
     validator_coverage,
 )
 from depas.telegram import (
@@ -563,6 +566,14 @@ def _watched_query(prefs: Preferences) -> Query:
     )
 
 
+class Busy(RuntimeError):
+    """Another process is already running this stage.
+
+    Not a failure: the work is being done, just not by us. So it must not stamp an error
+    on the stage's heartbeat, which is why it is raised before `_stage` starts recording.
+    """
+
+
 @contextmanager
 def _stage(name: str) -> Iterator[tuple[sqlite3.Connection, Fetcher, Preferences]]:
     """One stage of the scheduled work, stamped only if it ran the whole way through.
@@ -575,6 +586,14 @@ def _stage(name: str) -> Iterator[tuple[sqlite3.Connection, Fetcher, Preferences
     """
     fetcher = Fetcher()
     connection = connect()
+    # Before the try that records outcomes, and outside it: a stage that never started
+    # has neither completed nor failed, and saying either would be a lie the healthcheck
+    # reads. The lock heals itself after LOCK_STALE, so a process killed mid-run costs
+    # one window rather than the stage.
+    if not take_stage_lock(connection, name):
+        fetcher.close()
+        connection.close()
+        raise Busy(name)
     try:
         yield connection, fetcher, Preferences.load(connection)
         remember_validators(connection, fetcher.validators)
@@ -584,6 +603,7 @@ def _stage(name: str) -> Iterator[tuple[sqlite3.Connection, Fetcher, Preferences
         remember_watch(connection, f"{type(error).__name__}: {error}", name)
         raise
     finally:
+        release_stage_lock(connection, name)
         fetcher.close()
         connection.close()
 
@@ -613,19 +633,40 @@ def discover(args: argparse.Namespace) -> None:
 
 
 def enrich(args: argparse.Namespace) -> None:
-    """Read the detail pages that are due: the new ones first, then the re-reads."""
+    """Read the detail pages that are due: the new ones first, then the re-reads.
+
+    Rounds rather than one batch, while there is a backlog. The budget is there to be
+    polite to the portals and the polite delay is inside `Fetcher`, so this does ask
+    them for more per hour — but only while the queue is actually full, which is what a
+    standing higher budget cannot express: that one asks for the rate always.
+    """
     with _stage("enrich") as (connection, fetcher, prefs):
         # The ranked view prices per m2 straight from this, so cache it before reading it.
         stored_uf(connection, fetcher)
-        pending = pending_detail(
-            connection,
-            _budget(args.limit, prefs, "DEPAS_ENRICH_LIMIT"),
-            _budget(args.refresh_limit, prefs, "DEPAS_REFRESH_LIMIT"))
-        enriched = _enrich(connection, fetcher, pending)
-        print(f"enrich: {enriched} of {len(pending)} listings")
+        fresh = _budget(args.limit, prefs, "DEPAS_ENRICH_LIMIT")
+        refresh = _budget(args.refresh_limit, prefs, "DEPAS_REFRESH_LIMIT")
+        rounds = max(_budget(args.rounds, prefs, "DEPAS_ENRICH_ROUNDS"), 1)
+        for number in range(1, rounds + 1):
+            pending = pending_detail(connection, fresh, refresh)
+            enriched = _enrich(connection, fetcher, pending)
+            print(f"enrich: {enriched} of {len(pending)} listings"
+                  + (f" (vuelta {number} de {rounds})" if rounds > 1 else ""))
+            if number == rounds or not _still_behind(pending, fresh):
+                break
         print(f"from descriptions: {_infer_stored_descriptions(connection)} listings filled")
         urls, offered = validator_coverage(connection)
         print(f"http: {offered} of {urls} urls offer a cache validator")
+
+
+def _still_behind(pending: list[sqlite3.Row], fresh: int) -> bool:
+    """Whether the pages nobody has read yet filled their whole budget.
+
+    Measured on that half alone. The re-reads are the other half and there are usually
+    plenty of them due, so counting the batch as a whole would read as "behind" on every
+    pass and spend every round of every hour on work that was never urgent.
+    """
+    unread = sum(1 for row in pending if row["detail_fetched_at"] is None)
+    return fresh > 0 and unread >= fresh
 
 
 def route(args: argparse.Namespace) -> None:
@@ -661,7 +702,12 @@ def watch(args: argparse.Namespace) -> None:
     connection = connect()
     try:
         for stage in PASS_STAGES:
-            stage(args)
+            try:
+                stage(args)
+            except Busy as busy:
+                # Its own crontab entry is running it: skipping is the point, and the
+                # stages after it are still ours to run.
+                print(f"{busy}: ya lo está corriendo otro proceso, se salta")
         remember_watch(connection, None)
     except Exception as error:
         remember_watch(connection, f"{type(error).__name__}: {error}")
@@ -686,12 +732,19 @@ def healthcheck(args: argparse.Namespace) -> None:
             print(f"watch healthy: last completed {completed}")
             return
 
+        # A stage holding its lock right now is the difference between "no está
+        # corriendo" and "se quedó pegada corriendo", which is the first thing whoever
+        # reads this would go and check by hand.
+        held = {row["stage"]: row["taken_at"] for row in held_stage_locks(connection)}
         lines = []
         for stage, completed, error in stale:
             # Read on a phone, so the minute rather than the microsecond it carries.
             since = (f"la última terminó el {completed[:16].replace('T', ' ')} UTC"
                      if completed else "nunca ha terminado una")
             lines.append(f"• <b>{STAGE_LABEL.get(stage, stage)}</b>: {since}.")
+            if stage in held:
+                lines.append(f"  Hay una corriendo desde las "
+                             f"{held[stage][11:16]} UTC: puede estar colgada.")
             if error:
                 lines.append(f"  <code>{escape(error)}</code>")
         warning = "⚠️ <b>Hay etapas que no están corriendo</b>\n" + "\n".join(lines)
@@ -1016,7 +1069,8 @@ def backup(args: argparse.Namespace) -> None:
 
 # What every stage reads off its args. `watch` calls the stages directly, so its own
 # namespace has to carry the same names — None everywhere, meaning "use the setting".
-_STAGE_DEFAULTS = {"limit": None, "refresh_limit": None, "updates_limit": None}
+_STAGE_DEFAULTS = {"limit": None, "refresh_limit": None, "updates_limit": None,
+                   "rounds": None}
 
 
 def main() -> None:
@@ -1044,6 +1098,9 @@ def main() -> None:
     enricher = subparsers.add_parser("enrich", help="read the detail pages that are due")
     enricher.add_argument("--limit", type=int,
                           help="detail pages this run; default DEPAS_ENRICH_LIMIT")
+    enricher.add_argument("--rounds", type=int,
+                          help="times the read may repeat while the queue is still "
+                               "full; default DEPAS_ENRICH_ROUNDS")
     enricher.add_argument("--refresh-limit", type=int,
                           help="detail pages re-read; default DEPAS_REFRESH_LIMIT")
     enricher.set_defaults(func=enrich, **{**_STAGE_DEFAULTS, "limit": None})

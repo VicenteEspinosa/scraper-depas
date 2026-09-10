@@ -12,7 +12,18 @@
 
 # Discovery: sweep DEPAS_COMMUNES on all six portals at once, then delist whatever
 # no believable sweep has turned up. This is the one that must not stall.
-7 * * * * depas discover
+#
+# Three times an hour rather than one. It was the largest wait in the chain by far — a
+# listing published at :08 waited until :07 the next hour to be seen at all — and the
+# cutoff at DEPAS_SWEEP_QUIET_PAGES makes an incremental sweep cheap: a portal with
+# nothing new stops after two pages. It is still the only stage that costs the portals
+# real requests, which is why it goes to three and not to twelve.
+#
+# DEPAS_DELIST_AFTER moves with this. It counts believable sweeps, not hours, so
+# tripling the sweeps would have tripled how fast a listing is given up on — three
+# sweeps used to be three hours of patience and would have become one. Its default went
+# from 3 to 9 to keep the same wall clock.
+7,27,47 * * * * depas discover
 
 # Detail pages: the new ones first, then the re-reads. Every ten minutes, in small
 # batches, which spreads the requests instead of firing 60 at the top of the hour.

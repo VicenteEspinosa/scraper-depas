@@ -477,6 +477,43 @@ means splitting fetching from parsing across all six portals, which is its own c
 and one worth justifying on evidence rather than on the hope that these portals emit
 validators at all. `validator_coverage` is that evidence, gathered from production.
 
+## Spending the budget on the right rows
+
+Three things fell out of one question: why a card for a flat first seen three weeks ago
+arrives today. The queue explained it, and each of its parts wanted a different fix.
+
+**Reading in parallel raises the ceiling; it does not spend it.** The budget still caps
+what a run does, so the parallel read on its own changes nothing about throughput — what
+it changes is that the cap stopped being the ten minutes between runs, which is what made
+raising it from 60 to 250 affordable. Worth stating plainly, because the two look like the
+same improvement and only one of them is a decision about politeness.
+
+**Rounds are the adaptive version of a bigger budget.** Running again while the unread
+queue is still full is arithmetically identical to a limit three times larger: the polite
+delay lives inside `Fetcher`, so the requests per hour are the same either way. The
+difference is that it only asks for that rate while there is a backlog, where a standing
+limit asks for it always. That is the whole justification, and it is why the condition is
+measured on the unread half alone — there are always re-reads due, so counting the batch
+as a whole would read as "behind" every pass and spend every round of every hour on work
+nobody was waiting for.
+
+**Newest first is not a queue at all.** It is the right order — a flat published this
+morning is what somebody is waiting for — but every arrival goes in *front* of what is
+waiting, so an old row does not advance as time passes, it falls back. Draining faster
+shortens the window without closing it: if the inflow ever outruns the throughput for
+long enough, the oldest still never get read. A fifth of every unread batch is the floor
+under that, and it has to be a floor rather than a reserved slice: reserving slots that
+no old row claims shrinks the batch, and a batch that comes back short reads as having
+caught up, so a backlog would stop draining while it was still there. That one was found
+by simulating a flood rather than by reading the code.
+
+The lock is what makes all three safe together. A run may now outlast its window on
+purpose, and nothing stopped a second one starting — WAL and `busy_timeout` mean that is
+one process dying with «database is locked» rather than corruption, but it is a pass
+silently lost. `taken_at` is what keeps the cure from being worse than the disease: a lock
+nobody released would wedge the stage forever, so one older than the staleness limit is
+not a lock, and the failure mode is one skipped window instead of a stalled stage.
+
 ## The rate limit is per chat
 
 Telegram's limits are about a message a second to any one chat and twenty a minute to a

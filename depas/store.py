@@ -207,6 +207,46 @@ QUEUED = ("SELECT portal, external_id, url, detail_fetched_at, price, price_at_d
           f"FROM listings WHERE {ELIGIBLE_FOR_DETAIL}")
 
 
+# How much of the unread budget goes to the oldest rows rather than the newest. Newest
+# first is right — a listing published this morning is what somebody is waiting for — but
+# on its own it is not a queue at all: every arrival goes in *front* of what is waiting,
+# so an old row does not advance as time passes, it falls back. After a flood (a comuna
+# added, the budget raised, a portal read to the bottom for the first time) the oldest
+# rows could wait weeks, which is how a card for a flat first seen in July turns up in
+# September. This slice is the floor under that: whatever else happens, some of every
+# pass is spent on the rows that have waited longest.
+OLDEST_SHARE = 5  # a fifth
+
+
+def _unread(connection: sqlite3.Connection, fresh: int, now: str) -> list[sqlite3.Row]:
+    """The detail pages never read: mostly the newest, and a slice of the very oldest.
+
+    `detail_due_at` gates this half too, not just the re-reads. It defaults to the empty
+    string, which sorts before every timestamp, so a row nobody has touched is still due
+    now — the only rows it holds back here are the ones a failed read deferred, which
+    would otherwise take a slot every ten minutes for as long as they stay broken.
+    """
+    if fresh <= 0:
+        return []
+    query = (f"{QUEUED} AND detail_fetched_at IS NULL AND detail_due_at <= ? "
+             "ORDER BY first_seen %s LIMIT ?")
+    # A floor and not a carve-out: the oldest go in first, and then the newest fill the
+    # whole budget behind them. Asking the newest for only what the share left over would
+    # shrink the batch whenever fewer old rows are waiting than the share reserved —
+    # which is most of the time, and would spend a full budget on a partial one.
+    rows: dict[tuple[str, str], sqlite3.Row] = {}
+    for order, limit in (("ASC", fresh // OLDEST_SHARE), ("DESC", fresh)):
+        if limit <= 0:
+            continue
+        for row in connection.execute(query % order, (now, limit)):
+            # Keyed, so a small queue where the two ends meet comes back as one row each
+            # rather than as the same page fetched twice.
+            rows.setdefault((row["portal"], row["external_id"]), row)
+            if len(rows) == fresh:
+                return list(rows.values())
+    return list(rows.values())
+
+
 def pending_detail(connection: sqlite3.Connection, fresh: int,
                    refresh: int = 0) -> list[sqlite3.Row]:
     """The detail pages due: the ones never read first, then the re-reads.
@@ -217,15 +257,7 @@ def pending_detail(connection: sqlite3.Connection, fresh: int,
     only reason the pass exists.
     """
     now = datetime.now(UTC).isoformat()
-    # `detail_due_at` gates the unread half too, not just the re-reads. It defaults to
-    # the empty string, which sorts before every timestamp, so a row nobody has touched
-    # is still due now — the only rows this holds back are the ones a failed read
-    # deferred, which would otherwise take a slot every ten minutes forever.
-    unread = connection.execute(
-        f"{QUEUED} AND detail_fetched_at IS NULL AND detail_due_at <= ? "
-        "ORDER BY first_seen DESC LIMIT ?",
-        (now, fresh),
-    ).fetchall()
+    unread = _unread(connection, fresh, now)
     if refresh <= 0:
         return unread
     # A price that moved is read before one merely due: until it is, the listing is
@@ -1002,6 +1034,45 @@ def clear_notified(connection: sqlite3.Connection, hours: int,
     ).rowcount
     connection.commit()
     return cleared
+
+
+# ── one at a time ───────────────────────────────────────────────────────────────
+
+# How long a held lock is believed. Generous on purpose: it has to be longer than the
+# slowest legitimate run — a batch of 250 detail pages where several time out — because
+# the cost of being too short is the overlap the lock exists to prevent, while the cost
+# of being too long is one skipped pass ten minutes later.
+LOCK_STALE = timedelta(minutes=30)
+
+
+def take_stage_lock(connection: sqlite3.Connection, stage: str,
+                    stale: timedelta = LOCK_STALE) -> bool:
+    """Claim a stage for this process, or answer False because somebody else has it.
+
+    One statement, so two processes racing cannot both win: SQLite serialises the write,
+    and the conditional update means the second one changes no row and is told so.
+    """
+    now = datetime.now(UTC)
+    taken = connection.execute(
+        "INSERT INTO stage_locks (stage, taken_at) VALUES (?, ?) "
+        "ON CONFLICT(stage) DO UPDATE SET taken_at = excluded.taken_at "
+        " WHERE stage_locks.taken_at < ?",
+        (stage, now.isoformat(), (now - stale).isoformat()),
+    ).rowcount
+    connection.commit()
+    return bool(taken)
+
+
+def release_stage_lock(connection: sqlite3.Connection, stage: str) -> None:
+    """Let go, so the next run starts on time rather than waiting out the staleness."""
+    connection.execute("DELETE FROM stage_locks WHERE stage = ?", (stage,))
+    connection.commit()
+
+
+def held_stage_locks(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Which stages are held and since when, for `healthcheck` to look at."""
+    return connection.execute(
+        "SELECT stage, taken_at FROM stage_locks ORDER BY taken_at").fetchall()
 
 
 # The watch's own heartbeat, in `settings` beside the shortlist: what `healthcheck` reads.
