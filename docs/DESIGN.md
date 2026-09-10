@@ -609,9 +609,21 @@ being watched. A stalled enrichment is no longer hidden behind a scrape that kee
 succeeding. Each stage has its own patience too — discovery feeds everything downstream
 and gets four hours, routing is somebody else's server and gets a day.
 
-A *sub*-stage nobody runs is not stale, since splitting the pass up is opt-in and a box
-on one hourly `watch` runs none of them. `watch` itself is always checked, unstamped
-included: a deploy whose pass has never finished is the case the watchdog was built for.
+What the watchdog checks is those four, unstamped included: a deploy whose pass has
+never finished is the case it was built for, and a stage that has never once completed is
+the loudest form of that.
+
+`watch` is not among them, and the first version of this had that backwards. It checked
+`watch` always and skipped a stage that had never been stamped — which read as careful
+and was the opposite twice over. A box whose crontab drives the four stages separately
+runs no `watch` at all, so its stamp froze at the last single-entry pass and the admins
+were warned about "la pasada horaria" every four hours while all four stages were running
+on time; meanwhile the four stages, on a box where one had never completed, were the ones
+being skipped. Both halves came from treating `watch` as the real signal. It is not: it
+runs the same four stage functions, each of which stamps its own heartbeat on the way
+through, so the four stamps are written under either crontab and `watch`'s own stamp says
+nothing they have not. It is still written, as the record of how a single-entry pass
+ended, and no longer alerted on.
 
 The per-stage patience was declared and then not used: `--stale-hours` had a default of
 four, so every stage was held to four hours and `route`'s day never applied. The flag
@@ -683,9 +695,10 @@ nothing but the destination.
 
 ## Knowing the pass still runs
 
-`watch` stamps `watch_completed_at` in `settings` as its last act, and records what
-stopped it in `watch_error` on the way out. `healthcheck` warns the admins when that
-stamp is more than a few hours old.
+Each stage stamps `watch_completed_at:<stage>` in `settings` as its last act, and
+records what stopped it in `watch_error:<stage>` on the way out. `healthcheck` warns the
+admins when any of those stamps is more than that stage's patience old. `watch` keeps the
+unprefixed pair for the pass as a whole, which is a record rather than an alert.
 
 The stamp is written at the *end* on purpose. The 404 above got past every freshness
 signal further up — `last_seen` on listings was minutes old, the UF cache current, both

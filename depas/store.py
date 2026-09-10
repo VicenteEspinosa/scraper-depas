@@ -1075,20 +1075,22 @@ def held_stage_locks(connection: sqlite3.Connection) -> list[sqlite3.Row]:
         "SELECT stage, taken_at FROM stage_locks ORDER BY taken_at").fetchall()
 
 
-# The watch's own heartbeat, in `settings` beside the shortlist: what `healthcheck` reads.
-# A pass that dies mid-way still updates `last_seen`, so freshness there proves nothing.
+# The whole pass's own heartbeat, in `settings` beside the shortlist. Still written, so
+# the single-entry layout keeps a record of how the pass as a whole ended, but no longer
+# what the watchdog alerts on -- see `stale_stages`.
 WATCH_COMPLETED, WATCH_ERROR = "watch_completed_at", "watch_error"
 
-# The stages a pass is made of, each able to run on its own schedule. `watch` is all of
-# them in order and keeps the original two keys, so a box upgrading into this does not
-# read as having never completed a pass.
+# The stages a pass is made of, each on its own schedule and each stamping its own
+# heartbeat. `watch` is not one of them: it runs these four in order, and every one of
+# them stamps itself either way, so the four cover both crontab layouts and `watch`'s own
+# stamp says nothing they have not already said.
 WATCH = "watch"
-STAGES = (WATCH, "discover", "enrich", "route", "announce")
+STAGES = ("discover", "enrich", "route", "announce")
 
 # How long each may go without completing before the admins hear about it. Discovery is
 # the one that must not stall — everything downstream is fed by it — while routing is
 # somebody else's server and allowed to be slow.
-STALE_HOURS = {WATCH: 4, "discover": 4, "enrich": 6, "route": 24, "announce": 6}
+STALE_HOURS = {"discover": 4, "enrich": 6, "route": 24, "announce": 6}
 
 
 def _keys(stage: str) -> tuple[str, str]:
@@ -1125,17 +1127,14 @@ def stale_stages(connection: sqlite3.Connection, hours: int | None = None
                  ) -> list[tuple[str, str | None, str | None]]:
     """Every stage that has gone too long without completing, and what stopped it.
 
-    A *sub*-stage nobody runs is not stale: splitting the pass up is opt-in, so a box
-    still on one hourly `watch` must not be warned about four stages that never existed.
-    `watch` itself is always checked, unstamped included — a deploy whose pass has never
-    finished is the case this watchdog was built for.
+    Unstamped included: a stage that has never once completed is the loudest form of the
+    deploy-whose-pass-never-finished this was built for, and skipping it for want of a
+    stamp left the four stages unwatched on exactly the box that needed watching.
     Same isoformat the stamps were written with, so the comparison stays lexicographic.
     """
     stale = []
     for stage in STAGES:
         completed, error = stored_watch(connection, stage)
-        if stage != WATCH and completed is None and error is None:
-            continue
         cutoff = (datetime.now(UTC)
                   - timedelta(hours=hours if hours is not None else STALE_HOURS[stage]))
         if completed is None or completed < cutoff.isoformat():

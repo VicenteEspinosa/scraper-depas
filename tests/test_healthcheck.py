@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from depas.cli import healthcheck, watch
-from depas.store import connect, remember_watch, stored_watch
+from depas.store import STAGES, connect, remember_watch, stored_watch
 
 
 @pytest.fixture
@@ -24,15 +24,22 @@ def warned(monkeypatch):
     return sent
 
 
-def _completed_hours_ago(connection, hours: float) -> None:
-    connection.execute("INSERT INTO settings (key, value) VALUES ('watch_completed_at', ?)",
-                       ((datetime.now(UTC) - timedelta(hours=hours)).isoformat(),))
+def _stage_completed_hours_ago(connection, stage: str, hours: float) -> None:
+    remember_watch(connection, None, stage)
+    connection.execute("UPDATE settings SET value = ? WHERE key = ?",
+                       ((datetime.now(UTC) - timedelta(hours=hours)).isoformat(),
+                        f"watch_completed_at:{stage}"))
     connection.commit()
 
 
+def _every_stage_just_completed(connection) -> None:
+    for stage in STAGES:
+        _stage_completed_hours_ago(connection, stage, 0)
+
+
 def test_a_recent_pass_warns_nobody(connection, warned):
-    """The hourly pass completing is the whole signal: no message while it keeps completing."""
-    remember_watch(connection, None)
+    """The stages completing are the whole signal: no message while they keep completing."""
+    _every_stage_just_completed(connection)
 
     healthcheck(Namespace(stale_hours=4))
 
@@ -41,7 +48,8 @@ def test_a_recent_pass_warns_nobody(connection, warned):
 
 def test_a_stale_pass_warns_every_admin(connection, warned):
     """Four hours of no completed pass is a crash loop or a dead container, not a quiet market."""
-    _completed_hours_ago(connection, 5)
+    _every_stage_just_completed(connection)
+    _stage_completed_hours_ago(connection, "discover", 5)
 
     healthcheck(Namespace(stale_hours=4))
 
@@ -50,15 +58,16 @@ def test_a_stale_pass_warns_every_admin(connection, warned):
 
 def test_the_warning_carries_the_error_that_stopped_the_pass(connection, warned):
     """The admin reads this on a phone, so it says why rather than sending them to the logs."""
-    _completed_hours_ago(connection, 5)
-    remember_watch(connection, "HTTPError: HTTP Error 404: ")
+    _every_stage_just_completed(connection)
+    _stage_completed_hours_ago(connection, "discover", 5)
+    remember_watch(connection, "HTTPError: HTTP Error 404: ", "discover")
 
     healthcheck(Namespace(stale_hours=4))
 
     assert "HTTPError: HTTP Error 404" in warned[0][1]
 
 
-def test_a_watch_that_never_completed_warns_too(connection, warned):
+def test_a_pass_that_never_completed_warns_too(connection, warned):
     """A deploy whose pass has never finished is exactly what this is meant to catch."""
     healthcheck(Namespace(stale_hours=4))
 
@@ -82,17 +91,17 @@ def test_a_pass_that_dies_records_what_killed_it(connection):
     assert "ValueError: set DEPAS_COMMUNES" in stored_watch(connection)[1]
 
 
-def _stage_completed_hours_ago(connection, stage: str, hours: float) -> None:
-    remember_watch(connection, None, stage)
-    connection.execute("UPDATE settings SET value = ? WHERE key = ?",
-                       ((datetime.now(UTC) - timedelta(hours=hours)).isoformat(),
-                        f"watch_completed_at:{stage}"))
-    connection.commit()
+def test_the_whole_pass_stamps_the_stage_it_was_in(connection):
+    """Why the four stages are enough to watch: `watch` runs none the stages do not stamp."""
+    with pytest.raises(ValueError):  # no communes configured, so the pass dies in discover
+        watch(Namespace(limit=1, refresh_limit=1))
+
+    assert "ValueError: set DEPAS_COMMUNES" in stored_watch(connection, "discover")[1]
 
 
 def test_without_a_flag_each_stage_keeps_its_own_patience(connection, warned):
     """Routing is allowed a day; the flag's old default of four hours overrode that."""
-    remember_watch(connection, None)
+    _every_stage_just_completed(connection)
     _stage_completed_hours_ago(connection, "route", 10)
 
     healthcheck(Namespace(stale_hours=None))
@@ -101,7 +110,7 @@ def test_without_a_flag_each_stage_keeps_its_own_patience(connection, warned):
 
 
 def test_the_flag_still_applies_one_patience_to_every_stage(connection, warned):
-    remember_watch(connection, None)
+    _every_stage_just_completed(connection)
     _stage_completed_hours_ago(connection, "route", 10)
 
     healthcheck(Namespace(stale_hours=4))
