@@ -8,6 +8,7 @@ from depas import updates
 from depas.cli import _announce, _report_updates
 from depas.models import Listing
 from depas.store import (
+    DISLIKE,
     MIGRATIONS_DIR,
     Subscriber,
     add_subscriber,
@@ -18,6 +19,7 @@ from depas.store import (
     remember_card,
     save,
     save_detail,
+    set_interest,
 )
 from depas.updates import Change
 from tests.support import prefs
@@ -290,6 +292,29 @@ def test_the_notice_says_how_the_nota_moved(connection, telegram):
     _sync(connection)
 
     assert "La nota pasó de D 40" in telegram["replies"][0][1]
+
+
+def test_a_listing_somebody_turned_down_does_not_come_back_through_this(connection,
+                                                                        telegram):
+    """A /dislike is out for good, and a rebaja on it is that verdict being argued with."""
+    _announced(connection, 1_000_000)
+    set_interest(connection, "pi", "7", DISLIKE, user_id=None)
+    _later(connection, "price_history", "seen_at")
+    _later(connection, "subscriber_notifications", "notified_at")
+    save(connection, [_listing(920_000)])
+
+    assert _sync(connection) == 0
+    assert telegram["replies"] == []
+
+
+def test_a_note_too_long_for_telegram_is_cut_rather_than_lost(connection):
+    """A listing stored for months has a history to match, and the note has a limit."""
+    changes = [Change("orientation", "norte", f"sur {number}", "x") for number in range(400)]
+
+    note = updates.format_arrival_note("Aparece recién ahora.", changes)
+
+    assert len(note) <= updates.LIMIT
+    assert "cambios más" in note
 
 
 # ── case two: a card arriving late ──────────────────────────────────────────────
