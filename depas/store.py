@@ -304,14 +304,46 @@ def cutoff_safety(connection: sqlite3.Connection, quiet_pages: int) -> list[sqli
     ).fetchall()
 
 
-def mark_delisted(connection: sqlite3.Connection, portal: str, external_id: str) -> None:
+# What concluded a baja, as stored in `delisting_events.reason`. The portal answering 404
+# is evidence; the sweeps not turning a listing up is an absence being counted.
+GONE_404, GONE_UNSEEN = "404", "unseen"
+
+
+def mark_delisted(connection: sqlite3.Connection, portal: str, external_id: str,
+                  reason: str = GONE_404) -> None:
     """Take one listing out of the pool: rented, withdrawn, or answering 404."""
-    connection.execute(
+    now = datetime.now(UTC).isoformat()
+    delisted = connection.execute(
         "UPDATE listings SET delisted_at = ? "
         "WHERE portal = ? AND external_id = ? AND delisted_at IS NULL",
-        (datetime.now(UTC).isoformat(), portal, external_id),
-    )
+        (now, portal, external_id),
+    ).rowcount
+    # Only when this is the call that concluded it: a second 404 on a listing already
+    # down is the same baja, and recording it twice would report it twice.
+    if delisted:
+        _record_delisting(connection, [(portal, external_id)], "delisted", reason, now)
     connection.commit()
+
+
+def _record_delisting(connection: sqlite3.Connection, keys: list[tuple[str, str]],
+                      event: str, reason: str | None, happened_at: str) -> None:
+    """Append the history behind `delisted_at`, which is a state and says only the last one."""
+    connection.executemany(
+        "INSERT INTO delisting_events (portal, external_id, event, reason, happened_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [(portal, external_id, event, reason, happened_at) for portal, external_id in keys],
+    )
+
+
+def listing_events(connection: sqlite3.Connection, portal: str, external_id: str,
+                   since: str | None = None) -> list[sqlite3.Row]:
+    """Every baja and vuelta of one listing, oldest first, from `since` if one is given."""
+    where = "portal = ? AND external_id = ?" + ("" if since is None else " AND happened_at > ?")
+    parameters = (portal, external_id) if since is None else (portal, external_id, since)
+    return connection.execute(
+        f"SELECT event, reason, happened_at FROM delisting_events WHERE {where} "
+        "ORDER BY happened_at", parameters,
+    ).fetchall()
 
 
 def sweep_delisted(connection: sqlite3.Connection, after: int) -> int:
@@ -328,16 +360,25 @@ def sweep_delisted(connection: sqlite3.Connection, after: int) -> int:
     # asking for zero sweeps of evidence would delist the whole database.
     if after <= 0:
         return 0
-    delisted = connection.execute(
-        "UPDATE listings SET delisted_at = ? WHERE delisted_at IS NULL AND ("
-        "  SELECT COUNT(*) FROM scrape_runs"
-        "   WHERE scrape_runs.portal = listings.portal"
-        "     AND ok = 1 AND cards_seen > 0"
+    # Read before written rather than one UPDATE: the count was all the caller needed,
+    # but the history wants to know which listings, and this is the only place that does.
+    unseen = "\n".join((
+        "SELECT portal, external_id FROM listings WHERE delisted_at IS NULL AND (",
+        "  SELECT COUNT(*) FROM scrape_runs",
+        "   WHERE scrape_runs.portal = listings.portal",
+        "     AND ok = 1 AND cards_seen > 0",
         "     AND started_at > listings.last_seen) >= ?",
-        (datetime.now(UTC).isoformat(), after),
-    ).rowcount
+    ))
+    keys = [(row["portal"], row["external_id"])
+            for row in connection.execute(unseen, (after,))]
+    now = datetime.now(UTC).isoformat()
+    connection.executemany(
+        "UPDATE listings SET delisted_at = ? WHERE portal = ? AND external_id = ?",
+        [(now, portal, external_id) for portal, external_id in keys],
+    )
+    _record_delisting(connection, keys, "delisted", GONE_UNSEEN, now)
     connection.commit()
-    return delisted
+    return len(keys)
 
 
 def quiet_portals(connection: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -579,8 +620,12 @@ LOOKUP_CHUNK = 500
 
 
 def _stored_prices(connection: sqlite3.Connection,
-                   listings: Iterable[Listing]) -> dict[tuple[str, str], float]:
-    """What we last stored for each of these, read in one query per portal per chunk."""
+                   listings: Iterable[Listing]) -> dict[tuple[str, str], tuple[float, str | None]]:
+    """What we last stored for each of these: its price, and whether it was down.
+
+    One query per portal per chunk. The baja rides along because `save` clearing it is
+    the moment a listing comes back, and asking per listing would be a query each.
+    """
     by_portal: dict[str, list[str]] = defaultdict(list)
     for listing in listings:
         by_portal[listing.portal].append(listing.external_id)
@@ -590,9 +635,9 @@ def _stored_prices(connection: sqlite3.Connection,
         for start in range(0, len(external_ids), LOOKUP_CHUNK):
             chunk = external_ids[start:start + LOOKUP_CHUNK]
             stored.update(
-                ((portal, row["external_id"]), row["price"])
+                ((portal, row["external_id"]), (row["price"], row["delisted_at"]))
                 for row in connection.execute(
-                    "SELECT external_id, price FROM listings WHERE portal = ? "
+                    "SELECT external_id, price, delisted_at FROM listings WHERE portal = ? "
                     f"AND external_id IN ({', '.join('?' * len(chunk))})",
                     (portal, *chunk),
                 )
@@ -614,7 +659,7 @@ def save(connection: sqlite3.Connection, listings: Iterable[Listing]) -> dict[st
     stored = _stored_prices(connection, unique.values())
 
     for key, listing in unique.items():
-        previous = stored.get(key)
+        previous, was_down = stored.get(key, (None, None))
         values = [getattr(listing, name) for name in FIELDS]
         if key not in stored:
             connection.execute(
@@ -634,6 +679,10 @@ def save(connection: sqlite3.Connection, listings: Iterable[Listing]) -> dict[st
                 "WHERE portal = ? AND external_id = ?",
                 [*values, now, *key],
             )
+            # The sweep seeing it is the last word on whether it is published, so this
+            # is where a listing comes back — and the only place that can say so.
+            if was_down is not None:
+                _record_delisting(connection, [key], "relisted", None, now)
             moved = previous != listing.price
             counts["price_changed" if moved else "unchanged"] += 1
             if moved:
