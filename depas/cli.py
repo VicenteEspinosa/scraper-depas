@@ -500,7 +500,7 @@ def _announce_to(connection: sqlite3.Connection, prefs: Preferences,
         if grade.score >= minimum:
             _post_card(connection, prefs, destination, dict(row),
                        format_listing(dict(row), grade, prefs),
-                       note=_why_it_arrived(connection, dict(row)))
+                       note=_why_it_arrived(connection, prefs, dict(row)))
             posted += 1
         # The grade rides along, so a later notice can say the nota moved rather than
         # only restating today's.
@@ -508,14 +508,16 @@ def _announce_to(connection: sqlite3.Connection, prefs: Preferences,
     return posted
 
 
-def _why_it_arrived(connection: sqlite3.Connection, row: dict) -> str | None:
+def _why_it_arrived(connection: sqlite3.Connection, prefs: Preferences,
+                    row: dict) -> str | None:
     """The note under a card for a listing that has been stored a while, or None.
 
     A flat announced the hour it turned up explains itself. One first seen three weeks
     ago does not, and the reader's question — did my criteria change? — has an answer
     the database can give: what moved, or which queue it was waiting in.
     """
-    changes = updates.changes_for(connection, row["portal"], row["external_id"], None)
+    changes = updates.changes_for(connection, row["portal"], row["external_id"], None,
+                                  prefs.value("DEPAS_PRICE_CHANGE_MIN") or 0)
     reason = updates.why_now(connection, row, changes)
     return None if reason is None else updates.format_arrival_note(reason, changes)
 

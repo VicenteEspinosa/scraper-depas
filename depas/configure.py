@@ -81,6 +81,7 @@ LABELS = {
     "DEPAS_ALERTS_LIMIT": "📢 Tarjetas por pasada",
     "DEPAS_REFRESH_LIMIT": "🔄 Relecturas por pasada",
     "DEPAS_UPDATES_LIMIT": "✏️ Correcciones por pasada",
+    "DEPAS_PRICE_CHANGE_MIN": "💸🔻 Cambio de precio mín.",
     "DEPAS_DELIST_AFTER": "🗑️ Barridos para dar de baja",
     "DEPAS_SWEEP_QUIET_PAGES": "📄 Páginas vacías que cortan",
     "DEPAS_DEEP_SWEEP_HOURS": "🔍 Horas entre barridos profundos",
@@ -104,7 +105,7 @@ MENU: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("pace", "⏱️ Ritmo", ("DEPAS_ENRICH_LIMIT", "DEPAS_ENRICH_ROUNDS",
                           "DEPAS_REFRESH_LIMIT",
                           "DEPAS_COMMUTE_LIMIT", "DEPAS_ALERTS_LIMIT",
-                          "DEPAS_UPDATES_LIMIT",
+                          "DEPAS_UPDATES_LIMIT", "DEPAS_PRICE_CHANGE_MIN",
                           "DEPAS_DELIST_AFTER", "DEPAS_SWEEP_QUIET_PAGES",
                           "DEPAS_DEEP_SWEEP_HOURS")),
 )
@@ -124,8 +125,12 @@ KIND = {"_whole": NUMBER, "_clp": NUMBER, "_budget": NUMBER, "_number": WEIGHT,
 
 # Counted in pesos, so they step by an amount you would actually move a budget by.
 MONEY = frozenset({"DEPAS_COST_MAX", "DEPAS_COST_TARGET", "DEPAS_CURRENT_COST",
-                   "DEPAS_PARKING_INCOME", "DEPAS_STORAGE_INCOME"})
+                   "DEPAS_PARKING_INCOME", "DEPAS_STORAGE_INCOME",
+                   "DEPAS_PRICE_CHANGE_MIN"})
 MONEY_STEPS, PLAIN_STEPS = (25_000, 100_000), (1, 5)
+# Money too, but sized against the noise it filters rather than against a budget: a
+# +$25.000 button on a $10.000 threshold cannot reach any of the figures worth trying.
+STEPS = {"DEPAS_PRICE_CHANGE_MIN": (1_000, 5_000)}
 # What a bare number is counted in; pesos are absent, already rendered with their sign.
 UNITS = {"DEPAS_WALK_MAX": " min", "DEPAS_WALK_TARGET": " min",
          "DEPAS_COMMUTE_MAX": " min", "DEPAS_COMMUTE_TARGET": " min",
@@ -177,6 +182,8 @@ def kind(name: str) -> str:
 
 
 def steps(name: str) -> tuple[int, int]:
+    if name in STEPS:
+        return STEPS[name]
     return MONEY_STEPS if name in MONEY else PLAIN_STEPS
 
 

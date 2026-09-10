@@ -465,6 +465,25 @@ comuna's median — the neighbourhood changing, not the apartment. They stay in
 just are not news. That is a difference between a log and a notification, and the place
 to draw it is at the notification.
 
+The same distinction, in a different shape, is what `DEPAS_PRICE_CHANGE_MIN` draws. A
+flat published in UF has no CLP price of its own: the number the portal shows is today's
+UF times a constant, so it is rewritten every single day without a landlord touching
+anything, and a digest of «el arriendo subió de $635.567 a $635.694» four times over is
+the whole feature turned into noise. Converting back to UF before comparing would fix
+the pretty case and only that one — the portals also round, restate a gasto común to the
+peso, and quote in pesos flats that are really priced in UF — so the floor is put on the
+size of the move rather than on the currency it was written in.
+
+It **folds** rather than drops, and that is the part that matters. A hundred pesos a day
+dropped one at a time is fifteen thousand a reader never hears about, so an under-floor
+move is held and the next one is measured from where the last *told* figure was — not
+from the last one seen. When the arrears cross the floor they are reported as the single
+move they add up to, dated at the reading that crossed it. That works without any state
+of its own because the fold runs over the whole trail before `since` is applied: the
+baseline is recomputed from scratch on every pass, so the watermark moving for some
+other change cannot lose it. Nothing is stamped for a listing whose only movement was
+held, which is exactly right — it has not been told yet.
+
 ## Whether a conditional GET would pay
 
 `http_cache` records the `ETag` and `Last-Modified` each url offered — validators only,

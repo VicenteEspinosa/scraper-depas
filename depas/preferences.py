@@ -339,6 +339,15 @@ SETTINGS: tuple[Setting, ...] = (
             "tarjeta se edita, el hilo dice qué cambió y un solo mensaje los resume. Lo "
             "que no alcanza sale en la siguiente. En 0 no se avisa ningún cambio.",
             example="10", default="10"),
+    # Not a budget but a floor on what is worth saying, and it lives here because what
+    # it bounds is the same message DEPAS_UPDATES_LIMIT bounds.
+    Setting("DEPAS_PRICE_CHANGE_MIN", _clp,
+            "Cuánto tiene que moverse el arriendo o el gasto común para que se avise. "
+            "Un depto publicado en UF cambia de precio en pesos todos los días sin que "
+            "nadie lo haya tocado, y esos cien pesos llenan el resumen de ruido. Lo que "
+            "queda bajo el umbral no se descarta: se va sumando, y se cuenta entero "
+            "cuando el arrastre alcanza esta cifra. En 0 se avisa cualquier peso.",
+            example="10000", default="10000"),
     Setting("DEPAS_REFRESH_LIMIT", _budget,
             "Cuántas fichas ya leídas se releen por pasada, aparte de las nuevas. Una "
             "ficha se relee cuando el precio se movió o cuando le toca; sube esto si la "
