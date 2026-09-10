@@ -245,7 +245,6 @@ def test_an_edited_budget_changes_what_is_announced(connection, monkeypatch):
                                        {"chat": {"id": -100}, "message_id": 1})[1])
     monkeypatch.setattr("depas.cli.chat_type", lambda chat: "channel")
     monkeypatch.setattr("depas.cli.hides_comments", lambda chat: True)
-    monkeypatch.setattr("depas.cli.time.sleep", lambda _: None)
     set_preference(connection, "TELEGRAM_CHAT_ID", "-100")
     for index, price in enumerate((500_000, 900_000)):
         save(connection, [Listing(portal="pi", external_id=str(index), url=f"https://x/{index}",

@@ -156,7 +156,6 @@ def test_each_destination_is_told_once(connection, monkeypatch):
     posted = []
     monkeypatch.setattr("depas.cli._post_card",
                         lambda conn, p, dest, row, text: posted.append((dest, row["external_id"])))
-    monkeypatch.setattr("depas.cli.time.sleep", lambda seconds: None)
 
     _announce(connection, prefs(), limit=10)
 
@@ -173,7 +172,6 @@ def test_a_destination_that_refuses_does_not_cost_the_others(connection, monkeyp
     monkeypatch.setenv("DEPAS_GRADE_MIN", "0")
     add_subscriber(connection, CHANNEL, catch_up=True)
     add_subscriber(connection, "-2002", catch_up=True)
-    monkeypatch.setattr("depas.cli.time.sleep", lambda seconds: None)
     posted = []
 
     def refuses(conn, p, dest, row, text):
@@ -206,7 +204,6 @@ def test_a_new_chat_is_not_told_the_backlog(connection, monkeypatch):
     posted = []
     monkeypatch.setattr("depas.cli._post_card",
                         lambda conn, p, dest, row, text: posted.append(row["external_id"]))
-    monkeypatch.setattr("depas.cli.time.sleep", lambda seconds: None)
 
     written_off = add_subscriber(connection, CHANNEL)
 
@@ -222,7 +219,6 @@ def test_what_turns_up_after_subscribing_is_told(connection, monkeypatch):
     posted = []
     monkeypatch.setattr("depas.cli._post_card",
                         lambda conn, p, dest, row, text: posted.append(row["external_id"]))
-    monkeypatch.setattr("depas.cli.time.sleep", lambda seconds: None)
 
     save(connection, [Listing(portal="houm", external_id="fresh", url="https://x/f",
                               price=500_000, currency="CLP", price_clp=500_000.0,

@@ -36,7 +36,6 @@ def sent(monkeypatch):
     # A channel with a discussion group: the breakdown is the bot's to post into the
     # thread, once Telegram's copy of the card says where the thread is.
     monkeypatch.setattr("depas.cli.hides_comments", lambda chat: True)
-    monkeypatch.setattr("depas.cli.time.sleep", lambda _: None)  # no real rate-limit wait
     return posted
 
 

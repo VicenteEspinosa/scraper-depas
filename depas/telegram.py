@@ -1,4 +1,5 @@
 import json
+import time
 from collections.abc import Callable
 from datetime import date
 from typing import Any
@@ -30,22 +31,73 @@ def bot_id() -> int | None:
     return int(head) if head.isdigit() else None
 
 
+# How many times a call that tripped the flood control is worth retrying. Telegram says
+# how long to wait and the waits are seconds, not minutes, so a couple of tries is
+# plenty — and a third failure is a rate we are wrong about rather than a burst.
+FLOOD_ATTEMPTS = 3
+
+
 def call(method: str, **params: Any) -> Any:
-    """Invoke one Bot API method, raising with Telegram's own message on failure."""
-    response = requests.post(f"{API}/bot{bot_token()}/{method}", json=params, timeout=TIMEOUT)
-    try:
-        payload = response.json()
-    except ValueError:
-        # An outage answers with an HTML error page, which is a blip to survive rather
-        # than a JSONDecodeError nothing upstream expects.
-        raise RuntimeError(
-            f"telegram {method} answered HTTP {response.status_code} with no JSON") from None
-    if not payload.get("ok"):
-        # Telegram puts the actionable part in `parameters`: a migrated chat's new id.
-        detail = payload.get("parameters") or ""
-        raise RuntimeError(
-            f"telegram {method} failed: {payload.get('description')} {detail}".strip())
-    return payload["result"]
+    """Invoke one Bot API method, raising with Telegram's own message on failure.
+
+    A 429 is the exception: Telegram answers it with `retry_after`, so the wait is a
+    number it gave us rather than one we guessed, and honouring it is what lets the
+    pacing below aim at the limit instead of hiding well under it.
+    """
+    for attempt in range(FLOOD_ATTEMPTS):
+        response = requests.post(f"{API}/bot{bot_token()}/{method}", json=params,
+                                 timeout=TIMEOUT)
+        try:
+            payload = response.json()
+        except ValueError:
+            # An outage answers with an HTML error page, which is a blip to survive rather
+            # than a JSONDecodeError nothing upstream expects.
+            raise RuntimeError(
+                f"telegram {method} answered HTTP {response.status_code} with no JSON"
+            ) from None
+        if payload.get("ok"):
+            return payload["result"]
+        parameters = payload.get("parameters") or {}
+        wait = parameters.get("retry_after")
+        if wait is None or attempt == FLOOD_ATTEMPTS - 1:
+            # Telegram puts the actionable part in `parameters`: a migrated chat's new id.
+            raise RuntimeError(
+                f"telegram {method} failed: {payload.get('description')} "
+                f"{parameters or ''}".strip())
+        # A second over what it asked for: the limit is a window, and landing exactly on
+        # its edge is how a retry trips the same wait again.
+        time.sleep(float(wait) + 1)
+    raise RuntimeError(f"telegram {method} kept answering 429")  # unreachable
+
+
+# Telegram's own guidance, and the reason a card used to be followed by a fixed sleep:
+# about a message a second to one chat, and no more than twenty a minute to a group or a
+# channel. Both are PER CHAT, which a single global sleep cannot express — a card in the
+# channel and its comment in the linked discussion group are two chats and two budgets,
+# so making one wait for the other threw away two thirds of the allowance.
+PRIVATE_PACE_SECONDS = 1.0
+CROWDED_PACE_SECONDS = 3.0  # 20 a minute, which is the group and channel ceiling
+
+# When each chat was last posted to, on the monotonic clock so a clock adjustment cannot
+# turn a wait into a very long one. Per process, which is what a pass is.
+_LAST_SENT: dict[str, float] = {}
+
+
+def _pace(chat_id: str) -> None:
+    """Wait out this chat's own rate limit, counting from the last message sent to it.
+
+    Which limit applies is read off the id rather than asked: Telegram numbers a private
+    conversation with its user's own positive id and everything with more than one reader
+    negatively. Asking `getChat` would be a request per chat to learn what the id already
+    says — and would put one behind every plain card, which is the cost the verdict
+    keyboard is careful not to pay.
+    """
+    chat = str(chat_id)
+    interval = CROWDED_PACE_SECONDS if chat.startswith("-") else PRIVATE_PACE_SECONDS
+    waited = time.monotonic() - _LAST_SENT.get(chat, float("-inf"))
+    if waited < interval:
+        time.sleep(interval - waited)
+    _LAST_SENT[chat] = time.monotonic()
 
 
 _CHATS: dict[str, dict[str, Any]] = {}
@@ -437,6 +489,7 @@ def send_listing(chat_id: str, text: str, image_url: str | None = None,
                  thread_id: int | None = None,
                  buttons: dict[str, Any] | None = None) -> dict[str, Any]:
     """Post the card, as a photo when the listing has one and the caption fits."""
+    _pace(chat_id)
     # Only ever sent when replying inside a comment thread; Telegram rejects a null.
     thread = {"message_thread_id": thread_id} if thread_id else {}
     thread |= _markup(chat_id, buttons)
@@ -454,6 +507,7 @@ def send_listing(chat_id: str, text: str, image_url: str | None = None,
 def edit_listing(chat_id: str, message_id: int, text: str, is_photo: bool = False,
                  buttons: dict[str, Any] | None = None) -> None:
     """Re-render a card already posted, in place."""
+    _pace(chat_id)
     # An edit that omits reply_markup drops the keyboard, so the buttons ride every edit.
     markup = _markup(chat_id, buttons)
     # A photo card holds its text in the caption, a different method and a different field.
@@ -505,12 +559,14 @@ def pin(chat_id: str, message_id: int) -> None:
 
 def edit_text(chat_id: str, message_id: int, text: str) -> None:
     """Re-render a plain message in place: one that never carried a keyboard to preserve."""
+    _pace(chat_id)
     call("editMessageText", chat_id=chat_id, message_id=message_id, text=text,
          parse_mode="HTML", link_preview_options={"is_disabled": True})
 
 
 def ask_value(chat_id: str, text: str, thread_id: int | None = None) -> dict[str, Any]:
     """Ask for a value no keyboard can offer, as a reply the answer will quote back."""
+    _pace(chat_id)
     # Not `selective`: posted from a button press, it has nobody to target, so nobody replies.
     where: dict[str, Any] = {"message_thread_id": thread_id} if thread_id else {}
     return call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
@@ -521,6 +577,7 @@ def ask_value(chat_id: str, text: str, thread_id: int | None = None) -> dict[str
 def reply(chat_id: str, text: str, thread_id: int | None = None,
           reply_to: int | None = None) -> dict[str, Any]:
     """Answer one message: in its thread, and quoting the message that asked."""
+    _pace(chat_id)
     where: dict[str, Any] = {}
     if thread_id:
         where["message_thread_id"] = thread_id

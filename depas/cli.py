@@ -1,6 +1,5 @@
 import argparse
 import sqlite3
-import time
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -320,8 +319,6 @@ def _build_query(args: argparse.Namespace,
     return f"{TOP_QUERY}\nWHERE {' AND '.join(conditions)}", tuple(parameters)
 
 
-ALERT_DELAY_SECONDS = 3
-
 # Re-applied after enrichment, which overwrites card values and can disqualify a listing.
 ALERT_REQUIREMENTS = (
     ("DEPAS_COST_MAX", "net_monthly_clp <= ?"),
@@ -368,7 +365,6 @@ def _post_card(connection: sqlite3.Connection, prefs: Preferences, destination: 
     card = {"chat_id": str(sent["chat"]["id"]), "message_id": sent["message_id"],
             "portal": row["portal"], "external_id": row["external_id"]}
     post_breakdown(connection, card, prefs)
-    time.sleep(ALERT_DELAY_SECONDS)  # a second message spends a second slice of the rate limit
 
 
 def _announce_to(connection: sqlite3.Connection, prefs: Preferences,
@@ -401,7 +397,6 @@ def _announce_to(connection: sqlite3.Connection, prefs: Preferences,
             _post_card(connection, prefs, destination, dict(row),
                        format_listing(dict(row), grade, prefs))
             posted += 1
-            time.sleep(ALERT_DELAY_SECONDS)  # Telegram rate-limits how fast a chat is posted to
         mark_notified(connection, destination, row["portal"], row["external_id"])
     return posted
 
@@ -676,7 +671,6 @@ def redraw(args: argparse.Namespace) -> None:
         for card in cards:
             if refresh_card(connection, dict(card), prefs):
                 redrawn += 1
-            time.sleep(ALERT_DELAY_SECONDS)  # Telegram rate-limits edits like anything else
         print(f"redraw: {redrawn} of {len(cards)} cards re-rendered")
     finally:
         connection.close()
