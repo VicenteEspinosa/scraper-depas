@@ -33,6 +33,11 @@ def _completed(connection, stage: str, when: datetime) -> None:
     connection.commit()
 
 
+def _all_completed(connection, when: datetime) -> None:
+    for stage in STAGES:
+        _completed(connection, stage, when)
+
+
 # -- one heartbeat per stage ------------------------------------------------------
 
 
@@ -63,9 +68,11 @@ def test_a_stage_that_dies_records_what_killed_it(connection):
 # -- what the watchdog considers stale --------------------------------------------
 
 
-def test_a_stage_nobody_runs_is_not_stale(connection):
-    """Splitting the pass up is opt-in; a box on one hourly watch runs no sub-stages."""
-    _completed(connection, "watch", datetime.now(UTC))
+def test_the_whole_pass_stamp_is_not_something_to_alert_on(connection):
+    """A box whose crontab drives the stages runs no `watch`, so that stamp never moves."""
+    now = datetime.now(UTC)
+    _all_completed(connection, now)
+    _completed(connection, "watch", now - timedelta(days=30))
 
     assert stale_stages(connection) == []
 
@@ -73,22 +80,21 @@ def test_a_stage_nobody_runs_is_not_stale(connection):
 def test_a_stalled_stage_is_reported_even_while_the_others_are_fine(connection):
     """The failure this could never see: a scrape that keeps succeeding hides the rest."""
     now = datetime.now(UTC)
-    _completed(connection, "watch", now)
-    _completed(connection, "discover", now)
+    _all_completed(connection, now)
     _completed(connection, "enrich", now - timedelta(hours=9))
 
     assert [stage for stage, _, _ in stale_stages(connection)] == ["enrich"]
 
 
-def test_a_pass_that_never_completed_is_still_reported(connection):
-    """A fresh deploy whose pass has never finished is what this was built for."""
-    assert [stage for stage, _, _ in stale_stages(connection)] == ["watch"]
+def test_a_stage_that_never_completed_is_still_reported(connection):
+    """Skipping an unstamped stage left the four unwatched on a box that had never run."""
+    assert [stage for stage, _, _ in stale_stages(connection)] == list(STAGES)
 
 
 def test_each_stage_has_its_own_patience(connection):
     """Routing is somebody else's server; discovery feeds everything downstream."""
     now = datetime.now(UTC)
-    _completed(connection, "watch", now)
+    _all_completed(connection, now)
     _completed(connection, "discover", now - timedelta(hours=5))
     _completed(connection, "route", now - timedelta(hours=5))
 
@@ -97,8 +103,9 @@ def test_each_stage_has_its_own_patience(connection):
 
 def test_the_warning_names_every_stalled_stage(connection, warned):
     now = datetime.now(UTC)
-    _completed(connection, "watch", now)
+    _all_completed(connection, now)
     _completed(connection, "enrich", now - timedelta(hours=9))
+    _completed(connection, "route", now - timedelta(hours=25))
     remember_watch(connection, "HTTPError: 503", "route")
 
     healthcheck(Namespace(stale_hours=None))
@@ -109,7 +116,7 @@ def test_the_warning_names_every_stalled_stage(connection, warned):
 
 
 def test_a_healthy_box_warns_nobody(connection, warned):
-    _completed(connection, "watch", datetime.now(UTC))
+    _all_completed(connection, datetime.now(UTC))
 
     healthcheck(Namespace(stale_hours=None))
 
@@ -123,4 +130,4 @@ def test_the_pass_runs_every_stage_the_watchdog_knows(connection):
     """A stage added to one and not the other is a stage nobody notices stalling."""
     named = {stage.__name__ for stage in PASS_STAGES}
 
-    assert named == set(STAGES) - {"watch"}
+    assert named == set(STAGES)

@@ -67,10 +67,12 @@ Scraping is two-stage, because detail pages are expensive:
   benchmark. Only touches rows where `detail_fetched_at IS NULL`.
 - **`watch`** — both of the above in one scheduled pass, driven by the stored settings.
 - **`healthcheck`** — warns `DEPAS_ADMINS` by direct message when a stage has gone
-  too long without completing: four hours for `watch` and `discover`, six for `enrich`
-  and `announce`, a day for `route`. Runs every four hours from the same crontab,
-  because a `watch` that crashes every hour looks exactly like a quiet market from the
-  chat. `--stale-hours N` applies one patience to every stage instead.
+  too long without completing: four hours for `discover`, six for `enrich` and
+  `announce`, a day for `route`. Runs every four hours from the same crontab, because a
+  stage that crashes every hour looks exactly like a quiet market from the chat.
+  `--stale-hours N` applies one patience to every stage instead. It watches those four
+  and not `watch` itself, which stamps a heartbeat of its own but runs nothing they do
+  not stamp for themselves.
 - **`backup`** — copies the database through SQLite's backup API, **without** opening
   it the normal way, so the copy is of the schema as it stands and not as the current
   code would migrate it. Into `backups/` beside the file, keeping the last five. The

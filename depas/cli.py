@@ -35,6 +35,7 @@ from depas.preferences import (
 )
 from depas.store import (
     KEPT,
+    STAGES,
     Subscriber,
     add_subscriber,
     clear_notified,
@@ -718,7 +719,7 @@ def watch(args: argparse.Namespace) -> None:
         connection.close()
 
 
-STAGE_LABEL = {"watch": "la pasada horaria", "discover": "el barrido de portales",
+STAGE_LABEL = {"discover": "el barrido de portales",
                "enrich": "la lectura de fichas", "route": "el ruteo de viajes",
                "announce": "la publicación de alertas"}
 
@@ -730,8 +731,10 @@ def healthcheck(args: argparse.Namespace) -> None:
         prefs = Preferences.load(connection)
         stale = stale_stages(connection, args.stale_hours)
         if not stale:
-            completed, _ = stored_watch(connection)
-            print(f"watch healthy: last completed {completed}")
+            # Nothing stale means every stage is stamped, so the oldest of the four is
+            # the honest answer for how far behind the pass is as a whole.
+            oldest = min(stored_watch(connection, stage)[0] for stage in STAGES)
+            print(f"stages healthy: oldest completion {oldest}")
             return
 
         # A stage holding its lock right now is the difference between "no está
