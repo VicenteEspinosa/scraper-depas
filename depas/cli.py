@@ -10,8 +10,8 @@ from types import ModuleType
 
 from curl_cffi.requests.exceptions import HTTPError
 
-from depas import shortlist
-from depas.bot import post_breakdown, refresh_card
+from depas import shortlist, updates
+from depas.bot import post_arrival_note, post_breakdown, refresh_card
 from depas.bot import run as run_bot
 from depas.communes import SANTIAGO_PROVINCE, Commune
 from depas.commute import as_text as commute_text
@@ -45,6 +45,7 @@ from depas.store import (
     known_ids,
     mark_delisted,
     mark_notified,
+    park_arrival_note,
     pending_detail,
     pool_query,
     quiet_portals,
@@ -351,20 +352,25 @@ def _requirement_clauses(prefs: Preferences) -> tuple[list[str], list[object]]:
 
 
 def _post_card(connection: sqlite3.Connection, prefs: Preferences, destination: str,
-               row: dict, text: str) -> None:
+               row: dict, text: str, note: str | None = None) -> None:
     """Post one card, record it, and explain its grade underneath where nothing else will."""
     sent = send_listing(destination, text, row["image_url"],
                         buttons=verdict_buttons(row["id"], row["interest"]))
     # Recorded so a command left under the card finds its listing, and can redraw it.
     remember_card(connection, sent["chat"]["id"], sent["message_id"],
                   row["portal"], row["external_id"], "photo" in sent)
+    card = {"chat_id": str(sent["chat"]["id"]), "message_id": sent["message_id"],
+            "portal": row["portal"], "external_id": row["external_id"]}
+    if note:
+        # Parked either way: the thread is where this belongs, and in a channel with a
+        # discussion group there is not one yet — the bot posts it when the thread opens.
+        park_arrival_note(connection, card["chat_id"], card["message_id"], note)
     # Where the card gets a Comments thread the bot posts the breakdown into it instead,
     # under the keyboard, once Telegram's copy of the card tells it where the thread is.
     if hides_comments(destination):
         return
-    card = {"chat_id": str(sent["chat"]["id"]), "message_id": sent["message_id"],
-            "portal": row["portal"], "external_id": row["external_id"]}
     post_breakdown(connection, card, prefs)
+    post_arrival_note(connection, dict(card, arrival_note=note))
 
 
 def _announce_to(connection: sqlite3.Connection, prefs: Preferences,
@@ -395,10 +401,25 @@ def _announce_to(connection: sqlite3.Connection, prefs: Preferences,
         # Below the bar still gets stamped, so it is never reconsidered later.
         if grade.score >= minimum:
             _post_card(connection, prefs, destination, dict(row),
-                       format_listing(dict(row), grade, prefs))
+                       format_listing(dict(row), grade, prefs),
+                       note=_why_it_arrived(connection, dict(row)))
             posted += 1
-        mark_notified(connection, destination, row["portal"], row["external_id"])
+        # The grade rides along, so a later notice can say the nota moved rather than
+        # only restating today's.
+        mark_notified(connection, destination, row["portal"], row["external_id"], grade)
     return posted
+
+
+def _why_it_arrived(connection: sqlite3.Connection, row: dict) -> str | None:
+    """The note under a card for a listing that has been stored a while, or None.
+
+    A flat announced the hour it turned up explains itself. One first seen three weeks
+    ago does not, and the reader's question — did my criteria change? — has an answer
+    the database can give: what moved, or which queue it was waiting in.
+    """
+    changes = updates.changes_for(connection, row["portal"], row["external_id"], None)
+    reason = updates.why_now(connection, row, changes)
+    return None if reason is None else updates.format_arrival_note(reason, changes)
 
 
 def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) -> int:
@@ -415,6 +436,23 @@ def _announce(connection: sqlite3.Connection, prefs: Preferences, limit: int) ->
         except (RuntimeError, ValueError) as error:
             print(f"WARNING could not post to {subscriber.chat_id}: {error}")
     return posted
+
+
+def _report_updates(connection: sqlite3.Connection, prefs: Preferences,
+                    args: argparse.Namespace) -> int:
+    """Correct the cards every subscriber already has, each with its own budget.
+
+    Per subscriber for the same reason the alerts are: one destination refusing a card —
+    a bot removed from a channel — must not cost the others theirs.
+    """
+    limit = _budget(args.updates_limit, prefs, "DEPAS_UPDATES_LIMIT")
+    reported = 0
+    for subscriber in subscribers(connection, prefs):
+        try:
+            reported += updates.sync(connection, prefs, subscriber, limit)
+        except (RuntimeError, ValueError) as error:
+            print(f"WARNING could not report changes to {subscriber.chat_id}: {error}")
+    return reported
 
 
 def _watched_query(prefs: Preferences) -> Query:
@@ -510,6 +548,9 @@ def announce(args: argparse.Namespace) -> None:
     with _stage("announce") as (connection, _fetcher, prefs):
         alerts = _budget(args.limit, prefs, "DEPAS_ALERTS_LIMIT")
         print(f"alerts: {_announce(connection, prefs, alerts)} posted")
+        # After the new cards: a listing being announced for the first time this pass
+        # carries its own explanation, and must not also be reported as a correction.
+        print(f"cambios: {_report_updates(connection, prefs, args)} avisos corregidos")
         # Grades move with the pool, so the pinned list is restated once a pass.
         print(f"lista: {'actualizada' if shortlist.sync(connection, prefs) else 'sin cambios'}")
 
@@ -880,7 +921,7 @@ def backup(args: argparse.Namespace) -> None:
 
 # What every stage reads off its args. `watch` calls the stages directly, so its own
 # namespace has to carry the same names — None everywhere, meaning "use the setting".
-_STAGE_DEFAULTS = {"limit": None, "refresh_limit": None}
+_STAGE_DEFAULTS = {"limit": None, "refresh_limit": None, "updates_limit": None}
 
 
 def main() -> None:
@@ -920,13 +961,16 @@ def main() -> None:
     announcer = subparsers.add_parser("announce", help="post what is over the bar")
     announcer.add_argument("--limit", type=int,
                            help="cards posted this run; default DEPAS_ALERTS_LIMIT")
+    announcer.add_argument("--updates-limit", type=int,
+                           help="already-posted listings corrected this run; "
+                                "default DEPAS_UPDATES_LIMIT")
     announcer.set_defaults(func=announce, **{**_STAGE_DEFAULTS, "limit": None})
 
     watcher = subparsers.add_parser(
         "watch", help="scheduled pass: every stage in order")
     # No numbers here: the standing budgets live in the settings, where they can be moved
-    # without a redeploy. The stages read `limit` and `refresh_limit`, so a pass that
-    # overrides nothing passes None for both and each stage falls back to its setting.
+    # without a redeploy. The stages read those names off the namespace, so a pass that
+    # overrides nothing passes None for each and every stage falls back to its setting.
     watcher.set_defaults(func=watch, **_STAGE_DEFAULTS)
 
     checker = subparsers.add_parser(

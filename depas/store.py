@@ -707,13 +707,56 @@ def save(connection: sqlite3.Connection, listings: Iterable[Listing]) -> dict[st
 
 
 def mark_notified(connection: sqlite3.Connection, chat_id: object, portal: str,
-                  external_id: str) -> None:
-    """Record that this destination has had this listing; posting it again would repeat it."""
+                  external_id: str, grade: object = None) -> None:
+    """Record that this destination has had this listing; posting it again would repeat it.
+
+    The grade rides along so a later notice can say the nota moved. A listing stamped
+    without being posted — below the bar, and never reconsidered — has none to record.
+    """
     connection.execute(
-        "INSERT INTO subscriber_notifications (chat_id, portal, external_id, notified_at) "
-        "VALUES (?, ?, ?, ?) ON CONFLICT(chat_id, portal, external_id) DO NOTHING",
-        (str(chat_id), portal, external_id, datetime.now(UTC).isoformat()),
+        "INSERT INTO subscriber_notifications "
+        "(chat_id, portal, external_id, notified_at, grade_letter, grade_score) "
+        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(chat_id, portal, external_id) DO NOTHING",
+        (str(chat_id), portal, external_id, datetime.now(UTC).isoformat(),
+         getattr(grade, "letter", None), getattr(grade, "score", None)),
     )
+    connection.commit()
+
+
+def reported_through(connection: sqlite3.Connection, chat_id: object, portal: str,
+                     external_id: str) -> str | None:
+    """The newest change about this listing this chat has already been told about."""
+    row = connection.execute(
+        "SELECT through FROM update_notifications "
+        "WHERE chat_id = ? AND portal = ? AND external_id = ?",
+        (str(chat_id), portal, external_id),
+    ).fetchone()
+    return row["through"] if row else None
+
+
+def mark_updates_reported(connection: sqlite3.Connection, chat_id: object, portal: str,
+                          external_id: str, through: str, grade: object = None) -> None:
+    """Move this chat's watermark up to the newest change it has now been told about.
+
+    Written after the message rather than before: a pass that dies in between repeats a
+    notice next time, which beats a watermark for a message nobody ever received.
+    """
+    connection.execute(
+        "INSERT INTO update_notifications "
+        "(chat_id, portal, external_id, through, reported_at) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(chat_id, portal, external_id) DO UPDATE SET "
+        "through = excluded.through, reported_at = excluded.reported_at",
+        (str(chat_id), portal, external_id, through, datetime.now(UTC).isoformat()),
+    )
+    # The grade the reader now has in front of them, so the next notice compares against
+    # what they last saw rather than against the grade the card first went out with.
+    if grade is not None:
+        connection.execute(
+            "UPDATE subscriber_notifications SET grade_letter = ?, grade_score = ? "
+            "WHERE chat_id = ? AND portal = ? AND external_id = ?",
+            (getattr(grade, "letter", None), getattr(grade, "score", None),
+             str(chat_id), portal, external_id),
+        )
     connection.commit()
 
 
@@ -841,6 +884,26 @@ def remember_breakdown(connection: sqlite3.Connection, chat_id: object, message_
         "UPDATE card_messages SET detail_chat_id = ?, detail_message_id = ? "
         "WHERE chat_id = ? AND message_id = ?",
         (str(detail_chat_id), detail_message_id, str(chat_id), message_id),
+    )
+    connection.commit()
+
+
+def park_arrival_note(connection: sqlite3.Connection, chat_id: object, message_id: int,
+                      note: str) -> None:
+    """Hold the note explaining a card until the thread it belongs in is known."""
+    connection.execute(
+        "UPDATE card_messages SET arrival_note = ? WHERE chat_id = ? AND message_id = ?",
+        (note, str(chat_id), message_id),
+    )
+    connection.commit()
+
+
+def clear_arrival_note(connection: sqlite3.Connection, chat_id: object,
+                       message_id: int) -> None:
+    """Forget a note now posted: it is one message, not a surface that gets re-rendered."""
+    connection.execute(
+        "UPDATE card_messages SET arrival_note = NULL "
+        "WHERE chat_id = ? AND message_id = ?", (str(chat_id), message_id),
     )
     connection.commit()
 

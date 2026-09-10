@@ -18,6 +18,7 @@ from depas.store import (
     Subscriber,
     card_for_message,
     card_for_thread,
+    clear_arrival_note,
     connect,
     link_thread,
     remember_breakdown,
@@ -176,6 +177,27 @@ def _offer_buttons(connection: sqlite3.Connection, card_chat: object, card_messa
         print(f"could not post the buttons in thread {forward['message_id']}: {error}")
     # After the keyboard, so the thread opens on the verdict and explains itself below it.
     post_breakdown(connection, dict(card), prefs)
+    post_arrival_note(connection, dict(card))
+
+
+def post_arrival_note(connection: sqlite3.Connection, card: dict) -> bool:
+    """Post the note the pass parked on this card, now that there is a thread for it.
+
+    Why a card for a flat first seen three weeks ago is arriving today is a question the
+    reader will ask, and the answer belongs under the card rather than in the feed.
+    """
+    note = card.get("arrival_note")
+    if not note:
+        return False
+    chat, anchor = card_anchor(card)
+    try:
+        reply(chat, note, reply_to=anchor)
+    except RuntimeError as error:
+        # Kept rather than cleared: the next thing that opens this thread can try again.
+        print(f"could not post why card {card['message_id']} arrived: {error}")
+        return False
+    clear_arrival_note(connection, card["chat_id"], card["message_id"])
+    return True
 
 
 def _from_card_text(connection: sqlite3.Connection, text: str) -> dict | None:
@@ -248,8 +270,8 @@ def _card_subscriber(connection: sqlite3.Connection, card: dict) -> Subscriber:
 DISCARDED_BREAKDOWN = "🚫 descartado"
 
 
-def _breakdown_anchor(card: dict) -> tuple[str, int]:
-    """Where a breakdown hangs: the card's Comments thread, or the card itself."""
+def card_anchor(card: dict) -> tuple[str, int]:
+    """Where a message about a card hangs: its Comments thread, or the card itself."""
     # The same anchor the verdict keyboard uses, so the two always sit together.
     if card.get("thread_chat_id") and card.get("thread_id"):
         return str(card["thread_chat_id"]), int(card["thread_id"])
@@ -283,7 +305,7 @@ def post_breakdown(connection: sqlite3.Connection, card: dict, prefs: Preference
     row = _ranked(connection, card)
     if row is None:
         return False
-    chat, anchor = _breakdown_anchor(card)
+    chat, anchor = card_anchor(card)
     try:
         sent = reply(chat, _breakdown_text(row, prefs), reply_to=anchor)
     except RuntimeError as error:
