@@ -313,7 +313,6 @@ COMPONENT_LABELS = {
 UNSCORED = "el aviso no lo dice, o no lo has configurado"
 BAR_CELLS = 10
 FULL_CELL, EMPTY_CELL = "█", "·"
-WEAKEST_MARK = "← lo más flojo"
 
 
 def _bar(score: int) -> str:
@@ -329,14 +328,12 @@ def format_breakdown(grade: Any, prefs: Preferences) -> str:
     width = max((len(COMPONENT_LABELS[name]) for name, _ in scored), default=0)
 
     rows = []
-    for index, (name, score) in enumerate(scored):
+    for name, score in scored:
         weight = weights.get(name, 1)
         # A weight of 1 is the default and says nothing; anything else explains the grade.
         heavier = f" ×{weight:g}" if weight != 1 else ""
-        # Only worth pointing at when there is something above it to be flojo against.
-        weakest = f"  {WEAKEST_MARK}" if index and index == len(scored) - 1 else ""
         label = COMPONENT_LABELS[name].ljust(width)
-        rows.append(f"{label}  {_bar(score)} {score:>3}{heavier}{weakest}")
+        rows.append(f"{label}  {_bar(score)} {score:>3}{heavier}")
 
     total = len(grade.parts) + len(grade.missing)
     table = escape("\n".join(rows))

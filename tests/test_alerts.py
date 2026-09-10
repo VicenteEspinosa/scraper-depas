@@ -87,7 +87,7 @@ def test_the_breakdown_names_every_component_it_could_score(connection, monkeypa
     assert f"{grade.letter} {grade.score}" in breakdown
 
 
-def test_the_breakdown_marks_the_weakest_component_last(connection, monkeypatch):
+def test_the_breakdown_puts_the_weakest_component_last(connection, monkeypatch):
     """Sorted worst-last, so the row worth acting on is the one the eye stops at."""
     from depas.grade import Scale
     monkeypatch.setenv("DEPAS_COST_TARGET", "400000")  # badly missed, unlike the walk
@@ -96,8 +96,8 @@ def test_the_breakdown_marks_the_weakest_component_last(connection, monkeypatch)
 
     breakdown = format_breakdown(Scale(prefs()).grade(BREAKDOWN_ROW), prefs())
 
-    marked = [line for line in breakdown.splitlines() if "← lo más flojo" in line]
-    assert len(marked) == 1 and marked[0].startswith("costo")
+    table = breakdown.split("<pre>")[1].split("</pre>")[0]
+    assert table.splitlines()[-1].startswith("costo")
 
 
 def test_the_breakdown_says_what_went_unscored(connection, monkeypatch):
