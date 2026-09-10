@@ -129,6 +129,10 @@ a channel, or as a reply to it in a plain group:
 | 🚫 Descartar | `/dislike` | Marks it out. The card gains a 🚫, loses everything below its price, and the listing leaves the pool: never announced again and gone from `show`. Not even `resend` brings it back. |
 | ↩️ deshacer | — | Undoes whichever verdict was given: the listing goes back to unrated and the card is redrawn whole. |
 
+A card is also cut down without anybody pressing anything, when the flat comes off the
+market: it gains a ⚫ and says «ya no está publicado». See [when a listing comes off the
+market](#when-a-listing-comes-off-the-market).
+
 A verdict is changed by undoing it and giving the other one — the card only ever
 shows the buttons that make sense for the state it is in.
 
@@ -527,6 +531,14 @@ One place it does **not** drop out of is the pinned ⭐ list, where it stays mar
 está» instead. A flat you starred and then lost is something you want told, not
 disappeared: removing it silently answers "what happened to that one?" by losing the
 question.
+
+Its card is not disappeared either. The card already posted is edited in place: it gains
+a ⚫, keeps the header, the title, the 🏠 line, the price and the link, says «ya no está
+publicado», and drops everything that was only there to decide with — the same shape a
+🚫 Descartar leaves behind, for the same reason. The breakdown under it collapses to one
+line too. The link stays because a baja is a claim, and the aviso is where you check it.
+A sweep that finds the listing again clears `delisted_at`, and the next redraw brings the
+whole card back.
 
 Being wrong is cheap in both directions. A sweep that finds the listing again clears the
 mark unconditionally, so a portal outage or a comuna you removed and later added back
