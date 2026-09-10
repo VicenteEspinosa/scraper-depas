@@ -1,10 +1,11 @@
 import argparse
 import sqlite3
+from collections import defaultdict
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 
@@ -39,6 +40,7 @@ from depas.store import (
     clear_notified,
     connect,
     cutoff_safety,
+    defer_detail,
     due_a_deep_sweep,
     fill_gaps,
     forget_preference,
@@ -266,19 +268,43 @@ def _infer_stored_descriptions(connection: sqlite3.Connection) -> int:
     return filled
 
 
-def _enrich_one(connection: sqlite3.Connection, fetcher: Fetcher, row: sqlite3.Row) -> bool:
-    """Fetch one detail page, falling back to a computed walk when the portal omits one."""
+@dataclass(slots=True)
+class Read:
+    """One detail page as it came back, before anything has been written.
+
+    Three outcomes and not two: a page that is gone, one that was read, and one that
+    failed. The third used to be an exception out of the whole stage — see `_enrich`.
+    """
+
+    portal: str
+    external_id: str
+    url: str
+    detail: dict[str, object] | None = None
+    gone: bool = False
+    error: str | None = None
+
+
+def _read_detail(portal: ModuleType, fetcher: Fetcher, row: sqlite3.Row) -> Read:
+    """Fetch and parse one detail page, falling back to a computed walk when omitted.
+
+    Touches no database: this runs in a worker, and SQLite keeps its single writer.
+    """
+    where = Read(row["portal"], row["external_id"], row["url"])
     try:
-        detail = PORTALS[row["portal"]].fetch_detail(fetcher, row["url"])
+        detail = portal.fetch_detail(fetcher, row["url"])
     except HTTPError as error:
-        if error.response.status_code != 404:  # anything else is the portal, not this listing
-            raise
+        if error.response.status_code != 404:
+            # The portal, not this listing — but one listing's portal having a bad
+            # minute is not a reason to read nothing else. See `_enrich`.
+            return replace(where, error=f"HTTP {error.response.status_code}")
         # The strongest delisting signal there is: the portal itself says the page is
         # gone. Before `delisted_at` existed, leaving the row unenriched was the only
         # way to keep it out of the pool — which did nothing for a row already in it.
-        mark_delisted(connection, row["portal"], row["external_id"])
-        print(f"gone: {row['url']}")
-        return False
+        return replace(where, gone=True)
+    except Exception as error:
+        # A parser meeting a page shaped in a way it has never seen is the same kind of
+        # problem as a 500, and used to be the worse one: it was not caught at all.
+        return replace(where, error=f"{type(error).__name__}: {error}")
     description = detail.get("description")
     if description:
         # The portal's own spec table always wins; prose only fills what it left empty.
@@ -287,8 +313,77 @@ def _enrich_one(connection: sqlite3.Connection, fetcher: Fetcher, row: sqlite3.R
         station, metres, minutes = nearest_station(detail["lat"], detail["lon"])
         detail |= {"nearest_station": station, "station_distance_m": metres,
                    "walk_minutes": minutes, "walk_source": "computed"}
-    save_detail(connection, row["portal"], row["external_id"], detail)
-    return True
+    return replace(where, detail=detail)
+
+
+def _read_portal(portal: ModuleType,
+                 rows: list[sqlite3.Row]) -> tuple[list[Read], dict[str, object]]:
+    """Read one portal's share of the queue, in this thread, touching no database.
+
+    Its own `Fetcher`, so the polite delay is counted per portal rather than across all
+    six: that is the whole point, and it is why no host sees more requests per second
+    than it did when this was one queue. The validators come back with the pages so the
+    coverage `enrich` prints still counts the detail pages, which are most of it.
+    """
+    fetcher = Fetcher()
+    try:
+        return [_read_detail(portal, fetcher, row) for row in rows], fetcher.validators
+    finally:
+        fetcher.close()
+
+
+# How long a listing whose page failed waits before its next try. Fixed rather than a
+# backoff: the failures worth spacing out are the permanent ones — a 403 on one url, a
+# page the parser cannot read — and an hour already turns six wasted slots into one.
+RETRY_AFTER_FAILURE = timedelta(hours=1)
+
+
+def _enrich(connection: sqlite3.Connection, fetcher: Fetcher,
+            pending: list[sqlite3.Row]) -> int:
+    """Read every pending detail page, six portals at once, and write what came back.
+
+    The queue was one file across six different hosts, so a page from Portal
+    Inmobiliario waited behind one from Houm — and the delay that made that slow is
+    there for the *host*. One worker per portal spends the same politeness per host and
+    finishes in the time the busiest portal takes rather than the sum of all six.
+
+    And one listing can no longer take the stage down with it. It used to: any status
+    but 404 was re-raised, so a page answering 403 for good aborted the pass at the same
+    point every time and everything older than it in the queue was never read at all.
+    """
+    by_portal: dict[str, list[sqlite3.Row]] = defaultdict(list)
+    for row in pending:
+        by_portal[row["portal"]].append(row)
+    if not by_portal:
+        return 0
+
+    with ThreadPoolExecutor(max_workers=len(by_portal)) as pool:
+        answers = pool.map(lambda name: _read_portal(PORTALS[name], by_portal[name]),
+                           list(by_portal))
+        results = []
+        for read, validators in answers:
+            results.extend(read)
+            # Merged into the stage's own fetcher, which is what `_stage` persists.
+            fetcher.validators.update(validators)
+
+    enriched, failed = 0, []
+    for result in results:
+        if result.gone:
+            mark_delisted(connection, result.portal, result.external_id)
+            print(f"gone: {result.url}")
+        elif result.detail is not None:
+            save_detail(connection, result.portal, result.external_id, result.detail)
+            enriched += 1
+        else:
+            failed.append(result)
+            print(f"WARNING could not read {result.url}: {result.error}")
+            defer_detail(connection, result.portal, result.external_id,
+                         RETRY_AFTER_FAILURE)
+    # One listing failing is that listing's problem; every one of them failing is not,
+    # and a stage that reports success on it would hide a portal that moved its markup.
+    if failed and enriched == 0 and not any(one.gone for one in results):
+        raise RuntimeError(f"every detail page failed ({len(failed)} of them)")
+    return enriched
 
 
 FILTERS = (
@@ -526,7 +621,7 @@ def enrich(args: argparse.Namespace) -> None:
             connection,
             _budget(args.limit, prefs, "DEPAS_ENRICH_LIMIT"),
             _budget(args.refresh_limit, prefs, "DEPAS_REFRESH_LIMIT"))
-        enriched = sum(_enrich_one(connection, fetcher, row) for row in pending)
+        enriched = _enrich(connection, fetcher, pending)
         print(f"enrich: {enriched} of {len(pending)} listings")
         print(f"from descriptions: {_infer_stored_descriptions(connection)} listings filled")
         urls, offered = validator_coverage(connection)
