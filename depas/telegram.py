@@ -153,6 +153,8 @@ FLAWLESS_BANNER = "💎💎💎💎💎💎💎💎"
 TEST_MARK = "🧪"
 # The verdict given from the chat, so a scroll through the channel shows what is judged.
 INTEREST_MARK = {1: "⭐", -1: "🚫"}
+# Off the market. The card keeps its link: it is how you check the baja for yourself.
+GONE_MARK, GONE_NOTE = "⚫", "⚫ <i>ya no está publicado</i>"
 AMENITY_LABELS = (
     ("has_elevator", "ascensor"), ("has_concierge", "conserjería"),
     ("has_pool", "piscina"), ("has_gym", "gimnasio"), ("has_heating", "calefacción"),
@@ -216,8 +218,10 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
     emoji = GRADE_EMOJI.get(grade.letter, "⚪")
     marks = [PARTIAL_MARK if grade.missing else COMPLETE_MARK,
              MEETS_TARGETS_MARK if grade.meets_targets else None]
-    prefix = "".join(f"{mark} " for mark in (TEST_MARK if is_test else None,
-                                             INTEREST_MARK.get(row.get("interest"))) if mark)
+    prefix = "".join(f"{mark} " for mark in (
+        TEST_MARK if is_test else None,
+        GONE_MARK if row.get("delisted_at") else None,
+        INTEREST_MARK.get(row.get("interest"))) if mark)
     commune = (row.get("commune") or "").replace("-", " ").title()
     header = [f"{prefix}{emoji} <b>{grade.letter} {grade.score}</b> "
               + " ".join(mark for mark in marks if mark)]
@@ -241,6 +245,11 @@ def format_listing(row: dict[str, Any], grade: Any, prefs: Preferences,
     lines.append(f"💰 <b>{clp(row.get('net_monthly_clp'))}</b> neto al mes")
 
     link = f'\n<a href="{escape(row["url"])}">Ver aviso →</a>'
+    # A listing off the market is not a candidate any more, so the card that was there to
+    # decide with is cut down the way a discarded one is. A vuelta redraws it whole again.
+    if row.get("delisted_at"):
+        lines += [GONE_NOTE, link]
+        return "\n".join(lines)
     # A discarded listing keeps only what says which one it was; the decision is made.
     if row.get("interest") == -1:
         lines.append(link)

@@ -376,6 +376,16 @@ own, which is the one signal that needs no counting: the portal is saying the pa
 gone. That is also why the 404 branch changed — leaving the row unenriched used to be the
 only way to keep it out of the pool, which did nothing for a row already in it.
 
+The card in the chat is the other thing `delisted_at` was missing. A card is the state
+of a flat as of the moment it was posted, and a rented one sitting there in full — grade,
+UF/m², walk to the metro, amenities — is the chat asserting something false about the only
+question that matters. So a baja redraws it the way a 🚫 does: what identifies the listing
+stays, what was there to choose between candidates goes, and a ⚫ plus «ya no está
+publicado» says which of the two happened. The link is deliberately kept. A baja is
+inferred from an absence and is sometimes wrong, so the reader is left holding the one
+thing that settles it. Nothing about the reverse needed writing: the short card is a
+branch on `delisted_at`, and the sweep that clears it makes the next redraw whole again.
+
 `scrape_runs` pays for itself twice. `quiet_portals` compares a portal's latest sweep
 against its best ever and warns when it has gone from plenty to zero, which is the
 failure the healthcheck could never see: `_parse_card` returning None for every card
