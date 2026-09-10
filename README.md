@@ -486,6 +486,7 @@ whatever was edited from the chat since.
 | `DEPAS_REFRESH_LIMIT` | Detail pages **re-read** per pass, on top of the new ones. A page is re-read when the price moved since it was read, or when its own backoff comes due; the two budgets are separate so a listing nobody has read yet never waits behind a re-read. Default 20, `0` never re-reads. |
 | `DEPAS_DELIST_AFTER` | How many believable sweeps of a portal must fail to turn a listing up before it is marked gone. A sweep counts only if it finished *and* saw listings, so a portal that is down or whose markup moved delists nobody. Default 3. `0` never delists — and it has to be special-cased, since "at least zero sweeps" is true of every row. |
 | `DEPAS_ENRICH_LIMIT`, `DEPAS_COMMUTE_LIMIT`, `DEPAS_ALERTS_LIMIT` | How much work one `watch` pass may do: detail pages fetched, listings routed, cards posted. Defaults 60, 40 and 10 — the numbers the command-line flags used to hardcode. They belong in the table rather than in the crontab because the right figure moves with how many comunas you watch, and moving it should not need a redeploy. `0` switches a stage off. The flags still exist and override the setting for one run. |
+| `DEPAS_UPDATES_LIMIT` | Listings **already posted** that get corrected per pass when they change: the card edited, its thread told what moved, and one digest naming all of them. Default 10, `0` reports no changes at all. What the budget pushes out is not stamped, so it goes out next pass. |
 | `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread, which is also where `/like` and `/dislike` are read from; a group takes the cards but leaves them undiscussable, so verdicts have to be replies. Switching between the two is only this value. |
 
 ## Not re-reading pages that hold nothing new
@@ -553,6 +554,51 @@ is the history of one aviso. An entrega date that slips three times means the fl
 been sitting unrented for months, and a field that used to be published and now is not
 is what a broken parser looks like from the inside.
 
+## Being told what changed
+
+A card used to be a one-off: posted once and left there, saying for good whatever the
+rent was that day. So a card aged silently, and a flat that got rented sat in the chat
+looking available. Every pass now says what moved, in one of two ways.
+
+**A card you already have** gets three things. The card itself is edited in place with
+today's figures and today's grade; its Comments thread gets the diff; and one message per
+pass — not one per listing — names every aviso that moved, with a link back to each card:
+
+```
+🔄 Cambió lo que ya te mandé · 3 avisos · 10/09 14:20
+
+🟢 A 88 · era B 79 · Nunoa · $920.000
+    tarjeta · aviso · [713]
+    · El arriendo bajó de $1.050.000 a $920.000
+    · El gasto común subió de $80.000 a $95.000
+
+⚫ ya no está · Providencia · $890.000
+    tarjeta · aviso · [688]
+    · Se dio de baja: el portal ya no publica su ficha
+```
+
+**A card arriving for the first time** carries, in its thread, why it is arriving now —
+but only when the listing has been stored more than a day, since a flat announced the
+hour it turned up explains itself. The answer is read from the same history, and it is
+usually not the one you would guess: announcing is gated on requirements a listing can
+cross on its own, so a rebaja or a gasto común finally published is a likelier reason
+than anything you changed. When nothing about the listing moved, the note says the wait
+was ours — the detail queue is newest-first, so a flat can sit unenriched for weeks
+behind the ones that turned up after it — or that it came back after being delisted.
+
+What counts as a change is everything `detail_changes` records except three fields that
+move by mechanics rather than by the flat: `published_days_ago` and `published_label`
+shift on every re-read through the passing of time alone, and `zone_price_per_m2_uf` is
+the comuna's median, which is the neighbourhood changing and not the apartment. A baja
+and a vuelta count too, and are recorded in `delisting_events` — `delisted_at` holds a
+state and says only the last one, so until now a listing could leave the pool and come
+back with nothing anywhere saying it had happened.
+
+Two budgets bound it. `DEPAS_UPDATES_LIMIT` caps the listings corrected per pass, because
+two hundred moved prices is two hundred edits and ten minutes of channel; and the digest
+is capped separately at Telegram's 4096 characters, which it rejects a message for rather
+than trimming. Whatever either one pushes out is not stamped, so it goes out next pass.
+
 ## More than one reader
 
 Cards go to **subscribers**, and a subscriber is a place rather than a person: a private
@@ -613,7 +659,11 @@ of waiting for the next whole pass.
 
 The six portals are swept in parallel because they are six different hosts; each worker
 keeps the same polite delay, so no single portal sees more requests per second than
-before. And one portal being down no longer costs you the other five's alerts: the
+before. Posting is paced the same way: Telegram's limit is per chat — twenty messages a
+minute to a group or channel, about one a second to a private conversation — so a card in
+the channel and its thread comment in the linked group no longer wait for each other, and
+a 429 is waited out for exactly as long as Telegram asks rather than costing the chat the
+rest of its pass. And one portal being down no longer costs you the other five's alerts: the
 failure is recorded and the pass carries on. All six failing still fails the pass.
 
 **Each stage keeps its own heartbeat**, and `depas healthcheck` warns about any that has

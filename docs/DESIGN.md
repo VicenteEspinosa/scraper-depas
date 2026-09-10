@@ -421,6 +421,50 @@ What this makes visible for the first time: an entrega date that slips three tim
 the aviso has been unrented for months, and a column that used to be filled and now is
 not is what a broken parser looks like from the inside.
 
+## A card that stops being a one-off
+
+Everything above makes the database notice a listing moving. What it did not do was tell
+anybody: a card was posted once and left there saying whatever the rent was that day,
+while `price` was refreshed hourly underneath it. The card and the truth drifted apart
+with nothing in between.
+
+The shape of the telling follows from who the reader is, which is why there are two
+messages and not one. **A card already posted** is a message that is now wrong, so it is
+corrected — edited in place, with the diff in its thread where whoever is looking at it
+will be. But an edit notifies nobody, and a rebaja nobody hears about is a rebaja nobody
+acts on, so one digest per pass names everything that moved with a link back to each
+card. One message rather than one per listing: ten notifications about ten rebajas is how
+a chat gets muted, and muting the chat costs the alerts too.
+
+**A card about to be posted** is not wrong about anything; the question it raises is
+different. A flat first seen three weeks ago arriving today looks like the criteria
+changed, and the reader has no way to tell that it did not. The honest answer is
+recoverable, because announcing is gated on requirements the *listing* can cross on its
+own — a rebaja, a gasto común finally published, a walk that got computed — and those are
+exactly what `listing_changes` records. When none of them moved, the note says so: the
+wait was ours, and the detail queue being newest-first is the likeliest reason of the
+set. Naming the real cause beats asserting a plausible one.
+
+Both readings need a floor, and the floor is different for each. What has already been
+told is `COALESCE(update_notifications.through, subscriber_notifications.notified_at)` —
+the newest change already in a message, or failing that when the card went out, since a
+card is not stale about anything that happened before it. That also settles the ordering
+inside a pass for free: a listing announced minutes ago has a floor of now, so nothing
+about it is old enough to also report as a correction. What a *first* card explains is
+everything since `first_seen`, because the reader has seen none of it.
+
+The watermark is written after the message rather than before. A pass that dies in
+between repeats a notice next time, which is the failure worth having: a swallowed one
+never comes back.
+
+Three fields are excluded from counting as changes, and it is worth saying why they are
+excluded rather than filtered at the source. `published_days_ago` and `published_label`
+move on every re-read by the passing of time alone, and `zone_price_per_m2_uf` is the
+comuna's median — the neighbourhood changing, not the apartment. They stay in
+`detail_changes`, because they are true and someone reading the history wants them; they
+just are not news. That is a difference between a log and a notification, and the place
+to draw it is at the notification.
+
 ## Whether a conditional GET would pay
 
 `http_cache` records the `ETag` and `Last-Modified` each url offered — validators only,
@@ -432,6 +476,26 @@ would leave the parser with no body and no way to rebuild the rest. Doing it pro
 means splitting fetching from parsing across all six portals, which is its own change —
 and one worth justifying on evidence rather than on the hope that these portals emit
 validators at all. `validator_coverage` is that evidence, gathered from production.
+
+## The rate limit is per chat
+
+Telegram's limits are about a message a second to any one chat and twenty a minute to a
+group or a channel, which is where the three-second wait after every card came from. It
+was a global `time.sleep`, and a global sleep cannot express a per-chat limit: the card
+goes to the channel and its breakdown to the linked discussion group, which are two chats
+with two budgets, so a card cost six seconds of waiting for one message in the channel.
+
+Pacing per chat is the whole fix, and which limit applies is read off the id rather than
+asked — Telegram numbers a private conversation with its user's own positive id and
+anything with more than one reader negatively. `getChat` would be a request to learn what
+the id already says, and it would sit behind every plain card, which is a cost the
+verdict keyboard deliberately avoids paying.
+
+The other half is the 429. It used to surface as a `RuntimeError` that `_announce` caught
+per subscriber, so a burst tripping the flood control cost that chat the rest of its
+pass. Telegram says how long to wait in `parameters.retry_after`; honouring it — plus a
+second, because the limit is a window and landing on its edge trips it again — is what
+makes it safe to aim at the limit rather than hide well under it.
 
 ## Six portals at once
 
