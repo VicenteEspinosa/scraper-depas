@@ -1,0 +1,30 @@
+tests/test_updates.py
+  s_2a4d0dfda2ab63::t_f28965bbfab3b3 759-762,764,768-769,771
+  s_2a4d0dfda2ab63::t_098f33d3a318ae 155-174,456-466
+README.md
+  s_2a4d0dfda2ab63::t_808cf5b9a71e54 590,595,608-622,624,633-637
+  s_2a4d0dfda2ab63::t_6d2694ea4e01b4 623
+docs/DESIGN.md
+  s_2a4d0dfda2ab63::t_63354651d812a4 449-457,502,504-509,514-522
+depas/updates.py
+  s_2a4d0dfda2ab63::t_b9ab663c0fe8d7 79,81
+  s_2a4d0dfda2ab63::t_fa2fdb58dd0afb 403-406,408-409,414
+  s_2a4d0dfda2ab63::t_6d00cc59a5800b 46,48-55
+  s_2a4d0dfda2ab63::t_cf4661fe51ab34 552-568,599
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "8f20f7e027dd10a78cda345835735a0316589cad",
+  "prompts": {},
+  "sessions": {
+    "s_2a4d0dfda2ab63": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fd0e9c74-2a01-4b2d-a109-6c99dd956728",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Vicente <vespinosa@trytoku.com>"
+    }
+  }
+}
