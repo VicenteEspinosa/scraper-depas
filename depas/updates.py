@@ -43,10 +43,16 @@ from depas.telegram import GRADE_EMOJI, clp, escape, message_link, reply
 
 # Recorded on every re-read, and about the clock rather than the flat: a listing sitting
 # untouched for a month has its `published_days_ago` move by thirty and its label with
-# it, so counting them would make every re-read look like news. `zone_price_per_m2_uf`
-# moves with the comuna's median, which is the neighbourhood changing, not the apartment.
+# it, so counting them would make every re-read look like news.
 NOT_A_CHANGE = frozenset({
-    "published_days_ago", "published_label", "zone_price_per_m2_uf",
+    "published_days_ago", "published_label",
+    # Derived from the price, the area and the UF, so both move on their own every day
+    # the UF does: the comuna's median is the neighbourhood changing and the listing's
+    # own ratio is arithmetic, and neither is the landlord touching the flat.
+    "zone_price_per_m2_uf", "price_per_m2_uf",
+    # Editorial. A rewritten paragraph, a retitled aviso, a swapped photo: none of it
+    # changes what the flat costs or offers, and reported it was most of the resumen.
+    "description", "features", "transit", "title", "image_url", "url",
     # Bookkeeping of the reading itself, which the reader has no use for at all.
     "detail_fetched_at", "detail_hash", "detail_due_at", "detail_unchanged_count",
     "inferred_version", "price_at_detail", "last_seen",
@@ -69,12 +75,10 @@ LABELS: dict[str, str] = {
     "security_type": "El tipo de seguridad", "gated_community": "El condominio cerrado",
     "has_heating": "La calefacción", "has_air_conditioning": "El aire acondicionado",
     "has_pool": "La piscina", "has_gym": "El gimnasio", "has_terrace": "La terraza",
-    "description": "La descripción", "features": "Las características",
-    "title": "El título", "url": "El enlace", "image_url": "La foto",
     "broker": "El corredor", "commune": "La comuna", "address": "La dirección",
-    "commute": "El viaje", "transit": "El transporte", "nearest_station": "La estación",
+    "commute": "El viaje", "nearest_station": "La estación",
     "station_distance_m": "La distancia a la estación", "walk_minutes": "La caminata",
-    "walk_source": "De dónde sale la caminata", "price_per_m2_uf": "El UF/m²",
+    "walk_source": "De dónde sale la caminata",
     "lat": "La ubicación", "lon": "La ubicación", "is_project": "El tipo de aviso",
 }
 
@@ -87,9 +91,6 @@ YES_NO = frozenset({"furnished", "pets_allowed", "has_elevator", "has_concierge"
                     "gated_community", "has_heating", "has_air_conditioning",
                     "has_pool", "has_gym", "has_terrace", "is_project"})
 
-# A text field's old and new value are not worth quoting in full: a rewritten description
-# is a paragraph, and the reader wants to know that it moved, not to diff it in a chat.
-LONG = frozenset({"description", "features", "transit", "title", "image_url", "url"})
 # Stored as JSON, and the reader wants the minutes: `{"oficina": 32}` is «oficina 32 min».
 JOURNEYS = frozenset({"commute"})
 DATES = frozenset({"available_from"})
@@ -167,10 +168,6 @@ class Change:
         return UP if now > was else DOWN if now < was else MOVED
 
     def __str__(self) -> str:
-        # A rewritten description is a paragraph: that it moved is the news, and the two
-        # versions of it are not something to read in a chat.
-        if self.field in LONG:
-            return f"{self.label} {self._said(MOVED)}"
         # One side missing is a field the portal started or stopped publishing, which
         # reads as nonsense stated as a move from an em dash.
         if self.old is None or self.old == "":
@@ -403,14 +400,18 @@ def _digest_entry(update: Update, chat_id: str) -> str:
         escape(commune) or None,
         clp(row.get("net_monthly_clp")),
     ) if part)
+    # One way back, not two: a portal URL runs to a hundred characters and the card it
+    # points at already carries the «Ver aviso →» button, so paying for both here cost
+    # the resumen half the listings it could have named. The aviso only stands in when
+    # the card cannot be linked at all.
     link = message_link(chat_id, update.card["message_id"])
-    ways = [f'<a href="{link}">{CARD_LABEL}</a>'] if link else []
-    ways.append(f'<a href="{escape(row["url"])}">{LISTING_LABEL}</a>')
+    way = (f'<a href="{link}">{CARD_LABEL}</a>' if link
+           else f'<a href="{escape(row["url"])}">{LISTING_LABEL}</a>')
     told = update.lines()
     shown = [f"    · {one}" for one in told[:MOST_LINES]]
     if len(told) > MOST_LINES:
         shown.append(f"    · …y {len(told) - MOST_LINES} cambios más")
-    return "\n".join([f"{head}\n    {' · '.join(ways)} · <code>[{row['id']}]</code>", *shown])
+    return "\n".join([f"{head}\n    {way} · <code>[{row['id']}]</code>", *shown])
 
 
 TITLE = "🔄 <b>Cambió lo que ya te mandé</b>"
@@ -548,6 +549,23 @@ SELECT * FROM ({changed_since}) AS held
 """
 
 
+def _still_standing(events: list[sqlite3.Row]) -> list[sqlite3.Row]:
+    """Bajas their vueltas undid, dropped in pairs: the flat is where the reader left it.
+
+    A portal that drops a listing from one sweep and publishes it again in the next has
+    told the reader nothing — «ya no está» followed by «volvió» is two notices that cancel
+    out. An unmatched one on either end survives: a baja still standing is news, and so is
+    a vuelta whose baja went out in yesterday's resumen.
+    """
+    standing: list[sqlite3.Row] = []
+    for event in events:
+        if event["event"] == "relisted" and standing and standing[-1]["event"] == "delisted":
+            standing.pop()
+        else:
+            standing.append(event)
+    return standing
+
+
 def pending(connection: sqlite3.Connection, prefs: Preferences, subscriber: Subscriber,
             watermark: str) -> list[Update]:
     """Every card this chat holds whose listing has moved past `watermark`, newest first.
@@ -578,7 +596,7 @@ def pending(connection: sqlite3.Connection, prefs: Preferences, subscriber: Subs
             # being argued with.
             continue
         changes = changes_for(connection, *key, held["floor"], threshold)
-        events = listing_events(connection, *key, since=held["floor"])
+        events = _still_standing(listing_events(connection, *key, since=held["floor"]))
         if not changes and not events:
             continue  # a price re-recorded at the same figure is not a move
         updates.append(Update(dict(row), dict(card), changes, list(events),

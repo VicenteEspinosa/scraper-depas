@@ -446,6 +446,15 @@ acts on, so a resumen names everything that moved with a link back to each card.
 message rather than one per listing: ten notifications about ten rebajas is how a chat
 gets muted, and muting the chat costs the alerts too.
 
+That one message is bounded by Telegram's 4096 characters, which makes the length of an
+entry the length of the backlog: at two links apiece a resumen named about a dozen
+listings, and a queue of a hundred and fifty took a fortnight to drain. The cost was
+almost entirely the portal URL — a hundred characters of `assetplan.cl/arriendo/...`
+against forty for the whole `t.me` card link — so the entry keeps the card link alone.
+Nothing is lost by it: the card is the reader's own copy of the listing and already
+carries «Ver aviso →», so the aviso is one tap further away rather than gone, and it
+stands in directly when the card cannot be linked at all.
+
 The two are on different clocks, and that is the whole of the second decision. Correcting
 is silent, so it may as well be immediate: the pass that sees the rebaja redraws the card
 five minutes later, and whoever opens it reads the rent the flat is actually asking. The
@@ -490,13 +499,27 @@ never comes back. The one exception is a card Telegram refuses to edit — too o
 by hand — which is stamped anyway: it will be refused every pass, and retrying it is a
 thread comment every five minutes for as long as the change is pending.
 
-Three fields are excluded from counting as changes, and it is worth saying why they are
+A set of fields is excluded from counting as changes, and it is worth saying why they are
 excluded rather than filtered at the source. `published_days_ago` and `published_label`
-move on every re-read by the passing of time alone, and `zone_price_per_m2_uf` is the
-comuna's median — the neighbourhood changing, not the apartment. They stay in
+move on every re-read by the passing of time alone. `zone_price_per_m2_uf` is the comuna's
+median — the neighbourhood changing, not the apartment — and `price_per_m2_uf` is the
+price over the area over the UF, so it is arithmetic that moves every day the exchange
+rate does. The editorial fields go the same way: a rewritten `description`, a retitled
+aviso, a swapped `image_url` change nothing about what the flat costs or offers, and in
+the first real backlog they were most of what the resumen had to say. They all stay in
 `detail_changes`, because they are true and someone reading the history wants them; they
 just are not news. That is a difference between a log and a notification, and the place
 to draw it is at the notification.
+
+A baja and its vuelta cancel for the same reason, one step further on. Delisting is
+inferred from sweeps rather than announced by the portals, so a listing missed by one
+sweep and found by the next produces a real pair of events about a flat that never went
+anywhere. Told, they are «ya no está» and «volvió» about the same listing in the same
+message — two notices whose sum is nothing. So the events since the watermark are netted
+before anything is written: a vuelta cancels the baja immediately before it, and what is
+left unmatched still stands. That keeps both halves that carry information — a baja
+nothing has undone, and a vuelta whose baja went out in an earlier resumen — and drops
+only the round trip.
 
 The same distinction, in a different shape, is what `DEPAS_PRICE_CHANGE_MIN` draws. A
 flat published in UF has no CLP price of its own: the number the portal shows is today's
