@@ -152,6 +152,26 @@ def test_the_clock_moving_is_not_the_flat_changing(connection):
     assert updates.changes_for(connection, "pi", "7", None) == []
 
 
+def test_a_rewritten_aviso_is_not_the_flat_changing(connection):
+    """Retyping the paragraph and swapping the photo leaves the rent and the flat alone."""
+    _announced(connection)
+    save_detail(connection, "pi", "7", {"description": "Luminoso, entrega inmediata",
+                                        "title": "Depto 2D2B Ñuñoa",
+                                        "image_url": "https://x/nueva.jpg",
+                                        "walk_minutes": 6})
+
+    assert updates.changes_for(connection, "pi", "7", None) == []
+
+
+def test_the_uf_moving_is_not_the_flat_changing(connection):
+    """`price_per_m2_uf` is the price over the area over the UF: it drifts on its own daily."""
+    _announced(connection)
+    save_detail(connection, "pi", "7", {"price_per_m2_uf": 0.2865, "walk_minutes": 6})
+    save_detail(connection, "pi", "7", {"price_per_m2_uf": 0.2863, "walk_minutes": 6})
+
+    assert updates.changes_for(connection, "pi", "7", None) == []
+
+
 def test_a_gasto_comun_that_moved_is_told_as_money(connection):
     _announced(connection)
     save_detail(connection, "pi", "7", {"common_expenses": 95_000})
@@ -431,6 +451,17 @@ def test_a_vuelta_is_told_too(connection, telegram):
 
     assert _sync(connection) == 1
     assert "Volvió a estar publicado" in telegram["replies"][-1][1]
+
+
+def test_a_baja_its_vuelta_undid_is_told_as_neither(connection, telegram):
+    """Missed by one sweep and found by the next: two notices that cancel, so no message."""
+    _announced(connection)
+    _later(connection, "subscriber_notifications", "notified_at")
+    mark_delisted(connection, "pi", "7")
+    save(connection, [_listing()])
+
+    assert _sync(connection) == 0
+    assert telegram["replies"] == []
 
 
 def test_the_notice_says_how_the_nota_moved(connection, telegram):
@@ -725,17 +756,16 @@ def test_a_digest_too_long_for_telegram_is_cut_rather_than_lost(connection, tele
     So the budget is the message's, not just the pass's: what does not fit stays
     unstamped and is told next time, exactly like what the pass budget pushed out.
     """
-    # Portals publish long urls, and every entry carries one twice — as the link and
-    # as its text. Six of these is a message Telegram would refuse whole.
-    long_url = "https://portal/" + "arriendo-departamento-nunoa-" * 25
-    _three_announced(connection, how_many=6, url=long_url)
-    _rebaja_all(connection, how_many=6, url=long_url)
+    # A rebaja each on forty flats: a heading, a way back and a line apiece is already
+    # more than Telegram would take in one message, with the pass budget still unspent.
+    _three_announced(connection, how_many=40)
+    _rebaja_all(connection, how_many=40)
 
-    told = _sync(connection, limit=10)
+    told = _sync(connection, limit=40)
 
     digest = [text for chat, text in telegram["replies"] if "ya te mandé" in text][0]
     assert len(digest) <= updates.LIMIT
-    assert told < 6
-    assert "6 avisos" in digest and f"…y {6 - told} más" in digest
+    assert told < 40
+    assert "40 avisos" in digest and f"…y {40 - told} más" in digest
     # And what did not fit is still owed rather than quietly written off.
-    assert _sync(connection, limit=10) == 6 - told
+    assert _sync(connection, limit=40) == 40 - told

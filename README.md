@@ -587,12 +587,12 @@ each card. One notification a day rather than one per listing per pass:
 🔄 Cambió lo que ya te mandé · 3 avisos · 10/09 10:00
 
 🟢 A 88 · era B 79 · Nunoa · $920.000
-    tarjeta · aviso · [713]
+    tarjeta · [713]
     · El arriendo bajó de $1.050.000 a $920.000
     · El gasto común subió de $80.000 a $95.000
 
 ⚫ ya no está · Providencia · $890.000
-    tarjeta · aviso · [688]
+    tarjeta · [688]
     · Se dio de baja: el portal ya no publica su ficha
 ```
 
@@ -605,13 +605,23 @@ than anything you changed. When nothing about the listing moved, the note says t
 was ours — the detail queue is newest-first, so a flat can sit unenriched for weeks
 behind the ones that turned up after it — or that it came back after being delisted.
 
-What counts as a change is everything `detail_changes` records except three fields that
-move by mechanics rather than by the flat: `published_days_ago` and `published_label`
-shift on every re-read through the passing of time alone, and `zone_price_per_m2_uf` is
-the comuna's median, which is the neighbourhood changing and not the apartment. A baja
-and a vuelta count too, and are recorded in `delisting_events` — `delisted_at` holds a
-state and says only the last one, so until now a listing could leave the pool and come
-back with nothing anywhere saying it had happened.
+What counts as a change is everything `detail_changes` records except what moves by
+mechanics rather than by the flat. `published_days_ago` and `published_label` shift on
+every re-read through the passing of time alone. `zone_price_per_m2_uf` is the comuna's
+median and `price_per_m2_uf` is the price over the area over the UF, so both drift every
+day the exchange rate does. And the editorial fields — `description`, `features`,
+`transit`, `title`, `image_url`, `url` — are the landlord retyping a paragraph or
+swapping a photo: they change nothing about what the flat costs or offers, and reported
+they were most of the resumen.
+
+A baja and a vuelta count too, and are recorded in `delisting_events` — `delisted_at`
+holds a state and says only the last one, so a listing could otherwise leave the pool and
+come back with nothing anywhere saying it had happened. **A baja its vuelta undid is told
+as neither.** A portal that drops a listing from one sweep and publishes it again in the
+next has told you nothing, and «ya no está» followed by «volvió» is two notices that
+cancel out. They are dropped in pairs, so an unmatched one on either end still stands: a
+baja nothing has undone is news, and so is a vuelta whose baja went out in yesterday's
+resumen.
 
 Two budgets bound it. `DEPAS_UPDATES_LIMIT` caps how many listings change state per run,
 because two hundred moved prices is two hundred edits and ten minutes of channel; and the
@@ -619,6 +629,12 @@ resumen is capped separately at Telegram's 4096 characters, which it rejects a m
 rather than trimming. Whatever either one pushes out is not stamped: an uncorrected card
 is redrawn by the next pass, and a listing the resumen could not fit is named in the next
 day's.
+
+Which is why each listing in the resumen carries **one** way back rather than two. A
+portal URL runs to a hundred characters, and spending that on an `aviso` link next to the
+`tarjeta` link halved how many listings a single message could name — while the card it
+points at already carries its own «Ver aviso →». The aviso only stands in when the card
+cannot be linked at all.
 
 The two halves keep their own watermark in `update_notifications` — `through` for what the
 card already says, `digested_through` for what a resumen has already named — because they
