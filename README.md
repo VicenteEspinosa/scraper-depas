@@ -493,7 +493,7 @@ whatever was edited from the chat since.
 | `DEPAS_DELIST_AFTER` | How many believable sweeps of a portal must fail to turn a listing up before it is marked gone. A sweep counts only if it finished *and* saw listings, so a portal that is down or whose markup moved delists nobody. Default 3. `0` never delists — and it has to be special-cased, since "at least zero sweeps" is true of every row. |
 | `DEPAS_ENRICH_LIMIT`, `DEPAS_COMMUTE_LIMIT`, `DEPAS_ALERTS_LIMIT` | How much work one `watch` pass may do: detail pages fetched, listings routed, cards posted. Defaults 250, 40 and 25. The detail read is spread across the six portals at once, so 250 is about 40 per portal and a couple of minutes of the ten between runs — reading them in single file is what used to make 60 the sensible number. Routing stays at 40: one third-party host, still sequential. They belong in the table rather than in the crontab because the right figure moves with how many comunas you watch, and moving it should not need a redeploy. `0` switches a stage off. The flags still exist and override the setting for one run. |
 | `DEPAS_ENRICH_ROUNDS` | How many times the detail read may repeat inside one run while the unread queue is still filling its whole budget. Default 3, so a backlog drains at up to 750 pages a run instead of waiting ten minutes per batch — and only while there is a backlog, which is what a standing higher limit could not express. `1` reads one batch and stops. Rounds × limit has to fit the window between runs; if it does not, the stage lock makes the next run a clean no-op rather than two processes fighting. |
-| `DEPAS_UPDATES_LIMIT` | Listings **already posted** that change state per run when they move: the card edited and its thread told by the pass that saw it, and the 10:00 resumen naming all of them. Default 40, `0` reports no changes at all. What the budget pushes out is not stamped, so it goes out on the next run. |
+| `DEPAS_UPDATES_LIMIT` | Listings **already posted** that change state per run when they move: the card edited and its thread told by the pass that saw it, and the 10:00 resumen naming the ⭐ ones among them. Default 40, `0` reports no changes at all. What the budget pushes out is not stamped, so it goes out on the next run. |
 | `DEPAS_PRICE_CHANGE_MIN` | How far the arriendo or the gasto común has to move before it is worth a notice. Default 10000, `0` reports any peso. A flat published in UF has its CLP figure rewritten every day by the exchange rate, so «el arriendo subió de $635.567 a $635.694» is arithmetic and not news. What falls under the floor is not discarded but **folded**: the next move is measured from the last figure you were actually told, so a hundred pesos a day still arrives as one real rebaja once it adds up. Only money is held to it — a dormitorio that became two is one unit and the whole news of the listing. |
 | `TELEGRAM_CHAT_ID` | Where alerts are posted, from `depas chats`. A **channel** with a linked discussion group gives every card its own Comments thread, which is also where `/like` and `/dislike` are read from; a group takes the cards but leaves them undiscussable, so verdicts have to be replies. Switching between the two is only this value. |
 
@@ -580,11 +580,12 @@ looking available. Every pass now says what moved, in one of two ways.
 sees the change — every five minutes — edits the card in place with today's figures and
 today's grade and puts the diff in its Comments thread, because the card is your own copy
 of the listing and one still asking last week's rent misinforms whoever opens it. Then at
-**10:00** one message names every aviso that moved in the last day, with a link back to
-each card. One notification a day rather than one per listing per pass:
+**10:00** one message names the ones you marked **⭐ Me interesa** that moved in the last
+day, with a link back to each card. One notification a day rather than one per listing
+per pass:
 
 ```
-🔄 Cambió lo que ya te mandé · 3 avisos · 10/09 10:00
+🔄 Cambió algo de tu lista · 3 avisos · 10/09 10:00
 
 🟢 A 88 · era B 79 · Nunoa · $920.000
     tarjeta · [713]
@@ -595,6 +596,17 @@ each card. One notification a day rather than one per listing per pass:
     tarjeta · [688]
     · Se dio de baja: el portal ya no publica su ficha
 ```
+
+**Only the ⭐ ones get the message; every card gets the correction.** The two halves are
+not owed to the same set, because only one of them interrupts anybody. A channel that has
+been running for a month holds hundreds of cards, and a daily message about all of them is
+a daily message nobody reads — muted, which costs the alerts too. So the resumen is about
+the flats you pressed **⭐ Me interesa** on, and everything else is kept quietly right: its
+card still shows today's rent and today's grade, and its thread still says what moved, the
+moment it moved. Press ⭐ on a card later and the resumen starts at the press — what
+happened before it is history the card already carries, not news. Nothing is starred yet,
+so nothing is named: the pinned ⭐ list says as much, and the first press turns the
+message on.
 
 **A card arriving for the first time** carries, in its thread, why it is arriving now —
 but only when the listing has been stored more than a day, since a flat announced the
@@ -640,7 +652,9 @@ The two halves keep their own watermark in `update_notifications` — `through` 
 card already says, `digested_through` for what a resumen has already named — because they
 run on different clocks. One column could not say both: moved by the edit it would swallow
 the resumen, and moved by the resumen it would re-edit the same card and re-comment its
-thread every five minutes until the next morning.
+thread every five minutes until the next morning. A flat with no ⭐ never moves the second
+one, which is why a ⭐ pressed later is a floor of its own: without it the first resumen
+after the press would owe the flat every move it has made since its card went out.
 
 A price move also has to be big enough to be worth saying. `DEPAS_PRICE_CHANGE_MIN`
 (default 10000) is the floor: a flat published in UF has its CLP arriendo and gasto común
@@ -703,7 +717,7 @@ on one another:
 | `depas announce` | Posts what is over the bar, redraws the cards whose listing moved, and restates the pinned ⭐ list. |
 
 `depas resumen` is a fifth, and the only one that runs on the clock rather than on the
-work: **10:00 America/Santiago**, once, naming every card that moved since the last one.
+work: **10:00 America/Santiago**, once, naming the ⭐ cards that moved since the last one.
 It is not part of `depas watch` — an hourly pass running it would be a resumen an hour —
 so the crontab entry is the whole of "10:00", and nothing in the code asks what time it
 is or whether today's already went out.

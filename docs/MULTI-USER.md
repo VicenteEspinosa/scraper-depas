@@ -27,8 +27,8 @@ already keyed the way a multi-user bot needs them:
 | Where cards go, and whose verdicts count there | the chat, with an optional owner | `subscribers (chat_id, owner_user_id)` |
 
 `Subscriber.view()` is the seam: everything that renders a listing — cards, the ⭐ list,
-`/top`, the breakdown — reads `row["interest"]` and `row["notified_at"]` off it and
-never asks whose they are. That is why the rest of this plan is smaller than it sounds.
+`/top`, the breakdown, the 10:00 resumen that names the ⭐ ones that moved — reads
+`row["interest"]` and `row["notified_at"]` off it and never asks whose they are. That is why the rest of this plan is smaller than it sounds.
 
 ### 1.2 What is still single-user
 

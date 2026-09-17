@@ -6,9 +6,12 @@ things depending on whether the reader has seen the flat already:
   * **A card already posted** gets edited in place and its thread gets the diff, by the
     pass that saw the change: a card is the reader's own copy of the listing, and one
     still asking last week's rent misinforms whoever opens it. Then one resumen a day
-    names every listing that moved with a link back to its own card. One message a day
-    rather than one per listing per pass: a rebaja is worth knowing about, and a
-    notification every five minutes is how a chat gets muted.
+    names the ⭐ ones among them, with a link back to each card. One message a day rather
+    than one per listing per pass, and only about the flats the reader marked: a rebaja
+    is worth knowing about, but a notification every five minutes is how a chat gets
+    muted, and so is a daily one about every card the chat has ever held. Nothing is
+    lost by the ones it leaves out — correcting is not gated on a ⭐, so their cards
+    carry today's figures and their threads say what moved.
   * **A card about to be posted for the first time** carries the diff as the answer to
     the question the reader would otherwise ask — why is a flat first seen three weeks
     ago arriving now. Announcing is gated on requirements the *listing* can cross on its
@@ -414,7 +417,7 @@ def _digest_entry(update: Update, chat_id: str) -> str:
     return "\n".join([f"{head}\n    {way} · <code>[{row['id']}]</code>", *shown])
 
 
-TITLE = "🔄 <b>Cambió lo que ya te mandé</b>"
+TITLE = "🔄 <b>Cambió algo de tu lista</b>"
 THREAD_TITLE = "🔄 <b>Cambió desde que te mandé esta tarjeta</b>"
 ARRIVED_TITLE = "🆕 <b>Por qué este aviso aparece recién ahora</b>"
 SINCE_FIRST_SEEN = "Lo que cambió desde que lo vimos por primera vez:"
@@ -431,7 +434,7 @@ def _more(left_out: int) -> str:
 
 def format_digest(candidates: list[Update], chat_id: str,
                   beyond_budget: int = 0) -> tuple[str, list[Update]]:
-    """The one message a day that names every card that moved, newest movement first.
+    """The one message a day that names the ⭐ cards that moved, newest movement first.
 
     Hands back the updates it actually named as well as the message, because those are
     the ones the reader has been told about and so the only ones that may be stamped —
@@ -566,13 +569,29 @@ def _still_standing(events: list[sqlite3.Row]) -> list[sqlite3.Row]:
     return standing
 
 
+def _from_the_star(watermark: str, starred_at: str | None) -> str:
+    """The ⭐ is a floor of its own, and only for the resumen.
+
+    A card the resumen never names never moves its `digested_through`, so the watermark on
+    a flat nobody marked stays where the card left it and keeps falling behind. Star one a
+    month later and everything since would come out in the next morning's resumen at once:
+    true, and none of it news — the card was corrected each time and its thread said so as
+    it happened. What a ⭐ asks for is what moves from here on, so that is the floor.
+    """
+    return max(watermark, starred_at) if starred_at else watermark
+
+
 def pending(connection: sqlite3.Connection, prefs: Preferences, subscriber: Subscriber,
-            watermark: str) -> list[Update]:
+            watermark: str, *, starred_only: bool = False) -> list[Update]:
     """Every card this chat holds whose listing has moved past `watermark`, newest first.
 
     Read through the subscriber rather than `listings_ranked`, so the grade on the notice
     is the grade the card itself would be redrawn with — a listing somebody in the chat
     discarded reads as discarded here too.
+
+    `starred_only` is what separates the two readings beyond their watermarks: correcting
+    a card is silent and owed to every card the chat holds, while the resumen arrives as a
+    notification and is owed only to the ⭐ set.
     """
     scale = Scale(prefs)
     threshold = prefs.value("DEPAS_PRICE_CHANGE_MIN") or 0
@@ -590,13 +609,19 @@ def pending(connection: sqlite3.Connection, prefs: Preferences, subscriber: Subs
         ).fetchone()
         if row is None or card is None:
             continue  # a card outliving its listing is not a change to report
-        if (row["interest"] or 0) < 0:
+        interest = row["interest"] or 0
+        if interest < 0:
             # A /dislike is out for good — never announced again, and out of the pool.
             # A rebaja on a flat somebody turned down is not news, it is that verdict
             # being argued with.
             continue
-        changes = changes_for(connection, *key, held["floor"], threshold)
-        events = _still_standing(listing_events(connection, *key, since=held["floor"]))
+        if starred_only and interest <= 0:
+            continue  # its card is still corrected; it is the message that is the ⭐ set's
+        floor = held["floor"]
+        if starred_only:
+            floor = _from_the_star(floor, row["rated_at"])
+        changes = changes_for(connection, *key, floor, threshold)
+        events = _still_standing(listing_events(connection, *key, since=floor))
         if not changes and not events:
             continue  # a price re-recorded at the same figure is not a move
         updates.append(Update(dict(row), dict(card), changes, list(events),
@@ -629,12 +654,17 @@ def correct(connection: sqlite3.Connection, prefs: Preferences,
 
 def digest(connection: sqlite3.Connection, prefs: Preferences,
            subscriber: Subscriber, limit: int) -> int:
-    """The one message a day naming every card of this chat that moved since the last one.
+    """The one message a day naming the ⭐ cards of this chat that moved since the last one.
 
     The cards it links to were already corrected by the pass that saw the change, so this
     never points at a card still saying the old price.
+
+    Only the ⭐ ones: this is the half that actually notifies somebody, and a chat that is
+    told about every flat it was ever shown is a chat that gets muted — which costs the
+    alerts too. Nothing is lost by the flats left out, because the correction is not
+    gated on a ⭐: their cards carry today's figures and their threads say what moved.
     """
-    found = pending(connection, prefs, subscriber, IN_A_RESUMEN)
+    found = pending(connection, prefs, subscriber, IN_A_RESUMEN, starred_only=True)
     if not found:
         return 0
     resumen, told = format_digest(found[:limit], subscriber.chat_id,
