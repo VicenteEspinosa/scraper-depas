@@ -558,7 +558,7 @@ def _correct_cards(connection: sqlite3.Connection, prefs: Preferences,
 
 def _send_resumen(connection: sqlite3.Connection, prefs: Preferences,
                   args: argparse.Namespace) -> int:
-    """Post each subscriber the one message a day naming every card of theirs that moved."""
+    """Post each subscriber the one message a day naming the ⭐ cards of theirs that moved."""
     limit = _budget(args.updates_limit, prefs, "DEPAS_UPDATES_LIMIT")
     named = 0
     for subscriber in subscribers(connection, prefs):
@@ -708,7 +708,7 @@ def announce(args: argparse.Namespace) -> None:
 
 
 def resumen(args: argparse.Namespace) -> None:
-    """The one message a day naming every card that moved, at 10:00 in Santiago.
+    """The one message a day naming the ⭐ cards that moved, at 10:00 in Santiago.
 
     Its own stage rather than part of `announce` because it is the one thing here that
     runs on the clock instead of on the work: the cron entry is what says 10:00, so
@@ -1150,7 +1150,7 @@ def main() -> None:
     announcer.set_defaults(func=announce, **{**_STAGE_DEFAULTS, "limit": None})
 
     summariser = subparsers.add_parser(
-        "resumen", help="the one message a day naming every card that moved")
+        "resumen", help="the one message a day naming the ⭐ cards that moved")
     summariser.add_argument("--updates-limit", type=int,
                             help="listings named in the resumen; "
                                  "default DEPAS_UPDATES_LIMIT")

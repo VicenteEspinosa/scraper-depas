@@ -442,9 +442,20 @@ The shape of the telling follows from who the reader is, which is why there are 
 messages and not one. **A card already posted** is a message that is now wrong, so it is
 corrected — edited in place, with the diff in its thread where whoever is looking at it
 will be. But an edit notifies nobody, and a rebaja nobody hears about is a rebaja nobody
-acts on, so a resumen names everything that moved with a link back to each card. One
-message rather than one per listing: ten notifications about ten rebajas is how a chat
-gets muted, and muting the chat costs the alerts too.
+acts on, so a resumen names what moved with a link back to each card. One message rather
+than one per listing: ten notifications about ten rebajas is how a chat gets muted, and
+muting the chat costs the alerts too.
+
+That last sentence is also what decides **whose** changes the resumen is about, and the
+answer is not the same as the correction's. Correcting costs the reader nothing — it is a
+message they already have, quietly made right — so it is owed to every card the chat
+holds. The resumen is the half that lights up a phone, and a channel a month old holds
+hundreds of cards: a daily message about all of them is the thing that gets muted, at
+which point none of it arrives. So it names the **⭐ set** and nothing else. Nothing is
+lost by the flats left out, because they are not silent — their cards carry today's
+figures and their threads say what moved, as it moved. The reader stops being told about
+flats they never said they wanted and goes on being able to open any of them and find it
+current, which is a better trade than either half could make alone.
 
 That one message is bounded by Telegram's 4096 characters, which makes the length of an
 entry the length of the backlog: at two links apiece a resumen named about a dozen
@@ -475,6 +486,14 @@ side since the card went out, which is why `notified_at` is the fallback for bot
 the migration copies `through` into the new column rather than leaving it empty: until the
 split the two moved together, so what is drawn on the card is exactly what the last
 resumen named.
+
+Which is also why a ⭐ pressed later is a floor of its own — it falls out of those
+watermarks rather than being a rule laid on top of them. A flat the resumen never names
+never moves its `digested_through`, so the one on an unstarred card stays where the card
+left it and keeps falling behind; star it a month on and the next morning's resumen would
+owe it every move since. All true, and none of it news: the card was corrected each time
+and its thread said so at the time. So the ⭐ raises the floor to itself. What somebody
+asks for by pressing it is what happens from here on, not a month of history at breakfast.
 
 **A card about to be posted** is not wrong about anything; the question it raises is
 different. A flat first seen three weeks ago arriving today looks like the criteria

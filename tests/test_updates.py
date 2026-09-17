@@ -9,6 +9,7 @@ from depas.cli import _announce, _correct_cards, _send_resumen
 from depas.models import Listing
 from depas.store import (
     DISLIKE,
+    LIKE,
     MIGRATIONS_DIR,
     Subscriber,
     add_subscriber,
@@ -65,12 +66,33 @@ def _listing(price: int = 900_000, **fields) -> Listing:
                    commune="nunoa", **fields)
 
 
-def _announced(connection, price: int = 900_000) -> None:
-    """A listing this chat has a card for, as a pass that posted one would leave it."""
+# Well before anything these tests store, so a ⭐ is never itself the floor: the resumen
+# only names what moved after the star, and a star stamped now would sit a microsecond
+# either side of the change the test then makes.
+LONG_STARRED = "2020-01-01T00:00:00+00:00"
+
+
+def _starred(connection, external_id: str = "7", when: str = LONG_STARRED) -> None:
+    """The ⭐ that puts a flat in the resumen, dated: only later moves are named."""
+    set_interest(connection, "pi", external_id, LIKE, "vicente")
+    connection.execute(
+        "UPDATE user_interest SET rated_at = ? WHERE portal = 'pi' AND external_id = ?",
+        (when, external_id))
+    connection.commit()
+
+
+def _announced(connection, price: int = 900_000, starred: bool = True) -> None:
+    """A listing this chat has a card for, as a pass that posted one would leave it.
+
+    Starred by default: a card is corrected whatever anybody thinks of the flat, but the
+    resumen names the ⭐ set alone, and most of what is tested here is the resumen.
+    """
     save(connection, [_listing(price)])
     save_detail(connection, "pi", "7", {"walk_minutes": 6, "common_expenses": 80_000})
     remember_card(connection, CHAT, 500, "pi", "7")
     mark_notified(connection, CHAT, "pi", "7")
+    if starred:
+        _starred(connection)
 
 
 def _later(connection, table: str, column: str) -> None:
@@ -86,7 +108,7 @@ def _correct(connection, limit: int = 10) -> int:
 
 
 def _resumen(connection, limit: int = 10) -> int:
-    """The half that runs at 10:00: the one message that names everything that moved."""
+    """The half that runs at 10:00: the one message that names the ⭐ ones that moved."""
     return updates.digest(connection, prefs(), Subscriber(CHAT), limit)
 
 
@@ -103,13 +125,15 @@ def _one_of_many(external_id: str, price: int, url: str | None = None) -> Listin
 
 
 def _three_announced(connection, price: int = 1_000_000, how_many: int = 3,
-                     url: str | None = None) -> None:
+                     url: str | None = None, starred: bool = True) -> None:
     """Listings this chat holds cards for, ready to be moved by `_rebaja_all`."""
     for number in range(how_many):
         save(connection, [_one_of_many(str(number), price, url)])
         save_detail(connection, "pi", str(number), {"walk_minutes": 6})
         remember_card(connection, CHAT, 500 + number, "pi", str(number))
         mark_notified(connection, CHAT, "pi", str(number))
+        if starred:
+            _starred(connection, str(number))
 
 
 def _rebaja_all(connection, price: int = 900_000, how_many: int = 3,
@@ -291,7 +315,7 @@ def test_a_card_already_posted_is_edited_its_thread_told_and_the_digest_sent(
     thread, digest = telegram["replies"]
     assert "Cambió desde que te mandé esta tarjeta" in thread[1]
     assert "El arriendo bajó de $1.000.000 a $920.000" in thread[1]
-    assert "Cambió lo que ya te mandé" in digest[1]
+    assert "Cambió algo de tu lista" in digest[1]
     assert "El arriendo bajó de $1.000.000 a $920.000" in digest[1]
 
 
@@ -310,7 +334,7 @@ def test_the_card_is_fixed_by_the_pass_and_the_feed_hears_nothing_yet(connection
     assert _correct(connection) == 1
 
     assert telegram["edits"] == [500]
-    assert [text for chat, text in telegram["replies"] if "ya te mandé" in text] == []
+    assert [text for chat, text in telegram["replies"] if "de tu lista" in text] == []
 
 
 def test_a_card_fixed_hours_earlier_is_still_named_in_the_resumen(connection, telegram):
@@ -323,7 +347,7 @@ def test_a_card_fixed_hours_earlier_is_still_named_in_the_resumen(connection, te
 
     assert _resumen(connection) == 1
 
-    resumen = [text for chat, text in telegram["replies"] if "ya te mandé" in text][0]
+    resumen = [text for chat, text in telegram["replies"] if "de tu lista" in text][0]
     assert "El arriendo bajó de $1.000.000 a $920.000" in resumen
 
 
@@ -350,7 +374,7 @@ def test_the_resumen_gathers_a_day_of_passes_into_one_message(connection, telegr
 
     assert _resumen(connection) == 3
 
-    resumenes = [text for chat, text in telegram["replies"] if "ya te mandé" in text]
+    resumenes = [text for chat, text in telegram["replies"] if "de tu lista" in text]
     assert len(resumenes) == 1
     assert "3 avisos" in resumenes[0]
 
@@ -363,7 +387,7 @@ def test_the_digest_is_one_message_for_every_listing_that_moved(connection, tele
     assert _sync(connection) == 3
 
     digests = [text for chat, text in telegram["replies"]
-               if "Cambió lo que ya te mandé" in text]
+               if "Cambió algo de tu lista" in text]
     assert len(digests) == 1
     assert "3 avisos" in digests[0]
 
@@ -388,7 +412,7 @@ def test_a_digest_that_could_not_be_posted_is_said_again_next_pass(connection, t
     save(connection, [_listing(920_000)])
 
     def refuses(chat, text, thread_id=None, reply_to=None):
-        if "Cambió lo que ya te mandé" in text:
+        if "Cambió algo de tu lista" in text:
             raise RuntimeError("bot is not a member of the channel")
         return {"chat": {"id": int(chat)}, "message_id": 900}
 
@@ -409,7 +433,7 @@ def test_the_budget_caps_a_pass_and_says_what_is_left(connection, telegram):
 
     assert _sync(connection, limit=2) == 2
 
-    digest = [text for chat, text in telegram["replies"] if "ya te mandé" in text][0]
+    digest = [text for chat, text in telegram["replies"] if "de tu lista" in text][0]
     assert "3 avisos" in digest and "…y 1 más" in digest
     # And the one left out is not lost: the next pass says it.
     assert _sync(connection, limit=2) == 1
@@ -436,7 +460,7 @@ def test_a_baja_is_the_change_worth_telling(connection, telegram):
 
     assert _sync(connection) == 1
 
-    digest = [text for chat, text in telegram["replies"] if "ya te mandé" in text][0]
+    digest = [text for chat, text in telegram["replies"] if "de tu lista" in text][0]
     assert "ya no está" in digest
     assert "el portal ya no publica su ficha" in digest
 
@@ -490,6 +514,90 @@ def test_a_listing_somebody_turned_down_does_not_come_back_through_this(connecti
 
     assert _sync(connection) == 0
     assert telegram["replies"] == []
+
+
+# ── whose changes get a message, and whose only get a card ──────────────────────
+
+
+def test_a_flat_nobody_starred_is_corrected_but_never_named_in_the_resumen(connection,
+                                                                          telegram):
+    """The split that makes a daily message bearable at all.
+
+    Correcting is silent and owed to every card the chat holds; the resumen is the half
+    that lights up a phone, and it is owed to the flats the reader said they cared about.
+    """
+    _announced(connection, 1_000_000, starred=False)
+    _later(connection, "price_history", "seen_at")
+    _later(connection, "subscriber_notifications", "notified_at")
+    save(connection, [_listing(920_000)])
+
+    assert _correct(connection) == 1
+    assert _resumen(connection) == 0
+
+    assert telegram["edits"] == [500]  # the card still says what the flat is asking
+    (thread,) = telegram["replies"]
+    assert "Cambió desde que te mandé esta tarjeta" in thread[1]
+
+
+def test_the_star_is_what_puts_a_flat_in_the_resumen(connection, telegram):
+    """The same rebaja on the same card, told because «⭐ Me interesa» was pressed."""
+    _announced(connection, 1_000_000, starred=False)
+    _later(connection, "price_history", "seen_at")
+    _later(connection, "subscriber_notifications", "notified_at")
+    save(connection, [_listing(920_000)])
+    assert _resumen(connection) == 0
+
+    _starred(connection)
+
+    assert _resumen(connection) == 1
+    assert "El arriendo bajó de $1.000.000 a $920.000" in telegram["replies"][-1][1]
+
+
+def test_taking_the_star_back_takes_it_out_of_the_resumen(connection, telegram):
+    """A ⭐ undone is not a /dislike, but it is still «stop telling me about this one»."""
+    _announced(connection, 1_000_000)
+    set_interest(connection, "pi", "7", None, user_id=None)
+    _later(connection, "price_history", "seen_at")
+    _later(connection, "subscriber_notifications", "notified_at")
+    save(connection, [_listing(920_000)])
+
+    assert _resumen(connection) == 0
+    assert telegram["replies"] == []
+
+
+def test_starring_an_old_card_does_not_owe_it_everything_it_ever_did(connection,
+                                                                     telegram):
+    """Its resumen watermark stopped moving the day the card went out, so it is behind.
+
+    What piled up behind it is true and none of it is news: the card was corrected each
+    time and its thread said so as it happened. A ⭐ asks about what moves from here on.
+    """
+    _announced(connection, 1_000_000, starred=False)
+    _later(connection, "price_history", "seen_at")
+    _later(connection, "subscriber_notifications", "notified_at")
+    save(connection, [_listing(920_000)])
+    _correct(connection)
+
+    _starred(connection, when=datetime.now(UTC).isoformat())
+
+    assert _resumen(connection) == 0
+    assert [text for chat, text in telegram["replies"] if "de tu lista" in text] == []
+
+
+def test_what_moves_after_the_star_is_told(connection, telegram):
+    """The other half of the same rule: the floor is the ⭐, not silence for good."""
+    _announced(connection, 1_000_000, starred=False)
+    _later(connection, "price_history", "seen_at")
+    _later(connection, "subscriber_notifications", "notified_at")
+    save(connection, [_listing(920_000)])
+    _starred(connection, when=datetime.now(UTC).isoformat())
+
+    save(connection, [_listing(880_000)])
+
+    assert _resumen(connection) == 1
+    resumen = telegram["replies"][-1][1]
+    assert "El arriendo bajó de $920.000 a $880.000" in resumen
+    assert "$1.000.000" not in resumen  # the move it slept through stays slept through
 
 
 def test_a_note_too_long_for_telegram_is_cut_rather_than_lost(connection):
@@ -616,11 +724,12 @@ def test_a_late_card_is_never_also_reported_as_a_correction(connection, telegram
     save_detail(connection, "pi", "7", {"walk_minutes": 6})
 
     _announce(connection, prefs(), limit=10)
+    _starred(connection)  # so it is the floor keeping it out and not the missing ⭐
     args = type("Args", (), {"updates_limit": 10})()
 
     assert _correct_cards(connection, prefs(), args) == 0
     assert _send_resumen(connection, prefs(), args) == 0
-    assert [text for chat, text in telegram["replies"] if "ya te mandé" in text] == []
+    assert [text for chat, text in telegram["replies"] if "de tu lista" in text] == []
 
 
 def test_a_second_subscriber_is_told_on_its_own_account(connection, telegram):
@@ -640,7 +749,7 @@ def test_a_second_subscriber_is_told_on_its_own_account(connection, telegram):
                           type("Args", (), {"updates_limit": 10})())
 
     assert named == 2
-    assert {chat for chat, text in telegram["replies"] if "ya te mandé" in text} == {
+    assert {chat for chat, text in telegram["replies"] if "de tu lista" in text} == {
         CHAT, "-2002"}
 
 
@@ -763,7 +872,7 @@ def test_a_digest_too_long_for_telegram_is_cut_rather_than_lost(connection, tele
 
     told = _sync(connection, limit=40)
 
-    digest = [text for chat, text in telegram["replies"] if "ya te mandé" in text][0]
+    digest = [text for chat, text in telegram["replies"] if "de tu lista" in text][0]
     assert len(digest) <= updates.LIMIT
     assert told < 40
     assert "40 avisos" in digest and f"…y {40 - told} más" in digest

@@ -337,8 +337,8 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("DEPAS_UPDATES_LIMIT", _budget,
             "Cuántos avisos ya publicados cambian de estado por corrida: la tarjeta se "
             "edita y el hilo dice qué cambió en la pasada que vio el cambio, y a las "
-            "10:00 un solo resumen los nombra a todos. Lo que no alcanza sale al día "
-            "siguiente. En 0 no se avisa ningún cambio.",
+            "10:00 un solo resumen nombra los que marcaste con ⭐. Lo que no alcanza sale "
+            "al día siguiente. En 0 no se avisa ningún cambio.",
             example="40", default="40"),
     # Not a budget but a floor on what is worth saying, and it lives here because what
     # it bounds is the same message DEPAS_UPDATES_LIMIT bounds.

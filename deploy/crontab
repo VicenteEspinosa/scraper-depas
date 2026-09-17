@@ -41,8 +41,9 @@
 # waits — the batch only decides how fast a backlog drains.
 */5 * * * * depas announce
 
-# The one message a day that names every card that moved: a rebaja shows on the card
-# within five minutes, and the notification about it arrives at breakfast. The clock
+# The one message a day that names the ⭐ cards that moved: a rebaja shows on the card
+# within five minutes, and the notification about it arrives at breakfast — for the flats
+# marked «Me interesa», which is the only half of this that interrupts anybody. The clock
 # lives here rather than in the code — this entry is the whole of "10:00", and TZ is
 # America/Santiago, so it follows Chilean daylight saving on its own.
 0 10 * * * depas resumen
