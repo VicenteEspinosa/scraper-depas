@@ -40,6 +40,7 @@ from depas.telegram import (
     format_breakdown,
     format_comparison,
     format_listing,
+    message_link,
     reply,
     send_buttons,
     send_listing,
@@ -109,6 +110,53 @@ def _grade_link(connection: sqlite3.Connection, fetcher: Fetcher, portal_name: s
         "SELECT * FROM listings_ranked WHERE portal = ? AND external_id = ?", key
     ).fetchone()
     return dict(ranked), Scale(prefs).grade(dict(ranked))
+
+
+# A link for a flat we already announced: the card it went out on is where its buttons,
+# its breakdown and whatever was said about it already are, and a second card knows none
+# of that. The pointer costs one line and saves the reader the search.
+SEEN_BEFORE = '📌 ya lo habíamos publicado: <a href="{link}">la tarjeta original</a>'
+
+
+def _reachable_chats(connection: sqlite3.Connection, message: dict,
+                     prefs: Preferences) -> list[str]:
+    """The chats whoever pasted a link is in, so a deep link to one of them opens.
+
+    The chat it was pasted in, the channel that chat carries the comments of, and the
+    chats this person owns as a subscriber. Anybody else's channel is left out: a t.me/c
+    link does not open for a non-member, and naming one would tell the person pasting
+    about a chat that is not theirs.
+    """
+    chats = [str(message["chat"]["id"])]
+    # Which channel a discussion group belongs to is not in `subscribers`; the cards
+    # Telegram copied into this group are the record of it.
+    linked = connection.execute(
+        "SELECT chat_id FROM card_messages WHERE thread_chat_id = ? "
+        "ORDER BY posted_at DESC LIMIT 1", (str(message["chat"]["id"]),)
+    ).fetchone()
+    if linked is not None:
+        chats.append(str(linked["chat_id"]))
+    author = (message.get("from") or {}).get("id")
+    if author is not None:
+        chats += [one.chat_id for one in subscribers(connection, prefs)
+                  if one.owner == author]
+    return list(dict.fromkeys(chats))
+
+
+def original_card(connection: sqlite3.Connection, chats: list[str], portal: str,
+                  external_id: str) -> str | None:
+    """A deep link to the first card for this listing the reader can open, if any."""
+    if not chats:
+        return None
+    rows = connection.execute(
+        "SELECT chat_id, message_id FROM card_messages WHERE portal = ? AND external_id = ? "
+        f"AND chat_id IN ({', '.join('?' * len(chats))}) ORDER BY posted_at",
+        (portal, external_id, *chats),
+    ).fetchall()
+    # Oldest first — the original is the one that announced it — skipping a card in a
+    # private chat or a plain group, which Telegram gives no link to.
+    return next((link for row in rows
+                 if (link := message_link(row["chat_id"], row["message_id"]))), None)
 
 
 COMMANDS = {"/like": LIKE, "/dislike": DISLIKE}
@@ -470,6 +518,15 @@ def _tick(pressed: dict, card: dict, listing_id: int, interest: int) -> None:
         print(f"could not tick the keyboard on {pressed['message_id']}: {error}")
 
 
+def _point_at_card(chat: str, card_message: int, link: str) -> None:
+    """Hang the way back to a listing's first card under the card answering the link."""
+    try:
+        reply(chat, SEEN_BEFORE.format(link=link), reply_to=card_message)
+    except RuntimeError as error:
+        # A pointer to the old card must not cost the new one, nor the links after it.
+        print(f"could not point {card_message} at its original card: {error}")
+
+
 def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
             prefs: Preferences) -> None:
     # Telegram's own copy of a channel card is bookkeeping, never a request.
@@ -500,11 +557,17 @@ def _handle(connection: sqlite3.Connection, fetcher: Fetcher, message: dict,
         if graded is None:
             continue
         row, grade = graded
+        # Looked up before the card goes out, or the card about to be posted is the one
+        # it would point at.
+        already = original_card(connection, _reachable_chats(connection, message, prefs),
+                                row["portal"], row["external_id"])
         sent = send_listing(str(message["chat"]["id"]), format_listing(row, grade, prefs),
                             row.get("image_url"), message.get("message_thread_id"),
                             verdict_buttons(row["id"], row.get("interest")))
         remember_card(connection, sent["chat"]["id"], sent["message_id"],
                       row["portal"], row["external_id"], "photo" in sent)
+        if already:
+            _point_at_card(str(sent["chat"]["id"]), sent["message_id"], already)
         # A card is a card: this one carries its own keyboard, so the breakdown
         # answers it directly rather than waiting for a thread that will never open.
         post_breakdown(connection, {"chat_id": str(sent["chat"]["id"]),

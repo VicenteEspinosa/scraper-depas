@@ -334,6 +334,15 @@ the portals or a subdomain of one — `departamento.portalinmobiliario.com` yes,
 `miportalinmobiliario.com` no. The card the bot posts carries its endorsement, so a
 lookalike host must never earn one.
 
+A link for a flat the bot has already announced is answered twice: with its card,
+graded as it is graded today, and with one line under it pointing back at the card it
+first went out on — which is where its buttons, its breakdown and whatever was said in
+its comments are. The pointer only ever names a chat whoever pasted the link is already
+in: that chat, the channel whose comments it carries, or a chat of their own from
+`depas subscribers`. A `t.me/c` link opens for members only, so anybody else's channel
+would be a dead link as well as a mention of a chat that is not theirs. A listing
+nobody has seen before gets the card alone.
+
 A verdict is a column on the listing (`interest`, `rated_at`, `rated_by`), so it
 survives re-scrapes and is queryable:
 

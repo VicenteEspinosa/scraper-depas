@@ -830,6 +830,19 @@ The bot fetches what it recognises and posts the result as a card with a «Ver a
 link, so a pattern that let `miportalinmobiliario.com` through would have let anybody in
 the group have the bot vouch for a page of their own.
 
+A link the pool already knows gets a second message: the card it was first announced on.
+The new card is correct and useless on its own — the verdict, the breakdown and the
+comments are all on the old one, and a reader with two cards for one flat is a reader
+who has to work out which is which. The link is read out of `card_messages`, oldest
+first, because the original is the one that announced it rather than the latest paste of
+it; a card in a private chat or a plain group is skipped, since `message_link` has
+nothing to build out of an id with no `-100` on it. Which chats are searched is the
+whole of the privacy question: the chat the link was pasted in, the channel that chat is
+the discussion group of — learned from the `thread_chat_id` of any card Telegram copied
+into it, since `subscribers` does not record the pairing — and the chats the person
+pasting owns. Pointing one reader at another's channel would hand them a link that
+cannot open and a chat id they were never told about.
+
 Telegram's own failures come back as JSON with `ok: false`, which `call` turns into a
 `RuntimeError` the polling loop survives. An outage does not: it answers with an HTML
 error page, and the `JSONDecodeError` that followed was not on the list of things the

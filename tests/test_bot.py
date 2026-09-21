@@ -19,6 +19,7 @@ from depas.bot import (
 from depas.models import Listing
 from depas.store import (
     Subscriber,
+    add_subscriber,
     connect,
     mark_delisted,
     pool_query,
@@ -26,6 +27,7 @@ from depas.store import (
     save,
     save_detail,
 )
+from depas.telegram import message_link
 from tests.support import prefs
 
 
@@ -46,9 +48,10 @@ def sent(monkeypatch, answers):
     posted = []
 
     def send(chat, text, image=None, thread=None, buttons=None):
-        posted.append((chat, text, thread))
         # Telegram's own record of the message, which is what the bot stores.
-        return {"chat": {"id": int(chat)}, "message_id": 500 + len(posted)}
+        sent = {"chat": {"id": int(chat)}, "message_id": 501 + len(posted)}
+        posted.append((chat, text, thread, sent["message_id"]))
+        return sent
 
     monkeypatch.setattr("depas.bot.send_listing", send)
     return posted
@@ -250,6 +253,8 @@ def test_a_houm_page_that_is_not_a_listing_is_ignored():
 
 
 CHANNEL, CARD, GROUP, THREAD, KEYBOARD, BREAKDOWN = -1001, 77, -1002, 88, 950, 960
+# A channel of somebody else's, which nothing about this reader can reach.
+OTHER_CHANNEL = -1009
 
 
 @pytest.fixture
@@ -618,6 +623,78 @@ def test_a_pasted_link_is_explained_like_any_other_card(connection, sent, answer
                                "text": "https://portalinmobiliario.com/MLC-1-x-_JM"}, prefs())
 
     assert any(said.startswith("📊 ") for said in answers.said)
+
+
+def _pointer(answers):
+    """The one «ya lo habíamos publicado» the bot posted, of everything it said."""
+    pointers = [said for said in answers.said if said.startswith("📌 ")]
+    assert len(pointers) < 2, "one card, one pointer"
+    return pointers[0] if pointers else None
+
+
+def test_a_pasted_link_points_at_the_card_it_already_has(announced, sent, answers):
+    """A link for a flat already announced answers with the way back to that card."""
+    _handle(announced, None, {"chat": {"id": GROUP}, "message_id": 1,
+                              "text": "https://portalinmobiliario.com/MLC-1-x-_JM"}, prefs())
+
+    assert message_link(CHANNEL, CARD) in _pointer(answers)
+
+
+def test_a_link_nobody_has_seen_yet_has_no_original_to_point_at(connection, sent, answers):
+    """The card being posted right now is not an earlier card, and must not be offered as one."""
+    paste = {"chat": {"id": CHANNEL}, "message_id": 1,
+             "text": "https://portalinmobiliario.com/MLC-1-x-_JM"}
+
+    _handle(connection, None, paste, prefs())
+
+    assert _pointer(answers) is None
+
+    # Pasted a second time, the card the first paste left behind is what it points at.
+    _handle(connection, None, paste | {"message_id": 2}, prefs())
+
+    assert message_link(CHANNEL, sent[0][3]) in _pointer(answers)
+
+
+def test_a_card_in_somebody_elses_channel_is_not_pointed_at(connection, sent, answers):
+    """A t.me link opens for members only, and naming a chat is telling somebody about it."""
+    remember_card(connection, OTHER_CHANNEL, 42, "portalinmobiliario", "MLC-1")
+
+    _handle(connection, None, {"chat": {"id": CHANNEL}, "message_id": 1,
+                               "from": {"id": 7},
+                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"}, prefs())
+
+    assert _pointer(answers) is None
+
+
+def test_the_channel_you_own_is_pointed_at_from_your_own_chat(connection, sent, answers):
+    """Pasting in a private chat still finds the card, in the channel that reader's cards go to."""
+    add_subscriber(connection, CHANNEL, owner_user_id=7)
+    remember_card(connection, CHANNEL, CARD, "portalinmobiliario", "MLC-1")
+
+    _handle(connection, None, {"chat": {"id": 7}, "message_id": 1, "from": {"id": 7},
+                               "text": "https://portalinmobiliario.com/MLC-1-x-_JM"}, prefs())
+
+    assert message_link(CHANNEL, CARD) in _pointer(answers)
+
+
+def test_a_pointer_that_fails_to_post_still_leaves_the_card(announced, sent, answers,
+                                                           monkeypatch):
+    """The way back is a courtesy: the card and its breakdown must not go down with it."""
+    said = []
+
+    def refuse(chat, text, thread=None, reply_to=None):
+        if text.startswith("📌 "):
+            raise RuntimeError("Bad Request: message to reply not found")
+        said.append(text)
+        return {"chat": {"id": int(chat)}, "message_id": BREAKDOWN}
+
+    monkeypatch.setattr("depas.bot.reply", refuse)
+
+    _handle(announced, None, {"chat": {"id": GROUP}, "message_id": 1,
+                              "text": "https://portalinmobiliario.com/MLC-1-x-_JM"}, prefs())
+
+    assert len(sent) == 1
+    assert any(one.startswith("📊 ") for one in said)
 
 
 class StopLoop(Exception):
