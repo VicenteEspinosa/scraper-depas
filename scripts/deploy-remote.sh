@@ -127,4 +127,11 @@ for image in $previous; do
   fi
 done
 
+# Build cache is the one daemon-wide prune worth running every time: it holds nothing a
+# container needs, and other stacks losing their older cache costs their next build time
+# and nothing else. Only what this build just used survives, so the box stops filling up
+# between the rare deploys that find it short.
+log "drop the build cache this build did not use"
+docker builder prune -f --filter "until=1h" || true
+
 log "deploy of ${GITHUB_SHA:0:7} applied, $(free_mb .)MB free"

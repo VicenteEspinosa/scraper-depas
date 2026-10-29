@@ -130,12 +130,24 @@ def test_a_full_box_deploys_once_the_prune_has_room_again(deploy_path):
     assert (deploy_path / ".last-deployed-sha").read_text().strip() == "a" * 40
 
 
-def test_a_deploy_with_room_to_spare_keeps_the_build_cache(deploy_path):
-    """Pruning the cache costs the next build, so it is only ever worth it when short."""
+def test_a_deploy_with_room_to_spare_skips_the_reclaim(deploy_path):
+    """The pre-build reclaim is for a box that is short; one with room goes straight on."""
     finished = _deploy(deploy_path)
 
     assert finished.returncode == 0, finished.stderr
     assert "reclaiming what Docker can spare" not in finished.stdout
+
+
+def test_every_deploy_drops_the_build_cache_it_did_not_just_use(deploy_path):
+    """Waiting until the box was short let the cache grow to gigabytes between deploys."""
+    _stub(deploy_path, "docker", LOGGING_DOCKER)
+
+    finished = _deploy(deploy_path)
+    calls = (deploy_path / "docker.log").read_text().splitlines()
+
+    assert finished.returncode == 0, finished.stderr
+    assert calls.index("docker builder prune -f --filter until=1h") > calls.index(
+        "docker compose up -d")
 
 
 def test_the_image_the_build_replaced_is_reaped_by_id(deploy_path):

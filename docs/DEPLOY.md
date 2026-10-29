@@ -198,13 +198,16 @@ scoped to this project.** So the deploy never prunes images. What it can touch:
 | `docker image rm <id>` | exactly the ids this project's containers were on | every deploy |
 | `docker image prune -f` | untagged, unreferenced images, daemon-wide | only when short on space |
 | `docker builder prune -f --filter until=24h` | build cache over a day old, daemon-wide | only when short on space |
+| `docker builder prune -f --filter until=1h` | build cache this build did not use, daemon-wide | every deploy, after the restart |
 
-The last two are shared, and both are deliberately the kind nothing can miss: a dangling
+The last three are shared, and all are deliberately the kind nothing can miss: a dangling
 image has no tag to be started by and no container using it, and build cache rebuilds
-itself. **`docker image prune -a` and `docker system prune` are never run**, and a test
-reads the script to keep it that way — either would delete images belonging to other
-stacks, which for anything else built on this box with no registry is unrecoverable
-without its source.
+itself. The every-deploy cache prune exists because "only when short" let the cache reach
+7.5 GB across the box's stacks between deploys; another stack losing its older cache
+costs its next build time and nothing else. **`docker image prune -a` and `docker system
+prune` are never run**, and a test reads the script to keep it that way — either would
+delete images belonging to other stacks, which for anything else built on this box with
+no registry is unrecoverable without its source.
 
 Before writing anything the deploy checks there are **2048 MB free** (`MIN_FREE_MB` in
 `.github/workflows/deploy.yml`). Under that it runs the two shared reclaims above and
